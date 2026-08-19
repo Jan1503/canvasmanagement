@@ -318,9 +318,13 @@ public sealed class YouTubePlayerExtension : ICanvasExtension, IDisposable
         try
         {
             var formatArg = string.IsNullOrEmpty(format) ? "" : $"-f \"{format}\" ";
-            var arguments = $"--no-cache-dir {formatArg}-g \"{url}\"";
+            // Temporary workaround for the YouTube player-JS / SABR 403
+            // (https://github.com/yt-dlp/yt-dlp/issues/17456). Force the android
+            // client so extraction works until yt-dlp ships a fix. Remove then.
+            const string extractorArgs = "--extractor-args youtube:player_client=android";
+            var arguments = $"--no-cache-dir {extractorArgs} {formatArg}-g \"{url}\"";
 
-            Console.WriteLine($"[YT] Running yt-dlp {formatArg}-g ...");
+            Console.WriteLine($"[YT] Running yt-dlp {extractorArgs} {formatArg}-g ...");
 
             using var process = new Process
             {

@@ -969,7 +969,7 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
                 if (isYouTubeStream)
                 {
                     Console.WriteLine("[VLC] Adding YouTube-compatible HTTP headers...");
-                    // Match the Android client that VideoLibrary uses to fetch URLs
+                    // Must match yt-dlp --extractor-args youtube:player_client=android
                     media.AddOption(":http-user-agent=com.google.android.youtube/20.10.38 (Linux; U; Android 11)");
                     media.AddOption(":http-referrer=https://www.youtube.com/");
                     // Additional headers that may help
@@ -1119,10 +1119,14 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
         try
         {
             var formatArg = string.IsNullOrEmpty(format) ? "" : $"-f \"{format}\" ";
+            // Temporary workaround for the YouTube player-JS / SABR 403
+            // (https://github.com/yt-dlp/yt-dlp/issues/17456). Force the android
+            // client so extraction works until yt-dlp ships a fix. Remove then.
+            const string extractorArgs = "--extractor-args youtube:player_client=android";
             // Add --no-cache-dir to avoid permission errors when running as root
-            var arguments = $"--no-cache-dir {formatArg}-g \"{youtubeUrl}\"";
+            var arguments = $"--no-cache-dir {extractorArgs} {formatArg}-g \"{youtubeUrl}\"";
             
-            Console.WriteLine($"[VLC] Running: yt-dlp {formatArg}-g ...");
+            Console.WriteLine($"[VLC] Running: yt-dlp {extractorArgs} {formatArg}-g ...");
             
             var process = new System.Diagnostics.Process
             {
