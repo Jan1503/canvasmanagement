@@ -52,6 +52,12 @@ Expected siblings (same parent folder):
 | `verpixeld/` | [Jan1503/verpixeld](https://github.com/Jan1503/verpixeld) |
 | `pixplane/` | [Jan1503/pixplane](https://github.com/Jan1503/pixplane) |
 
+Clone this tree as **`CanvasManagement`** (PascalCase). verpixeld’s project reference is `../CanvasManagement/...`. On Linux:
+
+```bash
+git clone https://github.com/Jan1503/canvasmanagement.git CanvasManagement
+```
+
 ## Build
 
 ```powershell
