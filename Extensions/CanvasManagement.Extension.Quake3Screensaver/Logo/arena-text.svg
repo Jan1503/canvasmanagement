@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 48">
+  <!-- Original block letters (not a third-party wordmark). -->
+  <g fill="#b30000">
+    <!-- A -->
+    <polygon points="8,40 28,8 36,8 56,40 44,40 40,32 24,32 20,40"/>
+    <rect x="26" y="22" width="12" height="5"/>
+    <!-- R -->
+    <rect x="64" y="8" width="10" height="32"/>
+    <rect x="64" y="8" width="24" height="8"/>
+    <rect x="78" y="8" width="10" height="16"/>
+    <rect x="64" y="20" width="24" height="8"/>
+    <polygon points="78,28 98,40 86,40 74,28"/>
+    <!-- E -->
+    <rect x="104" y="8" width="10" height="32"/>
+    <rect x="104" y="8" width="28" height="8"/>
+    <rect x="104" y="20" width="22" height="8"/>
+    <rect x="104" y="32" width="28" height="8"/>
+    <!-- N -->
+    <rect x="140" y="8" width="10" height="32"/>
+    <polygon points="150,8 168,32 168,8 178,8 178,40 168,40 150,16 150,40 140,40 140,8"/>
+    <!-- A -->
+    <polygon points="188,40 208,8 216,8 236,40 224,40 220,32 204,32 200,40"/>
+    <rect x="206" y="22" width="12" height="5"/>
+  </g>
+</svg>

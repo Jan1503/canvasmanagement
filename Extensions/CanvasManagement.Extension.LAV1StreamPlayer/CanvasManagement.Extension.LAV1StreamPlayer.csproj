@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- The LAV1 stream player depends on Lav1.Protocol.dll from the sibling TPM2.net6 repo.
+         When that build output is not present (e.g. on machines without that repo), compile an
+         empty no-op assembly so the whole solution still builds cleanly instead of failing on
+         every build. Build the TPM2.net6 repo to enable the full LAV1 Stream Player. -->
+    <Lav1ProtocolPath>..\..\..\TPM2.net6\Lav1.Protocol\bin\Debug\net10.0\Lav1.Protocol.dll</Lav1ProtocolPath>
+    <Lav1Available Condition="Exists('$(Lav1ProtocolPath)')">true</Lav1Available>
+    <Lav1Available Condition="'$(Lav1Available)' == ''">false</Lav1Available>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\CanvasManagement.Interfaces\CanvasManagement.Interfaces.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Icons\lav1.svg" />
+  </ItemGroup>
+
+  <!-- Full build when the dependency is available. -->
+  <ItemGroup Condition="'$(Lav1Available)' == 'true'">
+    <Reference Include="Lav1.Protocol">
+      <HintPath>$(Lav1ProtocolPath)</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Dependency missing: exclude the source so the project still compiles (as an empty,
+       harmless assembly that simply contributes no extension). -->
+  <ItemGroup Condition="'$(Lav1Available)' != 'true'">
+    <Compile Remove="**\*.cs" />
+  </ItemGroup>
+
+  <Target Name="WarnLav1Unavailable" BeforeTargets="CoreCompile" Condition="'$(Lav1Available)' != 'true'">
+    <Message Importance="high"
+             Text="[LAV1] Lav1.Protocol.dll not found at '$(Lav1ProtocolPath)'. Building an empty LAV1 extension; build the TPM2.net6 repo to enable the LAV1 Stream Player." />
+  </Target>
+
+</Project>

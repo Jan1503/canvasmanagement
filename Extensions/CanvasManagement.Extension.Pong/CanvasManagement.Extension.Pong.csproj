@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12.0</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" />
+  </ItemGroup>
+  <ItemGroup>
+	  <ProjectReference Include="..\..\CanvasManagement.Interfaces\CanvasManagement.Interfaces.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Icons\pong.svg" />
+  </ItemGroup>
+</Project>

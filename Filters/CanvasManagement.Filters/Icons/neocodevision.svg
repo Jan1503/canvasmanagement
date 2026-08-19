@@ -1,0 +1,38 @@
+<svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <!-- Neo Code Vision / Futuristic HUD icon -->
+  <rect fill="#000a1f" width="48" height="48"/>
+  
+  <!-- HUD frame corners -->
+  <path d="M 4 4 L 14 4 M 4 4 L 4 14" stroke="#00FFFF" stroke-width="2" opacity="0.8"/>
+  <path d="M 44 4 L 34 4 M 44 4 L 44 14" stroke="#00FFFF" stroke-width="2" opacity="0.8"/>
+  <path d="M 4 44 L 14 44 M 4 44 L 4 34" stroke="#00FFFF" stroke-width="2" opacity="0.8"/>
+  <path d="M 44 44 L 34 44 M 44 44 L 44 34" stroke="#00FFFF" stroke-width="2" opacity="0.8"/>
+  
+  <!-- Center target/scanner -->
+  <circle cx="24" cy="24" r="12" fill="none" stroke="#00FF00" stroke-width="1.5" opacity="0.6"/>
+  <circle cx="24" cy="24" r="8" fill="none" stroke="#00FF00" stroke-width="1" opacity="0.8"/>
+  <circle cx="24" cy="24" r="4" fill="#00FF00" opacity="0.4"/>
+  
+  <!-- Scanning lines -->
+  <line x1="24" y1="12" x2="24" y2="36" stroke="#00FFFF" stroke-width="0.5" opacity="0.6"/>
+  <line x1="12" y1="24" x2="36" y2="24" stroke="#00FFFF" stroke-width="0.5" opacity="0.6"/>
+  
+  <!-- Digital readout text -->
+  <text x="6" y="9" font-family="monospace" font-size="3" fill="#00FFFF" opacity="0.9">SYS</text>
+  <text x="38" y="9" font-family="monospace" font-size="3" fill="#00FFFF" opacity="0.9">ON</text>
+  <text x="6" y="46" font-family="monospace" font-size="3" fill="#00FF00" opacity="0.9">OK</text>
+  <text x="37" y="46" font-family="monospace" font-size="3" fill="#00FF00" opacity="0.9">100%</text>
+  
+  <!-- Data streams -->
+  <text x="6" y="20" font-family="monospace" font-size="2.5" fill="#00FF00" opacity="0.7">01010</text>
+  <text x="36" y="20" font-family="monospace" font-size="2.5" fill="#00FF00" opacity="0.7">11001</text>
+  <text x="6" y="30" font-family="monospace" font-size="2.5" fill="#00FF00" opacity="0.6">10110</text>
+  <text x="36" y="30" font-family="monospace" font-size="2.5" fill="#00FF00" opacity="0.6">01101</text>
+  
+  <!-- Radar sweep line (suggesting animation) -->
+  <line x1="24" y1="24" x2="34" y2="18" stroke="#00FFFF" stroke-width="1.5" opacity="0.8"/>
+  
+  <!-- Hexagonal grid pattern -->
+  <path d="M 24 16 L 28 18 L 28 22 L 24 24 L 20 22 L 20 18 Z" 
+        fill="none" stroke="#00FF00" stroke-width="0.5" opacity="0.4"/>
+</svg>

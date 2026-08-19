@@ -1,0 +1,46 @@
+<svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <!-- Ink Sketch / Hand-drawn style icon -->
+  <rect fill="#F5F5DC" width="48" height="48"/>
+  
+  <!-- Sketchy border -->
+  <rect x="4" y="4" width="40" height="40" fill="none" stroke="#000000" stroke-width="1.5" 
+        stroke-dasharray="2,1" opacity="0.6"/>
+  
+  <!-- Hand-drawn tree sketch -->
+  <!-- Trunk -->
+  <path d="M 22 36 Q 21 30, 22 24 Q 23 18, 22 12" 
+        stroke="#000000" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <path d="M 24 36 Q 25 30, 24 24 Q 23 18, 24 12" 
+        stroke="#000000" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  
+  <!-- Foliage (sketchy circles with cross-hatching) -->
+  <circle cx="24" cy="16" r="10" fill="none" stroke="#000000" stroke-width="1.2" 
+          stroke-dasharray="3,2"/>
+  
+  <!-- Cross-hatching inside foliage -->
+  <path d="M 16 12 L 20 20" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  <path d="M 18 10 L 22 18" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  <path d="M 20 8 L 24 16" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  <path d="M 22 8 L 26 16" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  <path d="M 24 8 L 28 16" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  <path d="M 26 10 L 30 18" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  <path d="M 28 12 L 32 20" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  
+  <!-- Reverse diagonal hatching -->
+  <path d="M 32 12 L 28 20" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  <path d="M 30 10 L 26 18" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  <path d="M 28 8 L 24 16" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  <path d="M 26 8 L 22 16" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  <path d="M 24 8 L 20 16" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  <path d="M 22 10 L 18 18" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  <path d="M 20 12 L 16 20" stroke="#000000" stroke-width="0.6" opacity="0.7"/>
+  
+  <!-- Sketchy ground line -->
+  <path d="M 4 38 Q 12 37, 24 38 Q 36 39, 44 38" 
+        stroke="#000000" stroke-width="1.2" fill="none" stroke-dasharray="3,2"/>
+  
+  <!-- Sketch marks (artist strokes) -->
+  <path d="M 6 8 L 8 10" stroke="#000000" stroke-width="0.8" opacity="0.5"/>
+  <path d="M 40 8 L 42 10" stroke="#000000" stroke-width="0.8" opacity="0.5"/>
+  <path d="M 6 40 L 8 42" stroke="#000000" stroke-width="0.8" opacity="0.5"/>
+</svg>

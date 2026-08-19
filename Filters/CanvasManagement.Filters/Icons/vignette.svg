@@ -1,0 +1,43 @@
+<svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <!-- Vignette effect icon -->
+  <defs>
+    <radialGradient id="vignetteGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#FFFFFF;stop-opacity:1" />
+      <stop offset="40%" style="stop-color:#E0E0E0;stop-opacity:1" />
+      <stop offset="70%" style="stop-color:#808080;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#000000;stop-opacity:1" />
+    </radialGradient>
+    
+    <!-- Radial gradient for vignette darkening -->
+    <radialGradient id="vignetteDark" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#FFFFFF;stop-opacity:0" />
+      <stop offset="50%" style="stop-color:#000000;stop-opacity:0" />
+      <stop offset="100%" style="stop-color:#000000;stop-opacity:0.9" />
+    </radialGradient>
+  </defs>
+  
+  <!-- Background image representation -->
+  <rect fill="url(#vignetteGrad)" width="48" height="48"/>
+  
+  <!-- Sample content in center (bright) -->
+  <circle cx="24" cy="24" r="8" fill="#4A90E2" opacity="0.8"/>
+  <rect x="18" y="28" width="12" height="8" fill="#E94B3C" opacity="0.7"/>
+  
+  <!-- Vignette overlay (dark edges) -->
+  <rect fill="url(#vignetteDark)" width="48" height="48"/>
+  
+  <!-- Corner darkening emphasis -->
+  <circle cx="6" cy="6" r="8" fill="#000000" opacity="0.6"/>
+  <circle cx="42" cy="6" r="8" fill="#000000" opacity="0.6"/>
+  <circle cx="6" cy="42" r="8" fill="#000000" opacity="0.6"/>
+  <circle cx="42" cy="42" r="8" fill="#000000" opacity="0.6"/>
+  
+  <!-- Edge darkening -->
+  <rect x="0" y="0" width="48" height="6" fill="#000000" opacity="0.4"/>
+  <rect x="0" y="42" width="48" height="6" fill="#000000" opacity="0.4"/>
+  <rect x="0" y="0" width="6" height="48" fill="#000000" opacity="0.4"/>
+  <rect x="42" y="0" width="6" height="48" fill="#000000" opacity="0.4"/>
+  
+  <!-- Center focus indicator -->
+  <circle cx="24" cy="24" r="14" fill="none" stroke="#FFFFFF" stroke-width="0.5" opacity="0.3" stroke-dasharray="2,2"/>
+</svg>

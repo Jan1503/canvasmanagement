@@ -1,0 +1,505 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Player Remote Control</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 28px;
+            color: #667eea;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+        }
+
+        .media-input-group {
+            margin-bottom: 20px;
+        }
+
+        .media-input-group label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: #555;
+        }
+
+        .media-input, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .media-input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .control-buttons {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .slider-group {
+            margin-bottom: 20px;
+        }
+
+        .slider-group label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #555;
+        }
+
+        .slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #e2e8f0;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+        }
+
+        .color-picker-group {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .color-input {
+            width: 100%;
+            height: 40px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .message.success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .message.error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .message.show {
+            display: block;
+        }
+
+        .quick-links {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .quick-link-btn {
+            padding: 10px;
+            background: #f8fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .quick-link-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>🎵 Audio Player Remote</h1>
+            <p class="subtitle">Control your LED display audio visualization</p>
+
+            <div id="message" class="message"></div>
+
+            <!-- Audio URL Input -->
+            <div class="media-input-group">
+                <label for="audio-url">Audio URL or File Path</label>
+                <input 
+                    type="text" 
+                    id="audio-url" 
+                    class="media-input"
+                    placeholder="http://..., file path, or internet radio stream"
+                />
+            </div>
+
+            <!-- Quick Links -->
+            <div class="section-title">Quick Access</div>
+            <div class="quick-links">
+                <button class="quick-link-btn" onclick="loadQuickLink('rock')">🎸 Rock Radio</button>
+                <button class="quick-link-btn" onclick="loadQuickLink('jazz')">🎷 Jazz Radio</button>
+                <button class="quick-link-btn" onclick="loadQuickLink('electronic')">🎹 Electronic</button>
+                <button class="quick-link-btn" onclick="clearInput()">❌ Clear</button>
+            </div>
+
+            <!-- VU Meter Style -->
+            <div class="media-input-group">
+                <label for="vu-style">VU Meter Style</label>
+                <select id="vu-style">
+                    <option value="Stereo Bars">Stereo Bars</option>
+                    <option value="Spectrum Analyzer">Spectrum Analyzer (8-Band)</option>
+                    <option value="Spectrum 16-Band">Spectrum Analyzer (16-Band)</option>
+                    <option value="Waterfall Spectrum">Waterfall Spectrum</option>
+                    <option value="Circular Meter">Circular Meter</option>
+                    <option value="Waveform">Waveform</option>
+                    <option value="Oscilloscope">Oscilloscope</option>
+                    <option value="Beat Detection">Beat Detection + BPM</option>
+                    <option value="Peak Meter">Peak Meter</option>
+                </select>
+            </div>
+
+            <!-- Control Buttons -->
+            <div class="section-title">Playback Controls</div>
+            <div class="control-buttons">
+                <button class="btn btn-primary" onclick="playAudio()">▶️ Play</button>
+                <button class="btn btn-danger" onclick="stopAudio()">⏹️ Stop</button>
+            </div>
+
+            <!-- Volume Control -->
+            <div class="slider-group">
+                <label>
+                    <span>🔊 Volume</span>
+                    <span id="volume-value">100</span>
+                </label>
+                <input 
+                    type="range" 
+                    id="volume-slider" 
+                    class="slider"
+                    min="0" 
+                    max="100" 
+                    value="100"
+                    oninput="updateVolume(this.value)"
+                />
+            </div>
+
+            <!-- Color Configuration -->
+            <div class="section-title">VU Meter Colors</div>
+            <div class="color-picker-group">
+                <div>
+                    <label for="primary-color">Primary</label>
+                    <input type="color" id="primary-color" class="color-input" value="#00ff00" onchange="updateColors()">
+                </div>
+                <div>
+                    <label for="secondary-color">Warning</label>
+                    <input type="color" id="secondary-color" class="color-input" value="#ffff00" onchange="updateColors()">
+                </div>
+                <div>
+                    <label for="peak-color">Peak</label>
+                    <input type="color" id="peak-color" class="color-input" value="#ff0000" onchange="updateColors()">
+                </div>
+                <div>
+                    <label for="bg-color">Background</label>
+                    <input type="color" id="bg-color" class="color-input" value="#000000" onchange="updateColors()">
+                </div>
+            </div>
+
+            <!-- Advanced Settings -->
+            <details style="margin-top: 16px;">
+                <summary style="cursor: pointer; font-weight: 600; padding: 12px; background: #f8fafc; border-radius: 8px;">
+                    ⚙️ Advanced Settings
+                </summary>
+                <div style="padding: 12px;">
+                    <div class="slider-group">
+                        <label>
+                            <span>Decay Rate</span>
+                            <span id="decay-value">5</span>
+                        </label>
+                        <input type="range" id="decay-rate" class="slider" min="1" max="20" value="5" oninput="updateDecay(this.value)">
+                    </div>
+                    <div class="slider-group">
+                        <label>
+                            <span>Peak Hold Time (ms)</span>
+                            <span id="peak-hold-value">1000</span>
+                        </label>
+                        <input type="range" id="peak-hold" class="slider" min="0" max="5000" value="1000" step="100" oninput="updatePeakHold(this.value)">
+                    </div>
+                    
+                    <!-- Scrolling Text Settings -->
+                    <div class="section-title" style="margin-top: 16px;">📝 Track Info Display</div>
+                    <label style="margin-top: 12px;">
+                        <input type="checkbox" id="show-scroll-text" checked onchange="updateScrollText()"> Show scrolling track info
+                    </label>
+                    <div style="margin-top: 12px;">
+                        <label for="scroll-text-color">Scroll Text Color</label>
+                        <input type="color" id="scroll-text-color" class="color-input" value="#ffffff" onchange="updateScrollText()">
+                    </div>
+                    <div class="slider-group" style="margin-top: 12px;">
+                        <label>
+                            <span>Scroll Speed</span>
+                            <span id="scroll-speed-value">2</span>
+                        </label>
+                        <input type="range" id="scroll-speed" class="slider" min="1" max="10" value="2" oninput="updateScrollSpeed(this.value)">
+                    </div>
+                    
+                    <label style="margin-top: 12px;">
+                        <input type="checkbox" id="auto-play" checked> Auto-play
+                    </label>
+                    <label>
+                        <input type="checkbox" id="loop"> Loop playback
+                    </label>
+                </div>
+            </details>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        const CANVAS_NAME = 'Main';
+        let volumeTimer = null;
+
+        function loadQuickLink(type) {
+            const input = document.getElementById('audio-url');
+            switch (type) {
+                case 'rock':
+                    input.value = 'http://listen.181fm.com/181-greatoldies_128k.mp3';
+                    break;
+                case 'jazz':
+                    input.value = 'http://live-radio01.mediahubaustralia.com/JAZW/mp3/';
+                    break;
+                case 'electronic':
+                    input.value = 'http://stream.laut.fm/elektronik';
+                    break;
+            }
+        }
+
+        function clearInput() {
+            document.getElementById('audio-url').value = '';
+        }
+
+        async function playAudio() {
+            const url = document.getElementById('audio-url').value.trim();
+            if (!url) {
+                showMessage('Please enter an audio URL', 'error');
+                return;
+            }
+
+            const autoPlay = document.getElementById('auto-play').checked;
+            const loop = document.getElementById('loop').checked;
+            const volume = parseInt(document.getElementById('volume-slider').value);
+            const vuStyle = document.getElementById('vu-style').value;
+            
+            const config = {
+                AudioUrl: url,
+                AutoPlay: autoPlay,
+                Loop: loop,
+                Volume: volume,
+                VuMeterStyle: vuStyle,
+                PrimaryColor: document.getElementById('primary-color').value,
+                SecondaryColor: document.getElementById('secondary-color').value,
+                PeakColor: document.getElementById('peak-color').value,
+                BackgroundColor: document.getElementById('bg-color').value,
+                DecayRate: parseInt(document.getElementById('decay-rate').value),
+                PeakHoldTime: parseInt(document.getElementById('peak-hold').value),
+                ShowScrollingText: document.getElementById('show-scroll-text').checked,
+                ScrollTextColor: document.getElementById('scroll-text-color').value,
+                ScrollSpeed: parseInt(document.getElementById('scroll-speed').value)
+            };
+
+            try {
+                await assignAudioPlayer();
+                
+                const response = await fetch(`${API_BASE}/api/layout/configure/${CANVAS_NAME}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    showMessage('✓ Playing audio with VU meter', 'success');
+                } else {
+                    showMessage('Failed to play: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                showMessage('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function stopAudio() {
+            try {
+                const response = await fetch(`${API_BASE}/api/layout/stop/${CANVAS_NAME}`, {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    showMessage('✓ Stopped playback', 'success');
+                }
+            } catch (error) {
+                showMessage('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function assignAudioPlayer() {
+            try {
+                await fetch(`${API_BASE}/api/layout/assign`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        canvasName: CANVAS_NAME,
+                        extensionName: 'Audio Player with VU Meters'
+                    })
+                });
+            } catch (error) {
+                console.error('Failed to assign audio player:', error);
+            }
+        }
+
+        function updateVolume(value) {
+            document.getElementById('volume-value').textContent = value;
+            clearTimeout(volumeTimer);
+            volumeTimer = setTimeout(async () => {
+                await updateConfig({ Volume: parseInt(value) });
+            }, 150);
+        }
+
+        function updateDecay(value) {
+            document.getElementById('decay-value').textContent = value;
+            updateConfig({ DecayRate: parseInt(value) });
+        }
+
+        function updatePeakHold(value) {
+            document.getElementById('peak-hold-value').textContent = value;
+            updateConfig({ PeakHoldTime: parseInt(value) });
+        }
+        
+        function updateScrollSpeed(value) {
+            document.getElementById('scroll-speed-value').textContent = value;
+            updateConfig({ ScrollSpeed: parseInt(value) });
+        }
+        
+        function updateScrollText() {
+            updateConfig({
+                ShowScrollingText: document.getElementById('show-scroll-text').checked,
+                ScrollTextColor: document.getElementById('scroll-text-color').value
+            });
+        }
+
+        function updateColors() {
+            updateConfig({
+                PrimaryColor: document.getElementById('primary-color').value,
+                SecondaryColor: document.getElementById('secondary-color').value,
+                PeakColor: document.getElementById('peak-color').value,
+                BackgroundColor: document.getElementById('bg-color').value
+            });
+        }
+
+        async function updateConfig(config) {
+            try {
+                await fetch(`${API_BASE}/api/layout/configure/${CANVAS_NAME}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+            } catch (error) {
+                console.error('Failed to update config:', error);
+            }
+        }
+
+        function showMessage(text, type) {
+            const msg = document.getElementById('message');
+            msg.textContent = text;
+            msg.className = `message ${type} show`;
+            setTimeout(() => {
+                msg.classList.remove('show');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

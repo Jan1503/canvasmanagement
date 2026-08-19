@@ -1,0 +1,30 @@
+<svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <!-- Blur Filter icon - showing progressive blur effect -->
+  <defs>
+    <filter id="blur1" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="0.5"/>
+    </filter>
+    <filter id="blur2" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="1.5"/>
+    </filter>
+    <filter id="blur3" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3"/>
+    </filter>
+  </defs>
+  
+  <rect fill="#1a1a2e" width="48" height="48"/>
+  
+  <!-- Sharp circle -->
+  <circle cx="12" cy="24" r="6" fill="#4A90E2" opacity="1"/>
+  
+  <!-- Slightly blurred circle -->
+  <circle cx="24" cy="24" r="6" fill="#E94B3C" opacity="0.9" filter="url(#blur1)"/>
+  
+  <!-- Medium blur circle -->
+  <circle cx="36" cy="24" r="6" fill="#50C878" opacity="0.8" filter="url(#blur2)"/>
+  
+  <!-- Blur motion indicators -->
+  <path d="M 8 12 L 16 12" stroke="#4A90E2" stroke-width="1.5" opacity="0.6"/>
+  <path d="M 20 12 L 28 12" stroke="#E94B3C" stroke-width="1.5" opacity="0.5" filter="url(#blur1)"/>
+  <path d="M 32 12 L 40 12" stroke="#50C878" stroke-width="1.5" opacity="0.4" filter="url(#blur2)"/>
+</svg>

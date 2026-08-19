@@ -1,0 +1,64 @@
+<svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <!-- Pixelate / 8-bit style icon -->
+  <rect fill="#1a1a2e" width="48" height="48"/>
+  
+  <!-- Large pixels showing pixelation effect -->
+  <!-- Create a pixelated smiley face or heart -->
+  
+  <!-- Heart shape made of pixels -->
+  <g opacity="0.9">
+    <!-- Top left of heart -->
+    <rect x="12" y="12" width="4" height="4" fill="#FF1744"/>
+    <rect x="16" y="12" width="4" height="4" fill="#FF1744"/>
+    <rect x="20" y="12" width="4" height="4" fill="#FF1744"/>
+    
+    <!-- Top right of heart -->
+    <rect x="28" y="12" width="4" height="4" fill="#FF1744"/>
+    <rect x="32" y="12" width="4" height="4" fill="#FF1744"/>
+    
+    <!-- Middle rows -->
+    <rect x="8" y="16" width="4" height="4" fill="#FF5252"/>
+    <rect x="12" y="16" width="4" height="4" fill="#FF1744"/>
+    <rect x="16" y="16" width="4" height="4" fill="#FF1744"/>
+    <rect x="20" y="16" width="4" height="4" fill="#FF1744"/>
+    <rect x="24" y="16" width="4" height="4" fill="#FF1744"/>
+    <rect x="28" y="16" width="4" height="4" fill="#FF1744"/>
+    <rect x="32" y="16" width="4" height="4" fill="#FF1744"/>
+    <rect x="36" y="16" width="4" height="4" fill="#FF5252"/>
+    
+    <rect x="8" y="20" width="4" height="4" fill="#FF5252"/>
+    <rect x="12" y="20" width="4" height="4" fill="#FF1744"/>
+    <rect x="16" y="20" width="4" height="4" fill="#FF1744"/>
+    <rect x="20" y="20" width="4" height="4" fill="#FF1744"/>
+    <rect x="24" y="20" width="4" height="4" fill="#FF1744"/>
+    <rect x="28" y="20" width="4" height="4" fill="#FF1744"/>
+    <rect x="32" y="20" width="4" height="4" fill="#FF1744"/>
+    <rect x="36" y="20" width="4" height="4" fill="#FF5252"/>
+    
+    <!-- Bottom rows (narrowing) -->
+    <rect x="12" y="24" width="4" height="4" fill="#FF5252"/>
+    <rect x="16" y="24" width="4" height="4" fill="#FF1744"/>
+    <rect x="20" y="24" width="4" height="4" fill="#FF1744"/>
+    <rect x="24" y="24" width="4" height="4" fill="#FF1744"/>
+    <rect x="28" y="24" width="4" height="4" fill="#FF1744"/>
+    <rect x="32" y="24" width="4" height="4" fill="#FF5252"/>
+    
+    <rect x="16" y="28" width="4" height="4" fill="#FF5252"/>
+    <rect x="20" y="28" width="4" height="4" fill="#FF1744"/>
+    <rect x="24" y="28" width="4" height="4" fill="#FF1744"/>
+    <rect x="28" y="28" width="4" height="4" fill="#FF5252"/>
+    
+    <rect x="20" y="32" width="4" height="4" fill="#FF5252"/>
+    <rect x="24" y="32" width="4" height="4" fill="#FF5252"/>
+    
+    <rect x="22" y="36" width="4" height="4" fill="#FF7961"/>
+  </g>
+  
+  <!-- Grid overlay to emphasize pixels -->
+  <defs>
+    <pattern id="pixelGrid" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="4" fill="none" stroke="#FFFFFF" stroke-width="0.3" opacity="0.2"/>
+    </pattern>
+  </defs>
+  <rect width="48" height="48" fill="url(#pixelGrid)"/>
+</svg>

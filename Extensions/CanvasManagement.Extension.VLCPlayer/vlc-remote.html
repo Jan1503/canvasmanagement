@@ -1,0 +1,746 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VLC Player Remote Control</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 28px;
+            color: #667eea;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ccc;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.playing {
+            background: #10b981;
+        }
+
+        .status-indicator.paused {
+            background: #f59e0b;
+        }
+
+        .status-indicator.stopped {
+            background: #ef4444;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .media-input-group {
+            margin-bottom: 20px;
+        }
+
+        .media-input-group label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: #555;
+        }
+
+        .media-input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .media-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .quick-links {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .quick-link-btn {
+            padding: 10px 16px;
+            background: #f8fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .quick-link-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .control-buttons {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #f8fafc;
+            color: #475569;
+            border: 2px solid #e2e8f0;
+        }
+
+        .btn-secondary:hover {
+            background: #e2e8f0;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+
+        .info-item {
+            background: #f8fafc;
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        .info-label {
+            font-size: 12px;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+
+        .info-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1e293b;
+        }
+
+        .slider-group {
+            margin-bottom: 20px;
+        }
+
+        .slider-group label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #555;
+        }
+
+        .slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #e2e8f0;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+        }
+
+        .slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: none;
+        }
+
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .message.success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #10b981;
+        }
+
+        .message.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #ef4444;
+        }
+
+        .message.show {
+            display: block;
+        }
+
+        .recent-media {
+            list-style: none;
+        }
+
+        .recent-media li {
+            padding: 12px;
+            background: #f8fafc;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .recent-media li:hover {
+            background: #e2e8f0;
+            transform: translateX(4px);
+        }
+
+        .recent-media-url {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: #475569;
+        }
+
+        .recent-media-play {
+            color: #667eea;
+            font-weight: 600;
+            margin-left: 12px;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 10px;
+            }
+
+            .card {
+                padding: 16px;
+            }
+
+            .control-buttons {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>🎬 VLC Player Remote</h1>
+            <p class="subtitle">Control your LED display media playback</p>
+
+            <div id="message" class="message"></div>
+
+            <!-- Status -->
+            <div class="section-title">
+                <span class="status-indicator" id="status-indicator"></span>
+                <span>Status</span>
+            </div>
+            <div class="info-grid" style="margin-bottom: 24px;">
+                <div class="info-item">
+                    <div class="info-label">State</div>
+                    <div class="info-value" id="playback-state">Stopped</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Position</div>
+                    <div class="info-value" id="position">00:00 / 00:00</div>
+                </div>
+            </div>
+
+            <!-- Media URL Input -->
+            <div class="media-input-group">
+                <label for="media-url">Media URL or File Path</label>
+                <input 
+                    type="text" 
+                    id="media-url" 
+                    class="media-input"
+                    placeholder="http://..., rtsp://..., smb://server/share/file.mkv, or \\server\share\file.mkv"
+                />
+                <small style="color: #64748b; margin-top: 4px; display: block;">
+                    Supports: HTTP, RTSP, SMB/CIFS shares (use smb:// or \\server\share\path format)
+                </small>
+            </div>
+
+            <!-- SMB Credentials (collapsible) -->
+            <details class="smb-section" style="margin-bottom: 20px;">
+                <summary style="cursor: pointer; font-weight: 600; padding: 12px; background: #f8fafc; border-radius: 8px; margin-bottom: 12px;">
+                    🔐 SMB/CIFS Credentials (for network shares)
+                </summary>
+                <div style="padding: 12px; background: #f8fafc; border-radius: 8px;">
+                    <div class="media-input-group">
+                        <label for="smb-username">SMB Username</label>
+                        <input 
+                            type="text" 
+                            id="smb-username" 
+                            class="media-input"
+                            placeholder="Leave empty for guest access"
+                        />
+                    </div>
+                    <div class="media-input-group">
+                        <label for="smb-password">SMB Password</label>
+                        <input 
+                            type="password" 
+                            id="smb-password" 
+                            class="media-input"
+                            placeholder="Password for SMB share"
+                        />
+                    </div>
+                    <div class="media-input-group">
+                        <label for="smb-domain">SMB Domain (optional)</label>
+                        <input 
+                            type="text" 
+                            id="smb-domain" 
+                            class="media-input"
+                            placeholder="Domain name (usually not needed)"
+                        />
+                    </div>
+                    <small style="color: #64748b; display: block; margin-top: 8px;">
+                        ℹ️ Credentials are only sent to the VLC extension, not stored in the browser.
+                    </small>
+                </div>
+            </details>
+
+            <!-- Quick Links -->
+            <div class="section-title">Quick Access</div>
+            <div class="quick-links">
+                <button class="quick-link-btn" onclick="loadQuickLink('camera')">📹 Camera</button>
+                <button class="quick-link-btn" onclick="loadQuickLink('test')">🎬 Test Video</button>
+                <button class="quick-link-btn" onclick="loadQuickLink('smb')">📁 SMB Share</button>
+                <button class="quick-link-btn" onclick="clearInput()">❌ Clear</button>
+            </div>
+
+            <!-- Control Buttons -->
+            <div class="section-title">Playback Controls</div>
+            <div class="control-buttons">
+                <button class="btn btn-primary" onclick="playMedia()">
+                    ▶️ Play
+                </button>
+                <button class="btn btn-danger" onclick="stopMedia()">
+                    ⏹️ Stop
+                </button>
+            </div>
+
+            <!-- Volume Control -->
+            <div class="slider-group" style="margin-top: 24px;">
+                <label>
+                    <span>🔊 Volume</span>
+                    <span id="volume-value">100</span>
+                </label>
+                <input 
+                    type="range" 
+                    id="volume-slider" 
+                    class="slider"
+                    min="0" 
+                    max="100" 
+                    value="100"
+                    oninput="updateVolume(this.value)"
+                />
+            </div>
+
+            <!-- Options -->
+            <div class="slider-group">
+                <label>
+                    <input type="checkbox" id="auto-play" checked> Auto-play
+                </label>
+                <label>
+                    <input type="checkbox" id="loop"> Loop playback
+                </label>
+            </div>
+        </div>
+
+        <!-- Recent Media -->
+        <div class="card">
+            <div class="section-title">📚 Recent Media</div>
+            <ul class="recent-media" id="recent-media">
+                <li><span class="recent-media-url">No recent media</span></li>
+            </ul>
+            <details style="margin-top: 16px;">
+                <summary style="cursor: pointer; font-weight: 500; color: #667eea; padding: 8px;">
+                    💡 URL Format Examples
+                </summary>
+                <div style="margin-top: 12px; padding: 12px; background: #f8fafc; border-radius: 8px; font-size: 14px; color: #475569;">
+                    <strong>HTTP Stream:</strong><br>
+                    <code style="background: white; padding: 4px 8px; border-radius: 4px; display: block; margin: 4px 0;">http://example.com/video.mp4</code>
+                    
+                    <strong style="margin-top: 12px; display: block;">RTSP Camera:</strong><br>
+                    <code style="background: white; padding: 4px 8px; border-radius: 4px; display: block; margin: 4px 0;">rtsp://192.168.1.100:554/stream</code>
+                    
+                    <strong style="margin-top: 12px; display: block;">SMB Share (Windows UNC):</strong><br>
+                    <code style="background: white; padding: 4px 8px; border-radius: 4px; display: block; margin: 4px 0;">\\truenas\Media\Movies\file.mkv</code>
+                    
+                    <strong style="margin-top: 12px; display: block;">SMB Share (Direct URL):</strong><br>
+                    <code style="background: white; padding: 4px 8px; border-radius: 4px; display: block; margin: 4px 0;">smb://truenas/Media/Movies/file.mkv</code>
+                    
+                    <strong style="margin-top: 12px; display: block;">SMB with Credentials (embedded):</strong><br>
+                    <code style="background: white; padding: 4px 8px; border-radius: 4px; display: block; margin: 4px 0;">smb://user:pass@truenas/Media/Movies/file.mkv</code>
+                    
+                    <p style="margin-top: 12px; color: #64748b; font-size: 13px;">
+                        💡 Tip: For SMB shares, you can either enter credentials above or embed them in the URL.
+                    </p>
+                </div>
+            </details>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        const CANVAS_NAME = 'Main'; // Default canvas for VLC player
+        let statusInterval = null;
+        let volumeTimer = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadRecentMedia();
+            refreshStatus();
+            statusInterval = setInterval(refreshStatus, 2000); // Update every 2 seconds
+        });
+
+        // Load quick link URLs
+        function loadQuickLink(type) {
+            const input = document.getElementById('media-url');
+            switch (type) {
+                case 'camera':
+                    input.value = 'http://192.168.11.2/flv?port=1935&app=bcs&stream=channel0_main.bcs&user=home-assistant&password=YOUR_PASSWORD';
+                    break;
+                case 'test':
+                    input.value = 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+                    break;
+                case 'smb':
+                    // Example SMB share - user should customize
+                    input.value = '\\\\truenas\\Media\\Movies\\video.mkv';
+                    // Open SMB credentials section
+                    const smbSection = document.querySelector('.smb-section');
+                    if (smbSection) smbSection.open = true;
+                    showMessage('Enter your SMB credentials below and customize the path', 'success');
+                    break;
+            }
+        }
+
+        function clearInput() {
+            document.getElementById('media-url').value = '';
+        }
+
+        // Play media
+        async function playMedia() {
+            const url = document.getElementById('media-url').value.trim();
+            if (!url) {
+                showMessage('Please enter a media URL', 'error');
+                return;
+            }
+
+            const autoPlay = document.getElementById('auto-play').checked;
+            const loop = document.getElementById('loop').checked;
+            const volume = parseInt(document.getElementById('volume-slider').value);
+            
+            // Get SMB credentials
+            const smbUsername = document.getElementById('smb-username').value.trim();
+            const smbPassword = document.getElementById('smb-password').value.trim();
+            const smbDomain = document.getElementById('smb-domain').value.trim();
+
+            try {
+                // First, assign VLC extension to canvas if not already assigned
+                await assignVLCPlayer();
+
+                // Build configuration object
+                const config = {
+                    MediaUrl: url,
+                    AutoPlay: autoPlay,
+                    Loop: loop,
+                    Volume: volume
+                };
+
+                // Add SMB credentials if provided
+                if (smbUsername) {
+                    config.SmbUsername = smbUsername;
+                }
+                if (smbPassword) {
+                    config.SmbPassword = smbPassword;
+                }
+                if (smbDomain) {
+                    config.SmbDomain = smbDomain;
+                }
+
+                // Check if URL looks like SMB and warn if no credentials
+                const isSmbUrl = url.toLowerCase().startsWith('smb://') || 
+                                url.startsWith('\\\\') || 
+                                url.startsWith('//');
+                
+                if (isSmbUrl && !smbUsername && !url.includes('@')) {
+                    const proceed = confirm('This looks like an SMB share but no credentials are provided. Continue with guest access?');
+                    if (!proceed) return;
+                }
+
+                // Then update configuration with media URL
+                const response = await fetch(`${API_BASE}/api/layout/configure/${CANVAS_NAME}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    showMessage('✓ Playing media' + (isSmbUrl ? ' from network share' : ''), 'success');
+                    addToRecentMedia(url);
+                    setTimeout(refreshStatus, 500);
+                } else {
+                    showMessage('Failed to play: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                showMessage('Error: ' + error.message, 'error');
+            }
+        }
+
+        // Stop playback
+        async function stopMedia() {
+            try {
+                const response = await fetch(`${API_BASE}/api/layout/stop/${CANVAS_NAME}`, {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    showMessage('✓ Stopped playback', 'success');
+                    setTimeout(refreshStatus, 500);
+                } else {
+                    showMessage('Failed to stop: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                showMessage('Error: ' + error.message, 'error');
+            }
+        }
+
+        // Assign VLC Player extension to canvas
+        async function assignVLCPlayer() {
+            try {
+                const response = await fetch(`${API_BASE}/api/layout/assign`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        canvasName: CANVAS_NAME,
+                        extensionName: 'VLC Media Player'
+                    })
+                });
+
+                return await response.json();
+            } catch (error) {
+                console.error('Failed to assign VLC player:', error);
+            }
+        }
+
+        // Update volume
+        function updateVolume(value) {
+            document.getElementById('volume-value').textContent = value;
+
+            // Debounce API call
+            clearTimeout(volumeTimer);
+            volumeTimer = setTimeout(async () => {
+                try {
+                    await fetch(`${API_BASE}/api/layout/configure/${CANVAS_NAME}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            Volume: parseInt(value)
+                        })
+                    });
+                } catch (error) {
+                    console.error('Failed to update volume:', error);
+                }
+            }, 150);
+        }
+
+        // Refresh status
+        async function refreshStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/layout/content/${CANVAS_NAME}`);
+                const result = await response.json();
+
+                if (result.success && result.data) {
+                    const config = result.data.configuration || {};
+                    const state = config.PlaybackState || 'Stopped';
+                    const position = config.Position || 0;
+                    const duration = config.Duration || 0;
+
+                    // Update status indicator
+                    const indicator = document.getElementById('status-indicator');
+                    indicator.className = 'status-indicator';
+                    if (state.toLowerCase() === 'playing') {
+                        indicator.classList.add('playing');
+                    } else if (state.toLowerCase() === 'paused') {
+                        indicator.classList.add('paused');
+                    } else {
+                        indicator.classList.add('stopped');
+                    }
+
+                    // Update state text
+                    document.getElementById('playback-state').textContent = state;
+
+                    // Update position
+                    document.getElementById('position').textContent = 
+                        `${formatTime(position)} / ${formatTime(duration)}`;
+
+                    // Update volume slider if needed
+                    if (config.Volume !== undefined) {
+                        const slider = document.getElementById('volume-slider');
+                        if (Math.abs(slider.value - config.Volume) > 1) {
+                            slider.value = config.Volume;
+                            document.getElementById('volume-value').textContent = config.Volume;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to refresh status:', error);
+            }
+        }
+
+        // Format time in seconds to MM:SS
+        function formatTime(seconds) {
+            if (!seconds || seconds < 0) return '00:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Recent media management
+        function loadRecentMedia() {
+            const recent = JSON.parse(localStorage.getItem('recentMedia') || '[]');
+            const list = document.getElementById('recent-media');
+            
+            if (recent.length === 0) {
+                list.innerHTML = '<li><span class="recent-media-url">No recent media</span></li>';
+                return;
+            }
+
+            list.innerHTML = recent.map(url => `
+                <li onclick="loadRecentMedia('${url.replace(/'/g, "\\'")}')">
+                    <span class="recent-media-url">${url}</span>
+                    <span class="recent-media-play">▶️ Play</span>
+                </li>
+            `).join('');
+        }
+
+        function addToRecentMedia(url) {
+            let recent = JSON.parse(localStorage.getItem('recentMedia') || '[]');
+            recent = recent.filter(u => u !== url);
+            recent.unshift(url);
+            recent = recent.slice(0, 5); // Keep only last 5
+            localStorage.setItem('recentMedia', JSON.stringify(recent));
+            loadRecentMedia();
+        }
+
+        function loadRecentMedia(url) {
+            if (url && url !== 'No recent media') {
+                document.getElementById('media-url').value = url;
+            }
+        }
+
+        // Show message
+        function showMessage(text, type) {
+            const msg = document.getElementById('message');
+            msg.textContent = text;
+            msg.className = `message ${type} show`;
+            setTimeout(() => {
+                msg.classList.remove('show');
+            }, 3000);
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (statusInterval) {
+                clearInterval(statusInterval);
+            }
+        });
+    </script>
+</body>
+</html>

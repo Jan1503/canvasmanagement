@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="Svg.Skia" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\CanvasManagement.Interfaces\CanvasManagement.Interfaces.csproj" />
+    <ProjectReference Include="..\..\CanvasManagement.BdfFontManager\CanvasManagement.BdfFontManager.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Icons\*.svg" />
+    <!-- Original placeholders shipped in git. Official Q3 artwork is gitignored and
+         only embedded when a private local copy is present. -->
+    <EmbeddedResource Include="Logo\arena-symbol.svg" />
+    <EmbeddedResource Include="Logo\arena-text.svg" />
+    <EmbeddedResource Include="Logo\q3*.svg" Condition="Exists('Logo\q3symbol.svg')" />
+    <EmbeddedResource Include="Fonts\*.bdf" Condition="Exists('Fonts\q3arena.bdf')" />
+  </ItemGroup>
+
+</Project>

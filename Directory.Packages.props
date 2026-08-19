@@ -1,0 +1,31 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <!--
+    SkiaSharp is intentionally pinned to 3.116.1.
+    Do NOT bump to 3.119.x: those builds have missing native dependencies on
+    Raspberry Pi (the production target). Keep the whole SkiaSharp family aligned.
+  -->
+  <ItemGroup>
+    <PackageVersion Include="SkiaSharp" Version="3.116.1" />
+    <PackageVersion Include="SkiaSharp.Views.WindowsForms" Version="3.116.1" />
+    <PackageVersion Include="SkiaSharp.NativeAssets.Win32" Version="3.116.1" />
+  </ItemGroup>
+
+  <!-- Media / extension dependencies (kept at current stable versions for runtime stability) -->
+  <ItemGroup>
+    <PackageVersion Include="LibVLCSharp" Version="3.9.5" />
+    <PackageVersion Include="VideoLibrary" Version="3.3.0" />
+    <PackageVersion Include="ManagedBass" Version="4.0.2" />
+    <PackageVersion Include="Svg.Skia" Version="3.4.1" />
+  </ItemGroup>
+
+  <!-- Benchmarking -->
+  <ItemGroup>
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.2" />
+    <PackageVersion Include="Microsoft.VisualStudio.DiagnosticsHub.BenchmarkDotNetDiagnosers" Version="18.3.36812.1" />
+  </ItemGroup>
+</Project>

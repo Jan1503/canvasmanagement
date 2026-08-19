@@ -1,0 +1,46 @@
+<svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <!-- Matrix Transform / Digital distortion icon -->
+  <rect fill="#000000" width="48" height="48"/>
+  
+  <!-- Original shape (circle being transformed) -->
+  <circle cx="18" cy="18" r="8" fill="#4A90E2" opacity="0.5" stroke="#00FF00" stroke-width="1"/>
+  
+  <!-- Transformation arrows -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#00FF00" />
+    </marker>
+  </defs>
+  
+  <line x1="26" y1="18" x2="34" y2="24" stroke="#00FF00" stroke-width="1.5" 
+        marker-end="url(#arrowhead)" opacity="0.8"/>
+  
+  <!-- Digitally transformed/distorted shape -->
+  <path d="M 38 20 L 44 22 L 42 28 L 38 32 L 32 30 L 34 24 Z" 
+        fill="#00FF00" opacity="0.3" stroke="#00FF00" stroke-width="1.5"/>
+  
+  <!-- Digital glitch lines -->
+  <rect x="36" y="24" width="8" height="1" fill="#00FF00" opacity="0.8"/>
+  <rect x="34" y="27" width="10" height="1" fill="#00FF00" opacity="0.6"/>
+  <rect x="37" y="29" width="6" height="1" fill="#00FF00" opacity="0.7"/>
+  
+  <!-- Matrix code particles around transformation -->
+  <text x="28" y="14" font-family="monospace" font-size="4" fill="#00FF00" opacity="0.7">1</text>
+  <text x="32" y="16" font-family="monospace" font-size="4" fill="#00FF00" opacity="0.6">0</text>
+  <text x="30" y="34" font-family="monospace" font-size="4" fill="#00FF00" opacity="0.7">1</text>
+  <text x="44" y="26" font-family="monospace" font-size="4" fill="#00FF00" opacity="0.8">0</text>
+  <text x="42" y="32" font-family="monospace" font-size="4" fill="#00FF00" opacity="0.6">1</text>
+  
+  <!-- Data stream lines -->
+  <path d="M 10 32 L 14 38 L 18 42" stroke="#00FF00" stroke-width="1" opacity="0.5" fill="none"/>
+  <circle cx="10" cy="32" r="1" fill="#00FF00" opacity="0.8"/>
+  <circle cx="14" cy="38" r="1" fill="#00FF00" opacity="0.6"/>
+  <circle cx="18" cy="42" r="1" fill="#00FF00" opacity="0.4"/>
+  
+  <path d="M 8 40 L 12 44" stroke="#00FF00" stroke-width="1" opacity="0.5" fill="none"/>
+  <circle cx="8" cy="40" r="1" fill="#00FF00" opacity="0.7"/>
+  <circle cx="12" cy="44" r="1" fill="#00FF00" opacity="0.5"/>
+  
+  <!-- Digital grid overlay -->
+  <path d="M 0 24 L 48 24 M 24 0 L 24 48" stroke="#00FF00" stroke-width="0.3" opacity="0.3" stroke-dasharray="2,2"/>
+</svg>
