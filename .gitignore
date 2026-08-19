@@ -37,6 +37,9 @@ Media/
 deploy/
 PublishProfiles/*.user
 
+## Local notes (not for GitHub)
+tasks/
+
 ## OS / editor
 .DS_Store
 Thumbs.db
