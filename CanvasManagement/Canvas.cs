@@ -63,6 +63,7 @@ public class Canvas : ICanvas, IDisposable
 
     private bool _disposed;
     private float _opacity = 1.0f; // Canvas-level transparency (0.0 = fully transparent, 1.0 = opaque)
+    private int _panelColorBits = 14; // Network wall only: 8 (fast) or 14 (video). Default 14.
     private int _zOrder; // Canvas z-order for layering
 
     internal Canvas(SKBitmap mainBitmap, int xPos, int yPos, int width, int height, string? name = null, int zOrder = 0)
@@ -152,6 +153,28 @@ public class Canvas : ICanvas, IDisposable
             lock (_drawLock)
             {
                 _opacity = Math.Clamp(value, 0.0f, 1.0f);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Preferred panel colour depth when this canvas is visible on a network LED wall (8 or 14).
+    ///     Default 14 so video is not silently quantized. Other outputs ignore this.
+    /// </summary>
+    public int PanelColorBits
+    {
+        get
+        {
+            lock (_drawLock)
+            {
+                return _panelColorBits;
+            }
+        }
+        set
+        {
+            lock (_drawLock)
+            {
+                _panelColorBits = value >= 14 ? 14 : 8;
             }
         }
     }

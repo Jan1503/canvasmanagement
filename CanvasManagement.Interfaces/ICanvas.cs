@@ -23,6 +23,13 @@ public interface ICanvas
     float Opacity { get; set; }
 
     /// <summary>
+    ///     Preferred panel colour depth when this canvas is visible on a network LED wall: 8 (triple-buffer,
+    ///     high fps) or 14 (double-buffer, video quality). Default 14. HDMI / SPI / GPIO / simulation ignore
+    ///     this; the wall uses the maximum of all visible canvases.
+    /// </summary>
+    int PanelColorBits { get; set; }
+
+    /// <summary>
     ///     Gets or sets the Z-order of this canvas (lower values drawn first, higher values on top)
     ///     Changes to ZOrder should be coordinated with CanvasManager to maintain proper layering
     /// </summary>
