@@ -185,6 +185,8 @@ public void Reset() { /* … */ }
 
 ## 7. Drawing helpers on `ICanvas`
 
+`ICanvas.PanelColorBits` (8 or 14) is the preferred network-panel depth while this canvas is visible. The host uses the **max of visible canvases**; HDMI / GPIO / SPI ignore it. Leave the default (14) unless you are building a layout that should run the wall in 8-bit. Do not toggle it every frame.
+
 You can draw through `ICanvas` from the **host thread** (or after `SubmitCompletedFrame`). Useful bits for LED walls:
 
 | Method | Use |

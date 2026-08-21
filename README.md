@@ -22,13 +22,21 @@ The host that talks to hardware, the web UI, media playback and voice lives in *
         SKBitmap  ── verpixeld sends this to GPIO / PixPlane / HDMI / SPI / preview
 ```
 
-- **Canvases** are independent bitmaps with position, size, z-order, opacity and optional per-pixel alpha.
+- **Canvases** are independent bitmaps with position, size, z-order, opacity, optional per-pixel alpha, and `PanelColorBits` (8 or 14) for network LED walls.
 - **Extensions** are plugins that draw into a canvas (animation loop, clocks, stream players).
 - **Filters** run on the *composited* frame, not on a single canvas.
 - **BDF fonts** give pixel-perfect text on a 256×128 or 384×192 wall.
 
 If you want to add a new clock, game or visual effect: start with [docs/EXTENSIONS.md](docs/EXTENSIONS.md).  
 If you want a look (CRT scanlines, blur, seasonal overlay): start with [docs/FILTERS.md](docs/FILTERS.md).
+
+## Panel colour depth (network walls)
+
+`ICanvas.PanelColorBits` is **8** (triple-buffer, high fps) or **14** (double-buffer, video quality). Default **14** so a video canvas is not silently quantized. HDMI, SPI, GPIO and simulation ignore it.
+
+On a [verpixeld-panel](https://github.com/Jan1503/verpixeld-panel) the RP2350 cannot keep both buffer layouts in SRAM. verpixeld therefore takes the **maximum** of every *visible* canvas (hidden, or opacity below ~0.01, is ignored) and live-switches the panel with firmware 1.7 `livemode` — no reboot. One 14-bit canvas on the wall forces 14-bit for everyone; hide it and a clock-only layout can drop back to 8-bit.
+
+This property is a **host/layout** control (web UI / persisted canvas JSON). Extensions should not override it unless they are a dedicated depth switch. See [verpixeld](https://github.com/Jan1503/verpixeld) for the switch sequence and [PixPlane](https://github.com/Jan1503/pixplane) `SetColorModeLiveAsync`.
 
 ## Layout
 
