@@ -30,6 +30,30 @@ The host that talks to hardware, the web UI, media playback and voice lives in *
 If you want to add a new clock, game or visual effect: start with [docs/EXTENSIONS.md](docs/EXTENSIONS.md).  
 If you want a look (CRT scanlines, blur, seasonal overlay): start with [docs/FILTERS.md](docs/FILTERS.md).
 
+## What's new
+
+Dated from the public GitHub history. Newest first.
+
+### 2026-08-22 — HA Departures
+
+New **HA Departures** tile: next trains/buses from a Home Assistant sensor (HVV, HAFAS, RMV, similar). Reads a `departures` / `next` JSON attribute list and draws coloured line badges (U-Bahn, S-Bahn, AKN, bus, ferry), destination, and countdown or clock time. The host stores array/object HA attributes as JSON strings so the list is available to the plugin.
+
+Wall toasts now carry an optional **severity** on `HomeAssistantBridge.Notification` (`HaNotification`), so the host overlay can pick error/warning/success/info accents.
+
+### 2026-08-22 — HA tiles, weather sky, plugin hot-reload
+
+Home Assistant content plugins: **Sensor**, **Grid**, **Graph**, **Energy**, **Weather** (animated sky), **Now Playing**, **Climate**, **Waste**. Plugin DLLs load from a memory copy into a collectible context, so files on disk are not locked — copy a new DLL and **Reload plugins** in verpixeld (or `POST /api/plugins/reload`) without a process restart.
+
+### 2026-08-21 / 2026-08-20 — Panel colour depth
+
+`ICanvas.PanelColorBits` is 8 or 14 (default 14) for network LED walls. verpixeld takes the max of *visible* canvases and live-switches [verpixeld-panel](https://github.com/Jan1503/verpixeld-panel) firmware 1.7 with `livemode`. HDMI / SPI / GPIO / simulation ignore it.
+
+### 2026-08-19 — YouTube 403 workaround, public engine
+
+VLC and YouTube extensions pass yt-dlp android extractor-args so playback is less likely to 403. First public docs for the engine, extension API and filter API; clone the repo as **`CanvasManagement`** (PascalCase) so verpixeld’s project references resolve.
+
+---
+
 ## Panel colour depth (network walls)
 
 `ICanvas.PanelColorBits` is **8** (triple-buffer, high fps) or **14** (double-buffer, video quality). Default **14** so a video canvas is not silently quantized. HDMI, SPI, GPIO and simulation ignore it.
@@ -112,7 +136,7 @@ Details, templates and a checklist: [docs/EXTENSIONS.md](docs/EXTENSIONS.md) and
 ## Stock extensions (overview)
 
 Clocks: Analog, Digital, Binary, Flip, Word, Tetris Clock.  
-Content: Weather, News Ticker, Now Playing, Home Assistant, Advertising, Slideshow, Scroll text, GIF, YouTube, VLC, Audio, Network Stream (TPM2.NET), LAV1.  
+Content: Weather, News Ticker, Now Playing, Home Assistant (sensor, grid, graph, energy, weather, now-playing, climate, waste, **departures**), Advertising, Slideshow, Scroll text, GIF, YouTube, VLC, Audio, Network Stream (TPM2.NET), LAV1.  
 Visuals: Starfield, Aquarium, Lava Lamp, Falling Sand, Game of Life, Arena screensaver.  
 Games (original SkiaSharp drawing, fan-style): Pac-Man, Snake, Pong, Space Invaders, Dino Runner, Flappy Bird.
 
