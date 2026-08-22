@@ -95,7 +95,7 @@ Plugin load paths at runtime (next to `verpixeld.dll`):
 - Extensions: `Extensions/**/*.dll`
 - Filters: `Filters/**/*.dll`
 
-A new plugin is picked up after **process restart**. There is no assembly hot-reload.
+Plugin DLLs are loaded from a memory copy into a collectible load context, so the files on disk are **not locked**. After copying a new `Extensions/` or `Filters/` DLL, Settings → Plugins → **Reload plugins** (or `POST /api/plugins/reload`) unloads the old types, loads the new ones, and restores running canvases/filters. A process restart is still required if `CanvasManagement.Interfaces` / SkiaSharp / the host itself changed, or if a native plugin (VLC, FFmpeg) pins the old context.
 
 ## How plugins are discovered
 

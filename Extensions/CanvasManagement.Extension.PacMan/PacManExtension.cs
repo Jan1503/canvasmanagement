@@ -1,4 +1,4 @@
-using System.Timers;
+﻿using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
 using Timer = System.Timers.Timer;
@@ -394,5 +394,4 @@ public class PacManExtension(ICanvas canvas) : ICanvasExtension
     {
         Stop();
     }
-}
 }

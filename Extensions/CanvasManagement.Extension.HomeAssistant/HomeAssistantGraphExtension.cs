@@ -54,14 +54,24 @@ public class HomeAssistantGraphExtension : ICanvasExtension, IDisposable
         Order = 8)]
     public bool UseBdfFont { get; set; }
 
-    [ExtensionParameter("Line Color", "Colour of the graph line", DefaultValue = "#41BDF5", Order = 9)]
+    [ExtensionParameter("Align", "Horizontal alignment of the title", DefaultValue = HaTileAlign.Left, Order = 9)]
+    public HaTileAlign Align { get; set; } = HaTileAlign.Left;
+
+    [ExtensionParameter("Unit Override", "Custom unit (empty = entity unit)", DefaultValue = "", Order = 10)]
+    public string UnitOverride { get; set; } = "";
+
+    [ExtensionParameter("Value Size", "Current-value text height in px (0 = auto-fit)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 200, Unit = "px", Order = 11)]
+    public int ValueSize { get; set; }
+
+    [ExtensionParameter("Line Color", "Colour of the graph line", DefaultValue = "#41BDF5", Order = 12)]
     public SKColor LineColor { get; set; } = new(65, 189, 245);
 
-    [ExtensionParameter("Label Color", "Colour of the labels", DefaultValue = "#C8D2E6", Order = 10)]
+    [ExtensionParameter("Label Color", "Colour of the labels", DefaultValue = "#C8D2E6", Order = 13)]
     public SKColor LabelColor { get; set; } = new(200, 210, 230);
 
     [ExtensionParameter("Background Color", "Background (alpha 0 for transparent overlay)", DefaultValue = "#FF0C1420",
-        Order = 11)]
+        Order = 14)]
     public SKColor BackgroundColor { get; set; } = new(12, 20, 32);
 
     public string Name => "HA Graph";
@@ -129,7 +139,7 @@ public class HomeAssistantGraphExtension : ICanvasExtension, IDisposable
         HomeAssistantBridge.RequestHistory(EntityId);
         var found = HomeAssistantBridge.TryGet(EntityId, out var entity);
         var samples = HomeAssistantBridge.GetHistory(EntityId);
-        var unit = found ? entity.Unit : null;
+        var unit = !string.IsNullOrWhiteSpace(UnitOverride) ? UnitOverride : found ? entity.Unit : null;
 
         var title = !string.IsNullOrWhiteSpace(Label)
             ? Label
@@ -138,15 +148,17 @@ public class HomeAssistantGraphExtension : ICanvasExtension, IDisposable
                 : EntityId;
 
         var headerH = ShowTitle || ShowCurrent ? Math.Clamp(h * 0.2f, 6f, h * 0.35f) : 0f;
+        var titleAlign = HaText.ToSk(Align);
 
         if (ShowTitle && !string.IsNullOrWhiteSpace(title))
-            DrawText(c, title, LabelColor, pad, pad, w * 0.62f, headerH, headerH * 0.9f, SKTextAlign.Left);
+            DrawText(c, title, LabelColor, pad, pad, w * 0.62f, headerH, headerH * 0.9f, titleAlign);
 
         if (ShowCurrent && samples.Length > 0)
         {
             var cur = samples[^1].Value.ToString("F" + Decimals, CultureInfo.InvariantCulture);
             if (!string.IsNullOrWhiteSpace(unit)) cur += " " + unit;
-            DrawText(c, cur, LineColor, w * 0.4f, pad, w * 0.6f - pad, headerH, headerH * 0.95f, SKTextAlign.Right);
+            var curH = ValueSize > 0 ? ValueSize : headerH * 0.95f;
+            DrawText(c, cur, LineColor, w * 0.4f, pad, w * 0.6f - pad, headerH, curH, SKTextAlign.Right);
         }
 
         var graphRect = new SKRect(pad, headerH + pad, w - pad, h - pad);

@@ -54,20 +54,10 @@ public class ExtensionDiscoveryService : IExtensionDiscovery
         foreach (var dllFile in dllFiles)
             try
             {
-                var assemblyName = AssemblyName.GetAssemblyName(dllFile);
-
-                // Check if already loaded
-                if (AppDomain.CurrentDomain.GetAssemblies().Any(a => a.FullName == assemblyName.FullName))
-                {
-                    Console.WriteLine($"  Already loaded: {assemblyName.Name}");
-                    continue;
-                }
-
-                // Load the assembly
-                var assembly = Assembly.LoadFrom(dllFile);
+                var assembly = PluginAssemblyHub.Load(dllFile);
+                if (assembly == null) continue;
                 Console.WriteLine($"  Loaded: {assembly.GetName().Name}");
 
-                // Count extensions in this assembly
                 var extensionCount = assembly.GetTypes()
                     .Count(t => t.IsClass && !t.IsAbstract &&
                                 t.GetCustomAttributes(typeof(ExtensionInfoAttribute), false).Any());
@@ -103,6 +93,19 @@ public class ExtensionDiscoveryService : IExtensionDiscovery
     }
 
     /// <inheritdoc />
+    public void ReloadAssemblies(string? extensionsPath = null)
+    {
+        if (string.IsNullOrWhiteSpace(extensionsPath))
+            extensionsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Extensions");
+
+        Console.WriteLine($"Reloading extensions from: {extensionsPath}");
+        var n = Directory.Exists(extensionsPath) ? PluginAssemblyHub.UnloadUnder(extensionsPath) : 0;
+        PluginAssemblyHub.CollectUnloaded();
+        Console.WriteLine($"  Unloaded {n} plugin context(s)");
+        LoadAssemblies(extensionsPath);
+    }
+
+    /// <inheritdoc />
     public IEnumerable<Type> GetAvailableTypes()
     {
         lock (_cacheLock)
@@ -111,7 +114,7 @@ public class ExtensionDiscoveryService : IExtensionDiscovery
 
             var result = new List<Type>();
 
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            foreach (var assembly in PluginAssemblyHub.AssembliesToScan())
             {
                 Type[] types;
                 try
@@ -521,9 +524,7 @@ public class ExtensionDiscoveryService : IExtensionDiscovery
     /// </summary>
     private static string? FindExtensionMethodName(Type extensionType)
     {
-        var assemblies = AppDomain.CurrentDomain.GetAssemblies();
-
-        foreach (var assembly in assemblies)
+        foreach (var assembly in PluginAssemblyHub.AssembliesToScan())
             try
             {
                 var types = assembly.GetTypes();

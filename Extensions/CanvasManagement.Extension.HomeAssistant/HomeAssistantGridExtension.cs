@@ -41,17 +41,31 @@ public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Show Icons", "Draw an icon beside each value", DefaultValue = true, Order = 4)]
     public bool ShowIcons { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = false, Order = 5)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Show Labels", "Show the label line in each cell", DefaultValue = true, Order = 5)]
+    public bool ShowLabels { get; set; } = true;
 
-    [ExtensionParameter("Label Color", "Colour of the labels", DefaultValue = "#7FB7FF", Order = 6)]
+    [ExtensionParameter("Show Unit", "Append the unit to the value", DefaultValue = true, Order = 6)]
+    public bool ShowUnit { get; set; } = true;
+
+    [ExtensionParameter("BDF Font", "Use the crisp bitmap (BDF) font for which text", DefaultValue = HaBdfMode.None,
+        Order = 7)]
+    public HaBdfMode BdfFont { get; set; } = HaBdfMode.None;
+
+    [ExtensionParameter("Align", "Horizontal alignment inside each cell", DefaultValue = HaTileAlign.Left, Order = 8)]
+    public HaTileAlign Align { get; set; } = HaTileAlign.Left;
+
+    [ExtensionParameter("Value Size", "Value text height in px (0 = auto-fit)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 200, Unit = "px", Order = 9)]
+    public int ValueSize { get; set; }
+
+    [ExtensionParameter("Label Color", "Colour of the labels", DefaultValue = "#7FB7FF", Order = 10)]
     public SKColor LabelColor { get; set; } = new(127, 183, 255);
 
-    [ExtensionParameter("Value Color", "Colour of the values", DefaultValue = "#FFFFFF", Order = 7)]
+    [ExtensionParameter("Value Color", "Colour of the values", DefaultValue = "#FFFFFF", Order = 11)]
     public SKColor ValueColor { get; set; } = SKColors.White;
 
     [ExtensionParameter("Background Color", "Background (alpha 0 for transparent overlay)", DefaultValue = "#FF000000",
-        Order = 8)]
+        Order = 12)]
     public SKColor BackgroundColor { get; set; } = new(0, 0, 0);
 
     public string Name => "HA Grid";
@@ -120,7 +134,7 @@ public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
         if (items == null || items.Count == 0)
         {
             DrawText(c, HomeAssistantBridge.Connected ? "No entities configured" : "HA offline",
-                SKColors.Gray, 0, 0, w, h, Math.Max(8f, 12f * _scale), true, SKTextAlign.Center);
+                SKColors.Gray, 0, 0, w, h, Math.Max(8f, 12f * _scale), true, SKTextAlign.Center, false);
             c.Flush();
             _canvas.SubmitCompletedFrame(bb);
             return;
@@ -152,10 +166,18 @@ public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
             string value;
             if (!HomeAssistantBridge.Connected) value = "—";
             else if (!found) value = "n/a";
-            else value = FormatValue(entity.State, found ? entity.Unit : null);
+            else value = FormatValue(entity.State, found ? entity.Unit : null, item.UnitOverride);
 
-            var labelH = Math.Clamp(cellH * 0.34f, 5f, cellH * 0.45f);
+            var labelH = ShowLabels ? Math.Clamp(cellH * 0.34f, 5f, cellH * 0.45f) : 0f;
             var valueH = cellH - labelH - pad * 2;
+            var labelBdf = BdfFont is HaBdfMode.Label or HaBdfMode.Both;
+            var valueBdf = BdfFont is HaBdfMode.Value or HaBdfMode.Both;
+            var textAlign = Align switch
+            {
+                HaTileAlign.Right => SKTextAlign.Right,
+                HaTileAlign.Center => SKTextAlign.Center,
+                _ => SKTextAlign.Left
+            };
 
             var ix = cx + pad;
             var iw = cellW - pad * 2;
@@ -169,22 +191,28 @@ public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
                 iw = cx + cellW - pad - ix;
             }
 
-            DrawText(c, label, LabelColor, cx + pad, cy + pad, cellW - pad * 2, labelH, labelH, true,
-                SKTextAlign.Left);
-            DrawText(c, value, ValueColor, ix, cy + labelH + pad, iw, valueH, valueH, true, SKTextAlign.Left);
+            if (ShowLabels)
+                DrawText(c, label, LabelColor, cx + pad, cy + pad, cellW - pad * 2, labelH, labelH, true,
+                    textAlign, labelBdf);
+            var valueTarget = ValueSize > 0 ? ValueSize : valueH;
+            DrawText(c, value, ValueColor, ix, cy + labelH + pad, iw, valueH, valueTarget, ValueSize <= 0,
+                textAlign, valueBdf);
         }
 
         c.Flush();
         _canvas.SubmitCompletedFrame(bb);
     }
 
-    private string FormatValue(string raw, string? unit)
+    private string FormatValue(string raw, string? unit, string? unitOverride)
     {
         var text = raw;
         if (Decimals >= 0 && double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var num))
-        {
             text = num.ToString("F" + Decimals, CultureInfo.InvariantCulture);
-            if (!string.IsNullOrWhiteSpace(unit)) text += " " + unit;
+
+        if (ShowUnit)
+        {
+            var u = !string.IsNullOrWhiteSpace(unitOverride) ? unitOverride : unit;
+            if (!string.IsNullOrWhiteSpace(u)) text += " " + u;
         }
 
         return text;
@@ -197,11 +225,11 @@ public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
     }
 
     private void DrawText(SKCanvas c, string text, SKColor color, float rx, float ry, float rw, float rh,
-        float targetH, bool fit, SKTextAlign align)
+        float targetH, bool fit, SKTextAlign align, bool useBdf)
     {
         if (string.IsNullOrEmpty(text) || rw <= 1 || rh <= 1) return;
 
-        if (UseBdfFont)
+        if (useBdf)
         {
             var fontName = BdfFontRegistry.GetBestFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
             using var bmp = _canvas.RenderBdfTextToBitmap(text, color, fontName);
@@ -210,7 +238,8 @@ public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
             if (scale <= 0) return;
             var dw = bmp.Width * scale;
             var dh = bmp.Height * scale;
-            var left = align == SKTextAlign.Center ? rx + (rw - dw) / 2f : rx;
+            var left = align == SKTextAlign.Center ? rx + (rw - dw) / 2f
+                : align == SKTextAlign.Right ? rx + rw - dw : rx;
             var top = ry + (rh - dh) / 2f;
             c.DrawBitmap(bmp, new SKRect(left, top, left + dw, top + dh));
             return;
@@ -223,7 +252,8 @@ public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
 
         var metrics = font.Metrics;
         var baseline = ry + (rh - (metrics.Descent - metrics.Ascent)) / 2f - metrics.Ascent;
-        var anchorX = align == SKTextAlign.Center ? rx + rw / 2f : rx;
+        var anchorX = align == SKTextAlign.Center ? rx + rw / 2f
+            : align == SKTextAlign.Right ? rx + rw : rx;
         c.DrawText(text, anchorX, baseline, align, font, paint);
     }
 }

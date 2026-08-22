@@ -18,4 +18,29 @@ public static class Extension
     {
         return new HomeAssistantGraphExtension(canvas);
     }
+
+    public static HomeAssistantEnergyExtension GetHomeAssistantEnergy(this ICanvas canvas)
+    {
+        return new HomeAssistantEnergyExtension(canvas);
+    }
+
+    public static HomeAssistantWeatherExtension GetHomeAssistantWeather(this ICanvas canvas)
+    {
+        return new HomeAssistantWeatherExtension(canvas);
+    }
+
+    public static HomeAssistantMediaExtension GetHomeAssistantMedia(this ICanvas canvas)
+    {
+        return new HomeAssistantMediaExtension(canvas);
+    }
+
+    public static HomeAssistantClimateExtension GetHomeAssistantClimate(this ICanvas canvas)
+    {
+        return new HomeAssistantClimateExtension(canvas);
+    }
+
+    public static HomeAssistantWasteExtension GetHomeAssistantWaste(this ICanvas canvas)
+    {
+        return new HomeAssistantWasteExtension(canvas);
+    }
 }

@@ -34,15 +34,14 @@ public class WeatherExtension : ICanvasExtension, IDisposable
         _canvas = canvas;
     }
 
-    // Text inputs (not sliders) - latitude/longitude need decimal precision a slider can't give.
-    [ExtensionParameter("Latitude", "Location latitude, e.g. 52.52", DefaultValue = "52.52", Order = 1)]
+    [ExtensionParameter("Location", "City or place — use the search button", DefaultValue = "Berlin", Order = 1)]
+    public string Location { get; set; } = "Berlin";
+
+    [ExtensionParameter("Latitude", "Filled by the location picker", DefaultValue = "52.52", Order = 2)]
     public string Latitude { get; set; } = "52.52";
 
-    [ExtensionParameter("Longitude", "Location longitude, e.g. 13.405", DefaultValue = "13.405", Order = 2)]
+    [ExtensionParameter("Longitude", "Filled by the location picker", DefaultValue = "13.405", Order = 3)]
     public string Longitude { get; set; } = "13.405";
-
-    [ExtensionParameter("Location Label", "Text shown as the place name", DefaultValue = "Berlin", Order = 3)]
-    public string Location { get; set; } = "Berlin";
 
     [ExtensionParameter("Fahrenheit", "Use °F instead of °C", DefaultValue = false, Order = 4)]
     public bool Fahrenheit { get; set; }

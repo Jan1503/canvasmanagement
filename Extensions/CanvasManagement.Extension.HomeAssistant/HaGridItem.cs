@@ -10,4 +10,7 @@ public class HaGridItem
 
     [ExtensionParameter("Label", "Override label (empty = entity friendly name)", DefaultValue = "", Order = 2)]
     public string Label { get; set; } = "";
+
+    [ExtensionParameter("Unit Override", "Custom unit (empty = entity unit)", DefaultValue = "", Order = 3)]
+    public string UnitOverride { get; set; } = "";
 }

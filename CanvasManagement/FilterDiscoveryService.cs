@@ -57,20 +57,10 @@ public class FilterDiscoveryService : IFilterDiscovery
         foreach (var dllFile in dllFiles)
             try
             {
-                var assemblyName = AssemblyName.GetAssemblyName(dllFile);
-
-                // Check if already loaded
-                if (AppDomain.CurrentDomain.GetAssemblies().Any(a => a.FullName == assemblyName.FullName))
-                {
-                    Console.WriteLine($"  Already loaded: {assemblyName.Name}");
-                    continue;
-                }
-
-                // Load the assembly
-                var assembly = Assembly.LoadFrom(dllFile);
+                var assembly = PluginAssemblyHub.Load(dllFile);
+                if (assembly == null) continue;
                 Console.WriteLine($"  Loaded: {assembly.GetName().Name}");
 
-                // Count filters in this assembly
                 var filterCount = assembly.GetTypes()
                     .Count(t => t.IsClass && !t.IsAbstract &&
                                 typeof(ICanvasFilter).IsAssignableFrom(t));
@@ -106,6 +96,19 @@ public class FilterDiscoveryService : IFilterDiscovery
     }
 
     /// <inheritdoc />
+    public void ReloadAssemblies(string? filtersPath = null)
+    {
+        if (string.IsNullOrWhiteSpace(filtersPath))
+            filtersPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Filters");
+
+        Console.WriteLine($"Reloading filters from: {filtersPath}");
+        var n = Directory.Exists(filtersPath) ? PluginAssemblyHub.UnloadUnder(filtersPath) : 0;
+        PluginAssemblyHub.CollectUnloaded();
+        Console.WriteLine($"  Unloaded {n} plugin context(s)");
+        LoadAssemblies(filtersPath);
+    }
+
+    /// <inheritdoc />
     public IEnumerable<Type> GetAvailableTypes()
     {
         lock (_cacheLock)
@@ -115,7 +118,7 @@ public class FilterDiscoveryService : IFilterDiscovery
             var filterInterface = typeof(ICanvasFilter);
             var result = new List<Type>();
 
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            foreach (var assembly in PluginAssemblyHub.AssembliesToScan())
             {
                 Type[] types;
                 try

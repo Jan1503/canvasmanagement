@@ -17,6 +17,12 @@ public interface IFilterDiscovery
     void LoadAssembliesFromCommonLocations();
 
     /// <summary>
+    ///     Unloads collectible plugin contexts for this directory and loads DLLs from disk again.
+    ///     Caller must dispose live filter instances first (types from the old ALC become invalid).
+    /// </summary>
+    void ReloadAssemblies(string? filtersPath = null);
+
+    /// <summary>
     ///     Discovers all available filter types
     /// </summary>
     IEnumerable<Type> GetAvailableTypes();

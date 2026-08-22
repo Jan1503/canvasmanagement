@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 
 namespace CanvasManagement.Interfaces;
 
@@ -68,6 +69,45 @@ public static class HomeAssistantBridge
         History.Clear();
         Watched.Clear();
         Seeded.Clear();
+        Extra.Clear();
+    }
+
+    /// <summary>Title + message for a Home Assistant persistent notification (host overlay).</summary>
+    public static event Action<string, string>? Notification;
+
+    public static void RaiseNotification(string title, string message) =>
+        Notification?.Invoke(title ?? "", message ?? "");
+
+    private static readonly ConcurrentDictionary<string, Dictionary<string, string>> Extra =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public static void SetExtra(string entityId, Dictionary<string, string> attrs)
+    {
+        if (!string.IsNullOrWhiteSpace(entityId)) Extra[entityId] = attrs;
+    }
+
+    public static string? Attr(string entityId, string key)
+    {
+        if (string.IsNullOrWhiteSpace(entityId) || !Extra.TryGetValue(entityId, out var d)) return null;
+        return d.TryGetValue(key, out var v) ? v : null;
+    }
+
+    /// <summary>All scalar attributes the host stored for this entity (empty if unknown).</summary>
+    public static IReadOnlyDictionary<string, string> Attrs(string entityId)
+    {
+        if (string.IsNullOrWhiteSpace(entityId) || !Extra.TryGetValue(entityId, out var d))
+            return EmptyAttrs;
+        return d;
+    }
+
+    private static readonly IReadOnlyDictionary<string, string> EmptyAttrs =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    public static bool TryAttrDouble(string entityId, string key, out double value)
+    {
+        value = 0;
+        var s = Attr(entityId, key);
+        return s != null && double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
     }
 
     // ── Numeric history ──────────────────────────────────────────────────────

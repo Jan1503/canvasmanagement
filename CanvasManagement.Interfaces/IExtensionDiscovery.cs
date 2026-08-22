@@ -17,6 +17,12 @@ public interface IExtensionDiscovery
     void LoadAssembliesFromCommonLocations();
 
     /// <summary>
+    ///     Unloads collectible plugin contexts for this directory and loads DLLs from disk again.
+    ///     Caller must dispose live extension instances first (types from the old ALC become invalid).
+    /// </summary>
+    void ReloadAssemblies(string? extensionsPath = null);
+
+    /// <summary>
     ///     Discovers all available canvas extension types
     /// </summary>
     IEnumerable<Type> GetAvailableTypes();

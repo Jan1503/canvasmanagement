@@ -48,6 +48,9 @@ desktop.ini
 .cursor/
 *.swp
 
+## Downloaded trailer files (local cache; the Trailer extension is committed)
+Videos/
+
 ## Third-party artwork kept only on the local machine
 **/q3logo.svg
 **/q3symbol.svg
