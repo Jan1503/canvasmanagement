@@ -16,6 +16,13 @@ public readonly record struct HaEntityState(
     DateTime? LastChangedUtc,
     DateTime UpdatedUtc);
 
+/// <summary>Host overlay payload for a Home Assistant persistent notification.</summary>
+public readonly record struct HaNotification(
+    string Title,
+    string Message,
+    string? NotificationId,
+    string? Severity);
+
 /// <summary>A single numeric history sample for an entity.</summary>
 public readonly record struct HaSample(DateTime Utc, double Value);
 
@@ -72,11 +79,12 @@ public static class HomeAssistantBridge
         Extra.Clear();
     }
 
-    /// <summary>Title + message for a Home Assistant persistent notification (host overlay).</summary>
-    public static event Action<string, string>? Notification;
+    /// <summary>Raised when a persistent notification should appear on the wall.</summary>
+    public static event Action<HaNotification>? Notification;
 
-    public static void RaiseNotification(string title, string message) =>
-        Notification?.Invoke(title ?? "", message ?? "");
+    public static void RaiseNotification(string title, string message,
+        string? notificationId = null, string? severity = null) =>
+        Notification?.Invoke(new HaNotification(title ?? "", message ?? "", notificationId, severity));
 
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> Extra =
         new(StringComparer.OrdinalIgnoreCase);
