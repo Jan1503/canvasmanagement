@@ -43,4 +43,9 @@ public static class Extension
     {
         return new HomeAssistantWasteExtension(canvas);
     }
+
+    public static HomeAssistantDeparturesExtension GetHomeAssistantDepartures(this ICanvas canvas)
+    {
+        return new HomeAssistantDeparturesExtension(canvas);
+    }
 }
