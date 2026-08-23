@@ -7,6 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="BenchmarkSuite1" />
+    <InternalsVisibleTo Include="CanvasManagement.Tests" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="SkiaSharp" />

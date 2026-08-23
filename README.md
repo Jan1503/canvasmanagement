@@ -34,6 +34,10 @@ If you want a look (CRT scanlines, blur, seasonal overlay): start with [docs/FIL
 
 Dated from the public GitHub history. Newest first.
 
+### 2026-08-23 — Engine unit tests
+
+`CanvasManagement.Tests` (xUnit, net10) covers the pieces that used to be untested compositor math: `DisplayScale` (0×0 through 384×192), canvas z-order, `PixelateFilter.Apply` on a small bitmap, and `SetPixel`/`GetPixel` plus brightness clamp. The library still has **no** DI container — tests go through public APIs and `InternalsVisibleTo`. Run `dotnet test CanvasManagement.sln` on any machine; no panel and no `CanvasManager.Run()` loop.
+
 ### 2026-08-22 — HA Departures
 
 New **HA Departures** tile: next trains/buses from a Home Assistant sensor (HVV, HAFAS, RMV, similar). Reads a `departures` / `next` JSON attribute list and draws coloured line badges (U-Bahn, S-Bahn, AKN, bus, ferry), destination, and countdown or clock time. The host stores array/object HA attributes as JSON strings so the list is available to the plugin.
@@ -68,6 +72,7 @@ This property is a **host/layout** control (web UI / persisted canvas JSON). Ext
 CanvasManagement/                 compositor (CanvasManager, Canvas)
 CanvasManagement.Interfaces/      ICanvas, ICanvasExtension, ICanvasFilter, attributes
 CanvasManagement.BdfFontManager/  bitmap font renderer
+CanvasManagement.Tests/           xUnit: scale, z-order, pixelate, pixels/brightness
 CanvasManagement.WinForms.Demo/   run extensions on a window (no Pi, no panel)
 Extensions/                       one project per plugin
 Filters/CanvasManagement.Filters/ all stock filters in one assembly
@@ -97,6 +102,10 @@ dotnet build CanvasManagement.sln -c Release
 ```
 
 Target framework is **net10.0**. SkiaSharp is pinned to **3.116.1** in `Directory.Packages.props` (3.119.x is missing Raspberry Pi native assets). Do not bump it.
+
+```powershell
+dotnet test CanvasManagement.sln
+```
 
 ### Try an extension without hardware
 
