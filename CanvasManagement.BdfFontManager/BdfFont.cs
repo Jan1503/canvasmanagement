@@ -322,11 +322,11 @@ public class BdfFont
                     if (byteIndex < bytes.Length) bitmap[col, row] = ((bytes[byteIndex] >> bitIndex) & 1) == 1;
                 }
             }
-            catch (FormatException ex)
+            catch (FormatException)
             {
                 Console.WriteLine($"[BDF] Warning: Invalid bitmap hex value '{line}' at row {row}, skipping");
             }
-            catch (OverflowException ex)
+            catch (OverflowException)
             {
                 Console.WriteLine($"[BDF] Warning: Bitmap hex value '{line}' too large at row {row}, skipping");
             }

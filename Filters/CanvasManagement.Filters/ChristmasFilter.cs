@@ -530,6 +530,6 @@ public class ChristmasFilter : ICanvasFilter
         public float VY { get; set; }
         public int Life { get; set; }
         public int MaxLife { get; set; }
-        public List<(float X, float Y)> Trail { get; set; }
+        public List<(float X, float Y)> Trail { get; set; } = [];
     }
 }

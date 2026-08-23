@@ -82,7 +82,11 @@ public class Canvas : ICanvas, IDisposable
         Id = Guid.NewGuid().ToString("N").Substring(0, 8);
         Name = name ?? Id;
 
-        InitializeCachedObjects();
+        _cachedBackgroundCanvas = new SKCanvas(_canvasBackgroundBitmap);
+        _cachedStrokePaint = new SKPaint { Style = SKPaintStyle.Stroke };
+        _cachedFillPaint = new SKPaint { Style = SKPaintStyle.Fill };
+        _cachedAaStrokePaint = new SKPaint { Style = SKPaintStyle.Stroke, IsAntialias = true };
+        _cachedReusablePath = new SKPath();
     }
     
     private int _xPos;
@@ -620,33 +624,16 @@ public class Canvas : ICanvas, IDisposable
             if (_disposed) return;
             _disposed = true;
 
-            _canvasForegroundBitmap?.Dispose();
-            _canvasBackgroundBitmap?.Dispose();
-            DisposeCachedObjects();
+            _canvasForegroundBitmap.Dispose();
+            _canvasBackgroundBitmap.Dispose();
+            _cachedBackgroundCanvas.Dispose();
+            _cachedStrokePaint.Dispose();
+            _cachedFillPaint.Dispose();
+            _cachedAaStrokePaint.Dispose();
+            _cachedReusablePath.Dispose();
         }
 
         GC.SuppressFinalize(this);
-    }
-
-    private void InitializeCachedObjects()
-    {
-        //_cachedForegroundCanvas = new SKCanvas(_canvasForegroundBitmap);
-        _cachedBackgroundCanvas = new SKCanvas(_canvasBackgroundBitmap);
-
-        _cachedStrokePaint = new SKPaint { Style = SKPaintStyle.Stroke };
-        _cachedFillPaint = new SKPaint { Style = SKPaintStyle.Fill };
-        _cachedAaStrokePaint = new SKPaint { Style = SKPaintStyle.Stroke, IsAntialias = true };
-        _cachedReusablePath = new SKPath();
-    }
-
-    private void DisposeCachedObjects()
-    {
-        //_cachedForegroundCanvas?.Dispose();
-        _cachedBackgroundCanvas?.Dispose();
-        _cachedStrokePaint?.Dispose();
-        _cachedFillPaint?.Dispose();
-        _cachedAaStrokePaint?.Dispose();
-        _cachedReusablePath?.Dispose();
     }
 
     internal SKBitmap GetCanvasBitmap()

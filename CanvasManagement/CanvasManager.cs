@@ -441,7 +441,7 @@ public class CanvasManager : IDisposable
 
     #region Rendering
 
-    public event EventHandler<SKBitmap> RenderCompleted;
+    public event EventHandler<SKBitmap>? RenderCompleted;
 
     protected virtual void OnRenderCompleted(SKBitmap renderedBitmap)
     {

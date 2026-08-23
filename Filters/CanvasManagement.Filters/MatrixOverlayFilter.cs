@@ -100,11 +100,11 @@ public class MatrixOverlayFilter : ICanvasFilter
     private void DrawDigitalRain(SKBitmap bitmap)
     {
         using var canvas = new SKCanvas(bitmap);
+        using var font = new SKFont { Size = _fontSize, Edging = SKFontEdging.Alias };
         using var paint = new SKPaint
         {
             Color = new SKColor(0, 255, 0, (byte)(Intensity * 100)),
-            IsAntialias = false,
-            TextSize = _fontSize
+            IsAntialias = false
         };
 
         foreach (var drop in _drops)
@@ -116,7 +116,7 @@ public class MatrixOverlayFilter : ICanvasFilter
                 var alpha = (byte)((drop.Length - i) * 255 / drop.Length * Intensity);
                 paint.Color = new SKColor(0, 255, 0, alpha);
 
-                canvas.DrawText(drop.Char.ToString(), drop.X, y, paint);
+                canvas.DrawText(drop.Char.ToString(), drop.X, y, SKTextAlign.Left, font, paint);
             }
     }
 

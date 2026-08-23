@@ -498,21 +498,6 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
     private void DrawBackground(SKCanvas canvas)
     {
         canvas.Clear(SKColors.Black);
-        return;
-
-        // Subtle radial gradient from center
-        var centerX = _canvas.Width / 2f;
-        var centerY = _canvas.Height / 2f;
-        var radius = Math.Max(_canvas.Width, _canvas.Height) * 0.7f;
-
-        using var shader = SKShader.CreateRadialGradient(
-            new SKPoint(centerX, centerY),
-            radius,
-            new[] { new SKColor(30, 15, 40), new SKColor(10, 5, 15) },
-            SKShaderTileMode.Clamp);
-
-        using var paint = new SKPaint { Shader = shader };
-        canvas.DrawRect(0, 0, _canvas.Width, _canvas.Height, paint);
     }
 
     private void DrawText(SKCanvas canvas)

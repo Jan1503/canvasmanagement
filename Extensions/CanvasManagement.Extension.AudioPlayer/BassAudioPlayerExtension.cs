@@ -1341,6 +1341,6 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
 
         // Draw wrapped text for seamless loop
         if (_scrollPosition < 0 && _scrollPosition > -textWidth)
-            canvas.DrawText(text, (int)(_scrollPosition + textWidth + 20), textY, textPaint);
+            canvas.DrawText(text, (int)(_scrollPosition + textWidth + 20), textY, SKTextAlign.Left, font, textPaint);
     }
 }

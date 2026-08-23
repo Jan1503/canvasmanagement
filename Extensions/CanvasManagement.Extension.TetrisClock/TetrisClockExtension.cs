@@ -13,7 +13,6 @@ namespace CanvasManagement.Extension.TetrisClock;
     IconResourceName = "tetris.svg")]
 public class TetrisClockExtension : IDisposable
 {
-    private const int TETRIS_MAX_NUMBERS = 9;
     private const int TETRIS_Y_DROP_DEFAULT = 16;
 
     private static readonly SKColor TetrisRed = SKColors.Red;
@@ -37,7 +36,6 @@ public class TetrisClockExtension : IDisposable
     private readonly Dictionary<int, int> _currentNumbers = new();
 
     private readonly bool _drawOutline = false;
-    private readonly NumberState[] _numberStates = new NumberState[TETRIS_MAX_NUMBERS];
     private readonly SKColor _outlineColor = SKColors.Lime;
     private readonly Random _random = new();
 
@@ -674,13 +672,5 @@ public class TetrisClockExtension : IDisposable
                 DrawShape(xPos + offset1, yPos - offset1, scale, color);
                 break;
         }
-    }
-
-    private struct NumberState
-    {
-        internal int NumberToDraw;
-        internal int BlockIndex;
-        internal int FallIndex;
-        internal int XShift;
     }
 }

@@ -211,9 +211,15 @@ public class ScrollText
                     }
                 }
 
-                // OPTIMIZATION: Calculate scroll range
+                var frame = currentBitmap;
+                if (frame == null || frame.Width == 0)
+                {
+                    _isRunning = false;
+                    return;
+                }
+
                 var startX = _parentCanvas.Width;
-                var endX = -currentBitmap.Width;
+                var endX = -frame.Width;
 
                 // Scroll from right to left
                 for (var x = startX; x >= endX && !ct.IsCancellationRequested; x -= ScrollStep)

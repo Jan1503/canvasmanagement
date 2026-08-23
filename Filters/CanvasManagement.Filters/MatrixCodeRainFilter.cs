@@ -13,7 +13,7 @@ namespace CanvasManagement.Filters;
 public class MatrixCodeRainFilter : ICanvasFilter
 {
     private readonly Random _random = new();
-    private byte[,] _brightnessMap;
+    private byte[,] _brightnessMap = new byte[0, 0];
     private int _frameCount;
     private bool _initialized;
 
@@ -41,7 +41,7 @@ public class MatrixCodeRainFilter : ICanvasFilter
         var bitmap = inPlace ? source : source.Copy();
 
         // Initialize brightness map from source
-        if (!_initialized || _brightnessMap == null ||
+        if (!_initialized ||
             _brightnessMap.GetLength(0) != bitmap.Width ||
             _brightnessMap.GetLength(1) != bitmap.Height)
         {

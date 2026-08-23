@@ -191,13 +191,15 @@ public class TtfToBdfConverter
             SKFontStyleSlant.Upright);
         if (typeface == null) throw new Exception($"Font '{fontFamily}' not found");
 
+        using var font = new SKFont(typeface, fontSize)
+        {
+            Subpixel = false,
+            Edging = SKFontEdging.Alias
+        };
         using var paint = new SKPaint
         {
-            Typeface = typeface,
-            TextSize = fontSize,
-            IsAntialias = false, // Important: no anti-aliasing for BDF
-            SubpixelText = false,
-            TextAlign = SKTextAlign.Left
+            IsAntialias = false,
+            Color = SKColors.White
         };
 
         // Determine character range
@@ -205,7 +207,7 @@ public class TtfToBdfConverter
         var charEnd = includeExtended ? 255 : 126; // ASCII or extended ASCII
 
         // Measure font metrics
-        var metrics = paint.FontMetrics;
+        var metrics = font.Metrics;
         var ascent = (int)Math.Ceiling(Math.Abs(metrics.Ascent));
         var descent = (int)Math.Ceiling(Math.Abs(metrics.Descent));
         var height = ascent + descent;
@@ -239,7 +241,7 @@ public class TtfToBdfConverter
         foreach (var c in validChars)
         {
             var ch = (char)c;
-            GenerateGlyph(bdf, ch, paint, ascent, descent, height);
+            GenerateGlyph(bdf, ch, font, paint, ascent, descent, height);
         }
 
         bdf.AppendLine("ENDFONT");
@@ -250,11 +252,10 @@ public class TtfToBdfConverter
         return outputFile;
     }
 
-    private void GenerateGlyph(StringBuilder bdf, char ch, SKPaint paint, int ascent, int descent, int height)
+    private void GenerateGlyph(StringBuilder bdf, char ch, SKFont font, SKPaint paint, int ascent, int descent, int height)
     {
         // Measure character
-        var bounds = new SKRect();
-        var width = paint.MeasureText(ch.ToString(), ref bounds);
+        var width = font.MeasureText(ch.ToString(), out var bounds);
 
         var glyphWidth = (int)Math.Ceiling(width);
         var glyphHeight = height;
@@ -278,7 +279,7 @@ public class TtfToBdfConverter
         // Draw character
         var x = 2f - bounds.Left;
         var y = 2f + ascent;
-        canvas.DrawText(ch.ToString(), x, y, whitePaint);
+        canvas.DrawText(ch.ToString(), x, y, SKTextAlign.Left, font, whitePaint);
 
         // Get pixel data
         using var image = surface.Snapshot();

@@ -85,9 +85,9 @@ public class NeoCodeVisionFilter : ICanvasFilter
     };
 
     private readonly Random _random = new();
-    private byte[,] _brightnessMap;
-    private char[,] _characterMap;
-    private byte[,] _colorHueMap;
+    private byte[,] _brightnessMap = new byte[0, 0];
+    private char[,] _characterMap = new char[0, 0];
+    private byte[,] _colorHueMap = new byte[0, 0];
     private int _frameCount;
     private bool _initialized;
 
@@ -126,7 +126,7 @@ public class NeoCodeVisionFilter : ICanvasFilter
         var result = new SKBitmap(source.Width, source.Height, source.ColorType, source.AlphaType);
 
         // Initialize or update analysis maps
-        if (!_initialized || _brightnessMap == null ||
+        if (!_initialized ||
             _brightnessMap.GetLength(0) != source.Width ||
             _brightnessMap.GetLength(1) != source.Height)
         {
