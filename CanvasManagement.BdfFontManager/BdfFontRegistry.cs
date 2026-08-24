@@ -143,6 +143,7 @@ public static class BdfFontRegistry
             Path.Combine(baseDirectory, "bdf"),
             Path.Combine(baseDirectory, "Resources", "Fonts"),
             Path.Combine(baseDirectory, "Assets", "Fonts"),
+            Path.Combine(baseDirectory, "Data", "Fonts"),
 
             // Parent directory
             Path.Combine(Directory.GetParent(baseDirectory)?.FullName ?? baseDirectory, "Fonts"),
