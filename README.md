@@ -34,6 +34,10 @@ If you want a look (CRT scanlines, blur, seasonal overlay): start with [docs/FIL
 
 Dated from the public GitHub history. Newest first.
 
+### 2026-08-24 — Fonts on a data volume
+
+`BdfFontRegistry` also looks in `Data/Fonts` next to the app so [verpixeld](https://github.com/Jan1503/verpixeld) can seed BDFs on a Docker **Data** volume without an extra fonts mount. Pi hosts that keep fonts next to the DLL are unchanged.
+
 ### 2026-08-23 — Engine unit tests
 
 `CanvasManagement.Tests` (xUnit, net10) covers the pieces that used to be untested compositor math: `DisplayScale` (0×0 through 384×192), canvas z-order, `PixelateFilter.Apply` on a small bitmap, and `SetPixel`/`GetPixel` plus brightness clamp. The library still has **no** DI container — tests go through public APIs and `InternalsVisibleTo`. Run `dotnet test CanvasManagement.sln` on any machine; no panel and no `CanvasManager.Run()` loop.
