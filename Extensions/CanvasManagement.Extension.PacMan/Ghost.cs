@@ -9,8 +9,8 @@ namespace CanvasManagement.Extension.PacMan;
 /// </summary>
 public class Ghost
 {
-    private const float BaseSpeed = 0.08f;
-    private const float MaxSpeed = 0.095f; // keep ghosts a touch slower than Pac-Man (0.1) so it stays fair
+    private const float BaseSpeed = 0.085f;
+    private const float MaxSpeed = 0.112f; // can match Pac-Man (0.1) at higher difficulty so they actually catch him
     private static readonly Random _rand = new();
     private GhostMode _lastMode = GhostMode.Scatter;
     private bool _reverseQueued;
@@ -87,9 +87,12 @@ public class Ghost
 
         var speed = State switch
         {
-            GhostState.Frightened => BaseSpeed * 0.5f,
-            _ => Math.Min(MaxSpeed, BaseSpeed + (difficulty - 1) * 0.0025f)
+            GhostState.Frightened => BaseSpeed * 0.55f,
+            _ => Math.Min(MaxSpeed, BaseSpeed + (difficulty - 1) * 0.0045f)
         };
+        // Blinky (red) is the closer — a touch faster so the pack doesn't all take the same slow route.
+        if (GhostColorType == GhostColor.Red && State != GhostState.Frightened)
+            speed = Math.Min(MaxSpeed, speed * 1.08f);
 
         var atTarget = Math.Abs(_x - _targetX) < 0.05f && Math.Abs(_y - _targetY) < 0.05f;
         if (atTarget)
@@ -98,7 +101,7 @@ public class Ghost
             _y = _targetY;
 
             var target = GetTarget(pacmanPos, pacmanDir, blinky, maze, mode);
-            Direction = ChooseDirection(maze, (int)_x, (int)_y, target);
+            Direction = ChooseDirection(maze, (int)_x, (int)_y, target, pacmanPos);
 
             if (Direction != Direction.None)
             {
@@ -171,10 +174,12 @@ public class Ghost
 
     private Vector2 GetClydeTarget(Vector2 pacmanPos, Maze maze)
     {
-        return Vector2.Distance(Position, pacmanPos) > 8f ? pacmanPos : new Vector2(1, maze.GridHeight - 2);
+        // Scale the "too close → scatter" radius with the maze so Clyde actually peels off on big panels.
+        var shy = Math.Max(8f, Math.Min(maze.GridWidth, maze.GridHeight) * 0.35f);
+        return Vector2.Distance(Position, pacmanPos) > shy ? pacmanPos : new Vector2(1, maze.GridHeight - 2);
     }
 
-    private Direction ChooseDirection(Maze maze, int cellX, int cellY, Vector2 target)
+    private Direction ChooseDirection(Maze maze, int cellX, int cellY, Vector2 target, Vector2 pacmanPos)
     {
         var opposite = Maze.Opposite(Direction);
 
@@ -187,29 +192,39 @@ public class Ghost
                 return opposite;
         }
 
-        var best = Direction.None;
-        var bestScore = float.MaxValue;
-
-        // Frightened ghosts flee (maximise distance) - except while escaping the house, where they must
-        // still head straight for the gate.
         var flee = State == GhostState.Frightened && !maze.IsInsideGhostHouse(cellX, cellY);
+        if (flee)
+            return FleeDirection(maze, cellX, cellY, pacmanPos, opposite);
 
-        foreach (var dir in new[] { Direction.Up, Direction.Down, Direction.Left, Direction.Right })
+        // Greedy Euclidean targeting loops on generated mazes. Pathfind the first step toward the
+        // nearest open cell to the personality target, and never reverse unless it's a dead-end.
+        var (tx, ty) = SnapOpen(maze, (int)Math.Round(target.X), (int)Math.Round(target.Y));
+        var blocked = BlockOpposite(maze, cellX, cellY, opposite);
+        var step = maze.NextStepToNearestTarget((cellX, cellY), (x, y) => x == tx && y == ty, blocked);
+        if (step != Direction.None) return step;
+
+        step = maze.NextStepToNearestTarget((cellX, cellY), (x, y) => x == tx && y == ty);
+        if (step != Direction.None) return step;
+
+        var od = opposite.ToVector();
+        if (opposite != Direction.None && maze.IsOpenCell(cellX + (int)od.X, cellY + (int)od.Y))
+            return opposite;
+
+        return Direction.None;
+    }
+
+    private Direction FleeDirection(Maze maze, int cellX, int cellY, Vector2 danger, Direction opposite)
+    {
+        var best = Direction.None;
+        var bestScore = float.MinValue;
+        foreach (var dir in new[] { Direction.Up, Direction.Left, Direction.Down, Direction.Right })
         {
+            if (dir == opposite) continue;
             var delta = dir.ToVector();
             int nx = cellX + (int)delta.X, ny = cellY + (int)delta.Y;
             if (!maze.IsOpenCell(nx, ny)) continue;
-            if (dir == opposite) continue; // ghosts never reverse at a junction
-
-            var dist = Vector2.Distance(new Vector2(nx, ny), target);
-
-            // Add jitter so ghosts don't all pick identical paths.
-            if (flee)
-                dist = -dist + (float)_rand.NextDouble() * 0.5f;
-            else
-                dist += (float)_rand.NextDouble() * 0.01f;
-
-            if (dist < bestScore)
+            var dist = Vector2.Distance(new Vector2(nx, ny), danger) + (float)_rand.NextDouble() * 0.4f;
+            if (dist > bestScore)
             {
                 bestScore = dist;
                 best = dir;
@@ -217,13 +232,40 @@ public class Ghost
         }
 
         if (best != Direction.None) return best;
-
-        // Dead-end: reversing is the only option.
         var od = opposite.ToVector();
         if (opposite != Direction.None && maze.IsOpenCell(cellX + (int)od.X, cellY + (int)od.Y))
             return opposite;
-
         return Direction.None;
+    }
+
+    private static bool[,]? BlockOpposite(Maze maze, int cellX, int cellY, Direction opposite)
+    {
+        if (opposite == Direction.None) return null;
+        var d = opposite.ToVector();
+        int bx = cellX + (int)d.X, by = cellY + (int)d.Y;
+        if (bx < 0 || by < 0 || bx >= maze.GridWidth || by >= maze.GridHeight) return null;
+        var blocked = new bool[maze.GridWidth, maze.GridHeight];
+        blocked[bx, by] = true;
+        return blocked;
+    }
+
+    private static (int x, int y) SnapOpen(Maze maze, int x, int y)
+    {
+        x = Math.Clamp(x, 0, maze.GridWidth - 1);
+        y = Math.Clamp(y, 0, maze.GridHeight - 1);
+        if (maze.IsOpenCell(x, y)) return (x, y);
+        for (var r = 1; r <= 12; r++)
+        {
+            for (var dy = -r; dy <= r; dy++)
+            for (var dx = -r; dx <= r; dx++)
+            {
+                if (Math.Abs(dx) != r && Math.Abs(dy) != r) continue;
+                int nx = x + dx, ny = y + dy;
+                if (maze.IsOpenCell(nx, ny)) return (nx, ny);
+            }
+        }
+
+        return (x, y);
     }
 }
 

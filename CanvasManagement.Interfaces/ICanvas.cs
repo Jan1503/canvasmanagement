@@ -302,6 +302,12 @@ public interface ICanvas
         SKColor? backgroundColor = null);
 
     /// <summary>
+    ///     Registered BDF font whose glyph height best fits <paramref name="targetHeight"/> (largest
+    ///     that is not taller, or the smallest available). Null if no size-named fonts are loaded.
+    /// </summary>
+    string? GetBestBdfFontForHeight(int targetHeight);
+
+    /// <summary>
     ///     Allows extensions to signal they want to update the canvas with a complete frame.
     ///     This ensures atomic updates - the entire frame is written before CanvasManager reads it.
     /// </summary>

@@ -6,7 +6,7 @@ using Timer = System.Timers.Timer;
 namespace CanvasManagement.Extension.Pong;
 
 [ExtensionInfo("Pong Game",
-    "Classic Pong game with AI opponents",
+    "Classic Pong — right paddle AI, left paddle autopilot or arrows in Studio",
     "Games",
     IconResourceName = "pong.svg")]
 public class PongExtension : IDisposable
@@ -29,6 +29,9 @@ public class PongExtension : IDisposable
     private Timer? _gameTimer;
     private float _paddle1Y, _paddle2Y;
     private readonly Random _random = new();
+    private bool _human;
+    private bool _upHeld;
+    private bool _downHeld;
 
     internal PongExtension(ICanvas canvas)
     {
@@ -62,6 +65,9 @@ public class PongExtension : IDisposable
 
         lock (_gameLock)
         {
+            _human = false;
+            _upHeld = false;
+            _downHeld = false;
             InitializeGame();
 
             // Create back buffer
@@ -187,13 +193,22 @@ public class PongExtension : IDisposable
                     });
             }
 
-            // AI for paddle 1 (left)
-            var target1 = _ballY - PADDLE_HEIGHT / 2;
-            var aiSpeed1 = PaddleSpeed * (AIDifficulty / 10f);
-            if (_paddle1Y < target1 - 5)
-                _paddle1Y = Math.Min(_paddle1Y + aiSpeed1, target1);
-            else if (_paddle1Y > target1 + 5)
-                _paddle1Y = Math.Max(_paddle1Y - aiSpeed1, target1);
+            // Left paddle: player hold or AI
+            if (_human || !AutoPilot)
+            {
+                var hold = (_downHeld ? 1 : 0) - (_upHeld ? 1 : 0);
+                if (hold != 0)
+                    _paddle1Y += hold * PaddleSpeed;
+            }
+            else
+            {
+                var target1 = _ballY - PADDLE_HEIGHT / 2;
+                var aiSpeed1 = PaddleSpeed * (AIDifficulty / 10f);
+                if (_paddle1Y < target1 - 5)
+                    _paddle1Y = Math.Min(_paddle1Y + aiSpeed1, target1);
+                else if (_paddle1Y > target1 + 5)
+                    _paddle1Y = Math.Max(_paddle1Y - aiSpeed1, target1);
+            }
 
             // AI for paddle 2 (right)
             var target2 = _ballY - PADDLE_HEIGHT / 2;
@@ -293,37 +308,18 @@ public class PongExtension : IDisposable
                 canvas.DrawCircle(_ballX, _ballY, BALL_SIZE / 2, ballPaint);
 
                 // Draw scores
-                using var scoreFont = new SKFont
-                {
-                    Size = _canvas.ScaleSizeF(32),
-                    Typeface = SKTypeface.FromFamilyName("Arial")
-                };
-                using var scorePaint = new SKPaint
-                {
-                    Color = SKColors.White,
-                    IsAntialias = true
-                };
+                var scoreSize = CanvasText.ResolveSize(FontSize, _canvas.ScaleSizeF(32));
                 var scoreY = _canvas.ScaleSize(40);
-                canvas.DrawText(Score1.ToString(), _canvas.Width / 4, scoreY, SKTextAlign.Left, scoreFont, scorePaint);
-                canvas.DrawText(Score2.ToString(), _canvas.Width * 3 / 4, scoreY, SKTextAlign.Left, scoreFont,
-                    scorePaint);
+                CanvasText.Draw(canvas, _canvas, Score1.ToString(), SKColors.White, _canvas.Width / 4, scoreY,
+                    scoreSize, SKTextAlign.Left, UseBdfFont);
+                CanvasText.Draw(canvas, _canvas, Score2.ToString(), SKColors.White, _canvas.Width * 3 / 4, scoreY,
+                    scoreSize, SKTextAlign.Left, UseBdfFont);
 
-                // Draw winner message
                 if (MaxScore > 0 && (Score1 >= MaxScore || Score2 >= MaxScore))
                 {
                     var winner = Score1 >= MaxScore ? "Player 1 Wins!" : "Player 2 Wins!";
-                    using var winFont = new SKFont
-                    {
-                        Size = _canvas.ScaleSizeF(24),
-                        Typeface = SKTypeface.FromFamilyName("Arial")
-                    };
-                    using var winPaint = new SKPaint
-                    {
-                        Color = SKColors.Yellow,
-                        IsAntialias = true
-                    };
-                    canvas.DrawText(winner, _canvas.Width / 2, _canvas.Height / 2, SKTextAlign.Center, winFont,
-                        winPaint);
+                    CanvasText.Draw(canvas, _canvas, winner, SKColors.Yellow, _canvas.Width / 2, _canvas.Height / 2,
+                        CanvasText.ResolveSize(FontSize, _canvas.ScaleSizeF(24)), SKTextAlign.Center, UseBdfFont);
                 }
 
                 canvas.Flush();// Blit to canvas in one operation
@@ -369,6 +365,13 @@ public class PongExtension : IDisposable
         DefaultValue = true)]
     public bool ShowCenterLine { get; set; } = true;
 
+    [ExtensionParameter("Use BDF Font", "Render scores with the crisp bitmap (BDF) font", DefaultValue = false)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "Score height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 64, Unit = "px")]
+    public int FontSize { get; set; }
+
     [ExtensionParameter("Trail Effect", "Show ball trail effect",
         DefaultValue = false)]
     public bool TrailEffect { get; set; } = false;
@@ -376,6 +379,37 @@ public class PongExtension : IDisposable
     [ExtensionParameter("Max Score", "Score to win (0 = no limit)",
         DefaultValue = 0, MinValue = 0, MaxValue = 99)]
     public int MaxScore { get; set; } = 0;
+
+    [ExtensionParameter("Auto Pilot", "AI plays left paddle until you press a key in Studio", DefaultValue = true)]
+    public bool AutoPilot { get; set; } = true;
+
+    [ExtensionMethod("Paddle Up", "Move left paddle up — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Up|W", Order = 1)]
+    public void PaddleUp()
+    {
+        lock (_gameLock) { _human = true; _upHeld = true; }
+    }
+
+    [ExtensionMethod("Paddle Down", "Move left paddle down — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Down|S", Order = 2)]
+    public void PaddleDown()
+    {
+        lock (_gameLock) { _human = true; _downHeld = true; }
+    }
+
+    [ExtensionMethod("Release Up", "Release up",
+        Category = "Controls", KeyboardShortcut = "Up:up|W:up", Order = 3)]
+    public void ReleaseUp()
+    {
+        lock (_gameLock) _upHeld = false;
+    }
+
+    [ExtensionMethod("Release Down", "Release down",
+        Category = "Controls", KeyboardShortcut = "Down:up|S:up", Order = 4)]
+    public void ReleaseDown()
+    {
+        lock (_gameLock) _downHeld = false;
+    }
 
     #endregion
 }

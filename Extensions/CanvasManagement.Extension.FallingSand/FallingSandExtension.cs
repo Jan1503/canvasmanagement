@@ -54,30 +54,34 @@ public class FallingSandExtension : ICanvasExtension, IDisposable
         Mixed
     }
 
-    [ExtensionParameter("Material", "What pours from the top", DefaultValue = "Rainbow", Order = 1)]
+    [ExtensionParameter("Cell Size", "Sand grain size in pixels (1 = one LED per grain)", DefaultValue = 1,
+        MinValue = 1, MaxValue = 4, Order = 1)]
+    public int CellSize { get; set; } = 1;
+
+    [ExtensionParameter("Material", "What pours from the top", DefaultValue = SandMaterial.Rainbow, Order = 2)]
     public SandMaterial Material { get; set; } = SandMaterial.Rainbow;
 
     [ExtensionParameter("Flow Rate", "How much material pours in", DefaultValue = 5, MinValue = 1, MaxValue = 10,
-        Order = 2)]
+        Order = 3)]
     public int FlowRate { get; set; } = 5;
 
-    [ExtensionParameter("Sim Speed", "Physics sub-steps per frame (higher = faster flow)", DefaultValue = 2,
-        MinValue = 1, MaxValue = 5, Order = 3)]
-    public int SimSpeed { get; set; } = 2;
+    [ExtensionParameter("Sim Speed", "Physics sub-steps per frame (higher = faster flow)", DefaultValue = 3,
+        MinValue = 1, MaxValue = 8, Order = 4)]
+    public int SimSpeed { get; set; } = 3;
 
     [ExtensionParameter("Emitters", "Number of pour points across the top", DefaultValue = 3, MinValue = 1,
-        MaxValue = 8, Order = 4)]
+        MaxValue = 8, Order = 5)]
     public int EmitterCount { get; set; } = 3;
 
     [ExtensionParameter("Obstacles", "Number of static stone pegs for the sand to pile on", DefaultValue = 4,
-        MinValue = 0, MaxValue = 20, Order = 5)]
+        MinValue = 0, MaxValue = 20, Order = 6)]
     public int Obstacles { get; set; } = 4;
 
     [ExtensionParameter("Frame Delay", "Frame interval in milliseconds", DefaultValue = 33, MinValue = 16,
-        MaxValue = 100, Unit = "ms", Order = 6)]
+        MaxValue = 100, Unit = "ms", Order = 7)]
     public int FrameDelay { get; set; } = 33;
 
-    [ExtensionParameter("Background Color", "Background colour", DefaultValue = "#000000", Order = 7)]
+    [ExtensionParameter("Background Color", "Background colour", DefaultValue = "#000000", Order = 8)]
     public SKColor BackgroundColor { get; set; } = SKColors.Black;
 
     public string Name => "Falling Sand";
@@ -96,20 +100,7 @@ public class FallingSandExtension : ICanvasExtension, IDisposable
         {
             if (IsRunning) return;
 
-            var scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
-            _cell = Math.Clamp((int)Math.Round(4 * scale), 2, 6);
-            _gw = Math.Max(8, _canvas.Width / _cell);
-            _gh = Math.Max(8, _canvas.Height / _cell);
-            _offsetX = (_canvas.Width - _gw * _cell) / 2;
-            _offsetY = (_canvas.Height - _gh * _cell) / 2;
-
-            _mat = new byte[_gw, _gh];
-            _hue = new byte[_gw, _gh];
-            _moved = new bool[_gw, _gh];
-
-            PlaceObstacles();
-            _lastObstacles = Obstacles;
-            BuildEmitters();
+            RebuildGrid();
 
             _backBuffer?.Dispose();
             _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
@@ -148,6 +139,9 @@ public class FallingSandExtension : ICanvasExtension, IDisposable
             {
                 if (_timer != null && Math.Abs(_timer.Interval - FrameDelay) > 0.5) _timer.Interval = FrameDelay;
 
+                if (Math.Clamp(CellSize, 1, 4) != _cell)
+                    RebuildGrid();
+
                 BuildEmitters(); // cheap; honours live EmitterCount changes
                 if (Obstacles != _lastObstacles)
                 {
@@ -165,6 +159,30 @@ public class FallingSandExtension : ICanvasExtension, IDisposable
                 Console.WriteLine($"[FallingSand] {ex.Message}");
             }
         }
+    }
+
+    /// <summary>
+    ///     Rebuilds the grain grid for the current Cell Size. Must run while already holding <c>_lock</c>
+    ///     (Start / OnTick) — never via Stop()/Start() or the timer deadlocks.
+    /// </summary>
+    private void RebuildGrid()
+    {
+        _cell = Math.Clamp(CellSize, 1, 4);
+        _gw = Math.Max(8, _canvas.Width / _cell);
+        _gh = Math.Max(8, _canvas.Height / _cell);
+        _offsetX = (_canvas.Width - _gw * _cell) / 2;
+        _offsetY = (_canvas.Height - _gh * _cell) / 2;
+
+        _mat = new byte[_gw, _gh];
+        _hue = new byte[_gw, _gh];
+        _moved = new bool[_gw, _gh];
+        _emitters = Array.Empty<int>();
+        _draining = false;
+
+        PlaceObstacles();
+        _lastObstacles = Obstacles;
+        BuildEmitters();
+        Console.WriteLine($"[FallingSand] Grid {_gw}x{_gh} (cell {_cell})");
     }
 
     // ── Simulation ──────────────────────────────────────────────────────────
@@ -302,7 +320,9 @@ public class FallingSandExtension : ICanvasExtension, IDisposable
 
             var mat = PickMaterial(i);
             _mat[x, 0] = mat;
-            _hue[x, 0] = mat == Sand ? (byte)((_frame * 2 + i * 47) & 0xFF) : (byte)0;
+            _hue[x, 0] = mat == Sand && Material == SandMaterial.Rainbow
+                ? (byte)((_frame * 2 + i * 47) & 0xFF)
+                : (byte)0;
         }
     }
 
@@ -344,7 +364,7 @@ public class FallingSandExtension : ICanvasExtension, IDisposable
         {
             var cx = _random.Next(2, _gw - 2);
             var cy = _random.Next(_gh / 3, _gh * 3 / 4);
-            var r = 1 + _random.Next(Math.Max(1, _gw / 24));
+            var r = _cell <= 1 ? 1 + _random.Next(2) : 1 + _random.Next(Math.Max(1, _gw / 24));
             for (var dy = -r; dy <= r; dy++)
             for (var dx = -r; dx <= r; dx++)
             {
@@ -374,7 +394,9 @@ public class FallingSandExtension : ICanvasExtension, IDisposable
 
             paint.Color = m switch
             {
-                Sand => SKColor.FromHsl(_hue[x, y] / 255f * 360f, 85, 58),
+                Sand => Material == SandMaterial.Rainbow
+                    ? SKColor.FromHsl(_hue[x, y] / 255f * 360f, 85, 58)
+                    : new SKColor(214, 168, 78),
                 Water => new SKColor(40, 110, (byte)(220 - (y * 30 / _gh)), 230),
                 _ => new SKColor(95, 95, 110) // stone
             };

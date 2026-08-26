@@ -51,6 +51,14 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Background Color", "Background colour", DefaultValue = "#101015", Order = 4)]
     public SKColor BackgroundColor { get; set; } = new(16, 16, 21);
 
+    [ExtensionParameter("Use BDF Font", "Render track text with the crisp bitmap (BDF) font", DefaultValue = false,
+        Order = 5)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "Title height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 64, Unit = "px", Order = 6)]
+    public int FontSize { get; set; }
+
     public string Name => "Now Playing";
     public bool IsRunning { get; private set; }
 
@@ -186,9 +194,9 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
 
         if (idle)
         {
-            using var f = new SKFont { Size = Math.Max(9f, _canvas.Height * 0.12f) };
-            using var p = new SKPaint { Color = new SKColor(150, 150, 160), IsAntialias = true };
-            canvas.DrawText("♪  Nothing playing", _canvas.Width / 2f, _canvas.Height / 2f, SKTextAlign.Center, f, p);
+            var idleSize = CanvasText.ResolveSize(FontSize, Math.Max(9f, _canvas.Height * 0.12f));
+            CanvasText.Draw(canvas, _canvas, "Nothing playing", new SKColor(150, 150, 160),
+                _canvas.Width / 2f, _canvas.Height / 2f, idleSize, SKTextAlign.Center, UseBdfFont);
             canvas.Flush();
             _canvas.SubmitCompletedFrame(bb);
             return;
@@ -222,41 +230,33 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
         var barH = Math.Max(2f, 3f * _scale);
         var barY = h - pad - barH;
 
-        // Title (scrolls if too long), artist, album.
-        var titleSize = Math.Max(10f, h * 0.26f);
-        var subSize = Math.Max(8f, h * 0.18f);
-
-        using (var titleFont = new SKFont { Size = titleSize })
-        using (var titlePaint = new SKPaint { Color = SKColors.White, IsAntialias = true })
+        var titleSize = CanvasText.ResolveSize(FontSize, Math.Max(10f, h * 0.26f));
+        var subSize = FontSize > 0 ? Math.Max(6f, FontSize * 0.7f) : Math.Max(8f, h * 0.18f);
+        var ty = pad + titleSize;
+        var tw = CanvasText.Measure(_canvas, _track.Title, titleSize, UseBdfFont);
+        if (tw <= textW)
         {
-            var tw = titleFont.MeasureText(_track.Title);
-            var ty = pad + titleSize;
-            if (tw <= textW)
-            {
-                canvas.DrawText(_track.Title, textX, ty, SKTextAlign.Left, titleFont, titlePaint);
-            }
-            else
-            {
-                canvas.Save();
-                canvas.ClipRect(new SKRect(textX, 0, w - pad, h));
-                _titleScroll += 0.6f * _scale;
-                var span = tw + textW * 0.4f;
-                if (_titleScroll > span) _titleScroll = 0;
-                canvas.DrawText(_track.Title, textX - _titleScroll, ty, SKTextAlign.Left, titleFont, titlePaint);
-                canvas.Restore();
-            }
+            CanvasText.Draw(canvas, _canvas, _track.Title, SKColors.White, textX, ty, titleSize,
+                SKTextAlign.Left, UseBdfFont);
+        }
+        else
+        {
+            canvas.Save();
+            canvas.ClipRect(new SKRect(textX, 0, w - pad, h));
+            _titleScroll += 0.6f * _scale;
+            var span = tw + textW * 0.4f;
+            if (_titleScroll > span) _titleScroll = 0;
+            CanvasText.Draw(canvas, _canvas, _track.Title, SKColors.White, textX - _titleScroll, ty, titleSize,
+                SKTextAlign.Left, UseBdfFont);
+            canvas.Restore();
         }
 
-        using (var subFont = new SKFont { Size = subSize })
-        using (var artistPaint = new SKPaint { Color = new SKColor(200, 205, 215), IsAntialias = true })
-        using (var albumPaint = new SKPaint { Color = new SKColor(140, 145, 160), IsAntialias = true })
-        {
-            var ay = pad + titleSize + subSize * 1.3f;
-            canvas.DrawText(Trunc(subFont, _track.Artist, textW), textX, ay, SKTextAlign.Left, subFont, artistPaint);
-            if (h > 40 && !string.IsNullOrEmpty(_track.Album))
-                canvas.DrawText(Trunc(subFont, _track.Album, textW), textX, ay + subSize * 1.25f, SKTextAlign.Left,
-                    subFont, albumPaint);
-        }
+        var ay = pad + titleSize + subSize * 1.3f;
+        CanvasText.Draw(canvas, _canvas, Trunc(_track.Artist, subSize, textW), new SKColor(200, 205, 215),
+            textX, ay, subSize, SKTextAlign.Left, UseBdfFont);
+        if (h > 40 && !string.IsNullOrEmpty(_track.Album))
+            CanvasText.Draw(canvas, _canvas, Trunc(_track.Album, subSize, textW), new SKColor(140, 145, 160),
+                textX, ay + subSize * 1.25f, subSize, SKTextAlign.Left, UseBdfFont);
 
         // Progress bar.
         using (var track = new SKPaint { Color = new SKColor(55, 58, 68), Style = SKPaintStyle.Fill })
@@ -280,10 +280,10 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
         _canvas.SubmitCompletedFrame(bb);
     }
 
-    private static string Trunc(SKFont font, string s, float maxW)
+    private string Trunc(string s, float size, float maxW)
     {
-        if (string.IsNullOrEmpty(s) || font.MeasureText(s) <= maxW) return s;
-        while (s.Length > 1 && font.MeasureText(s + "…") > maxW) s = s[..^1];
+        if (string.IsNullOrEmpty(s) || CanvasText.Measure(_canvas, s, size, UseBdfFont) <= maxW) return s;
+        while (s.Length > 1 && CanvasText.Measure(_canvas, s + "…", size, UseBdfFont) > maxW) s = s[..^1];
         return s + "…";
     }
 

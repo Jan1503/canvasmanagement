@@ -72,17 +72,25 @@ public sealed class TrailerExtension : ICanvasExtension, IDisposable
         Order = 5)]
     public bool ShowTitle { get; set; } = true;
 
-    [ExtensionParameter("Auto Play", "Start when the extension starts", DefaultValue = true, Order = 6)]
+    [ExtensionParameter("Use BDF Font", "Render titles with the crisp bitmap (BDF) font", DefaultValue = false,
+        Order = 6)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "Title height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 64, Unit = "px", Order = 7)]
+    public int FontSize { get; set; }
+
+    [ExtensionParameter("Auto Play", "Start when the extension starts", DefaultValue = true, Order = 8)]
     public bool AutoPlay { get; set; } = true;
 
     [ExtensionParameter("Volume", "Playback volume (0-100)", MinValue = 0, MaxValue = 100, DefaultValue = 100,
-        Order = 7)]
+        Order = 9)]
     public int Volume { get; set; } = 100;
 
-    [ExtensionParameter("Now Playing", "Current file (read-only)", ReadOnly = true, Order = 8)]
+    [ExtensionParameter("Now Playing", "Current file (read-only)", ReadOnly = true, Order = 10)]
     public string NowPlaying { get; private set; } = "";
 
-    [ExtensionParameter("File Count", "Videos found in the folder (read-only)", ReadOnly = true, Order = 9)]
+    [ExtensionParameter("File Count", "Videos found in the folder (read-only)", ReadOnly = true, Order = 11)]
     public int FileCount => _queue.Count;
 
     public string Name => "Trailers";
@@ -290,12 +298,12 @@ public sealed class TrailerExtension : ICanvasExtension, IDisposable
         {
             using var c = new SKCanvas(bb);
             c.Clear(new SKColor(12, 10, 16));
-            using var titleFont = new SKFont(SKTypeface.Default, Math.Max(10, bb.Height * 0.16f));
-            using var bodyFont = new SKFont(SKTypeface.Default, Math.Max(8, bb.Height * 0.10f));
-            using var titlePaint = new SKPaint { Color = new SKColor(255, 200, 80), IsAntialias = true };
-            using var bodyPaint = new SKPaint { Color = new SKColor(210, 210, 220), IsAntialias = true };
-            c.DrawText(title, 6, bb.Height * 0.42f, titleFont, titlePaint);
-            c.DrawText(detail, 6, bb.Height * 0.68f, bodyFont, bodyPaint);
+            var titleSize = CanvasText.ResolveSize(FontSize, Math.Max(10, bb.Height * 0.16f));
+            var bodySize = FontSize > 0 ? Math.Max(6f, FontSize * 0.7f) : Math.Max(8, bb.Height * 0.10f);
+            CanvasText.Draw(c, _canvas, title, new SKColor(255, 200, 80), 6, bb.Height * 0.42f, titleSize,
+                SKTextAlign.Left, UseBdfFont);
+            CanvasText.Draw(c, _canvas, detail, new SKColor(210, 210, 220), 6, bb.Height * 0.68f, bodySize,
+                SKTextAlign.Left, UseBdfFont);
             c.Flush();
             _canvas.SubmitCompletedFrame(bb);
         }
@@ -499,15 +507,15 @@ public sealed class TrailerExtension : ICanvasExtension, IDisposable
         }
     }
 
-    private static void DrawTitle(SKBitmap bb, string title)
+    private void DrawTitle(SKBitmap bb, string title)
     {
         using var c = new SKCanvas(bb);
         var h = Math.Max(10f, bb.Height * 0.12f);
         using var bg = new SKPaint { Color = new SKColor(0, 0, 0, 140) };
         c.DrawRect(0, bb.Height - h - 8, bb.Width, h + 8, bg);
-        using var font = new SKFont(SKTypeface.Default, h * 0.75f);
-        using var paint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-        c.DrawText(title, 6, bb.Height - 10, font, paint);
+        CanvasText.Draw(c, _canvas, title, SKColors.White, 6, bb.Height - 10,
+            CanvasText.ResolveSize(FontSize, h * 0.75f),
+            SKTextAlign.Left, UseBdfFont);
     }
 
     private void StopFFmpeg()

@@ -72,6 +72,14 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
         DefaultValue = true)]
     public bool ShowNumbers { get; set; } = true;
 
+    [ExtensionParameter("Use BDF Font", "Render hour numerals with the crisp bitmap (BDF) font",
+        DefaultValue = false)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "Numeral height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 48, Unit = "px")]
+    public int FontSize { get; set; }
+
     [ExtensionParameter("Show Tick Marks", "Display minute/hour tick marks",
         DefaultValue = true)]
     public bool ShowTickMarks { get; set; } = true;
@@ -598,24 +606,14 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
         // Vintage numbers
         if (ShowNumbers)
         {
-            var fontSize = Math.Max(10, Math.Min(16, (int)(radius / 4)));
-            using var font = new SKFont
-            {
-                Size = fontSize,
-                Typeface = SKTypeface.FromFamilyName("Serif", SKFontStyle.Bold)
-            };
-            using var textPaint = new SKPaint
-            {
-                Color = new SKColor(139, 69, 19),
-                IsAntialias = true
-            };
-
+            var fontSize = CanvasText.ResolveSize(FontSize, Math.Max(10, Math.Min(16, (int)(radius / 4))));
             for (var i = 1; i <= 12; i++)
             {
                 var angle = (i * 30 - 90) * Math.PI / 180;
                 var x = centerX + (float)(Math.Cos(angle) * (radius - 25));
                 var y = centerY + (float)(Math.Sin(angle) * (radius - 25)) + fontSize / 3;
-                canvas.DrawText(i.ToString(), x, y, SKTextAlign.Center, font, textPaint);
+                CanvasText.Draw(canvas, _canvas, i.ToString(), new SKColor(139, 69, 19), x, y, fontSize,
+                    SKTextAlign.Center, UseBdfFont);
             }
         }
 
@@ -653,16 +651,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
 
     private void DrawNumbers(SKCanvas canvas, float centerX, float centerY, float radius, bool counterClockwise = false)
     {
-        var fontSize = Math.Max(8, Math.Min(16, (int)(radius / 4)));
-        using var font = new SKFont
-        {
-            Size = fontSize
-        };
-        using var textPaint = new SKPaint
-        {
-            Color = MarkingsColor,
-            IsAntialias = true
-        };
+        var fontSize = CanvasText.ResolveSize(FontSize, Math.Max(8, Math.Min(16, (int)(radius / 4))));
 
         for (var i = 1; i <= 12; i++)
         {
@@ -674,25 +663,15 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
             var x = centerX + (float)(Math.Cos(angle) * (radius - 20));
             var y = centerY + (float)(Math.Sin(angle) * (radius - 20)) + fontSize / 3;
 
-            canvas.DrawText(displayNum.ToString(), x, y, SKTextAlign.Center, font, textPaint);
+            CanvasText.Draw(canvas, _canvas, displayNum.ToString(), MarkingsColor, x, y, fontSize,
+                SKTextAlign.Center, UseBdfFont);
         }
     }
 
     private void DrawRomanNumerals(SKCanvas canvas, float centerX, float centerY, float radius)
     {
         var numerals = new[] { "XII", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI" };
-        var fontSize = Math.Max(8, Math.Min(16, (int)(radius / 4)));
-
-        using var font = new SKFont
-        {
-            Size = fontSize,
-            Typeface = SKTypeface.FromFamilyName("Serif")
-        };
-        using var textPaint = new SKPaint
-        {
-            Color = MarkingsColor,
-            IsAntialias = true
-        };
+        var fontSize = CanvasText.ResolveSize(FontSize, Math.Max(8, Math.Min(16, (int)(radius / 4))));
 
         for (var i = 0; i < 12; i++)
         {
@@ -700,7 +679,8 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
             var x = centerX + (float)(Math.Cos(angle) * (radius - 22));
             var y = centerY + (float)(Math.Sin(angle) * (radius - 22)) + fontSize / 3;
 
-            canvas.DrawText(numerals[i], x, y, SKTextAlign.Center, font, textPaint);
+            CanvasText.Draw(canvas, _canvas, numerals[i], MarkingsColor, x, y, fontSize,
+                SKTextAlign.Center, UseBdfFont);
         }
     }
 

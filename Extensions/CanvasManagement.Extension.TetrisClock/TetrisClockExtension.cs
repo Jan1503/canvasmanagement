@@ -33,10 +33,7 @@ public class TetrisClockExtension : IDisposable
 
     private readonly ICanvas _canvas;
 
-    private readonly Dictionary<int, int> _currentNumbers = new();
-
-    private readonly bool _drawOutline = false;
-    private readonly SKColor _outlineColor = SKColors.Lime;
+    private readonly DigitSlot[] _slots = [new(), new(), new(), new(), new(), new()];
     private readonly Random _random = new();
 
     // Pre-generated random color palette (eliminates SKColor allocations)
@@ -59,6 +56,8 @@ public class TetrisClockExtension : IDisposable
 
     private int _scale = 5;
     private bool _showColon = true;
+    private SKPaint? _fillPaint;
+    private SKCanvas? _draw;
 
     internal TetrisClockExtension(ICanvas canvas)
     {
@@ -121,20 +120,18 @@ public class TetrisClockExtension : IDisposable
     /// <summary>
     ///     Animation delay (ms per frame)
     /// </summary>
-    [ExtensionParameter("Animation Speed", "Delay between animation frames in milliseconds",
+    [ExtensionParameter("Animation Speed", "Delay between animation frames in milliseconds (hours/minutes)",
         MinValue = 1, MaxValue = 100, DefaultValue = 10)]
     public int AnimationDelay
     {
         get => _animationDelay;
-        set
-        {
-            if (_animationDelay != value)
-            {
-                _animationDelay = value;
-                Refresh();
-            }
-        }
+        set => _animationDelay = Math.Clamp(value, 1, 100);
     }
+
+    [ExtensionParameter("Seconds Fall Delay",
+        "Delay per frame for the seconds digit in milliseconds. Lower so the drop finishes before the next second.",
+        MinValue = 1, MaxValue = 50, DefaultValue = 1)]
+    public int SecondsFallDelay { get; set; } = 1;
 
     /// <summary>
     ///     Use random colors for blocks
@@ -249,11 +246,13 @@ public class TetrisClockExtension : IDisposable
         if (IsRunning) return;
 
         IsRunning = true;
+        foreach (var s in _slots) s.Reset();
 
-        // Create back buffer
         _backBuffer?.Dispose();
         _backBuffer = new SKBitmap(new SKImageInfo(_canvas.Width, _canvas.Height,
             SKColorType.Bgra8888, SKAlphaType.Premul));
+        _fillPaint?.Dispose();
+        _fillPaint = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = false };
 
         _cancellationTokenSource = new CancellationTokenSource();
         var ct = _cancellationTokenSource.Token;
@@ -263,38 +262,26 @@ public class TetrisClockExtension : IDisposable
             try
             {
                 var lastTime = "";
-
-                // Initial clear with background
-                if (_backgroundColor.Alpha > 0)
-                    _canvas.Clear(_backgroundColor);
-                else
-                    _canvas.Clear(SKColors.Transparent);
-
+                var lastTick = Environment.TickCount64;
                 while (!ct.IsCancellationRequested)
                 {
-                    // Only update when time actually changes (optimization)
                     var currentTime = DateTime.Now.ToString("HHmmss");
-
                     if (currentTime != lastTime)
                     {
-                        SetNumbers(null, DigitSpacing, ClockX, ClockY,
-                            BlockScale,
-                            AnimationDelay,
-                            RandomColors,
-                            false,
-                            true,
-                            ct);
-
+                        SyncDigits(currentTime);
                         lastTime = currentTime;
                     }
 
-                    // Check every 100ms for responsive updates
-                    await Task.Delay(100, ct);
+                    var now = Environment.TickCount64;
+                    var dt = (int)Math.Clamp(now - lastTick, 1, 50);
+                    lastTick = now;
+                    StepDigits(dt);
+                    RenderFrame();
+                    await Task.Delay(16, ct);
                 }
             }
             catch (OperationCanceledException)
             {
-                // Expected when cancellation is requested
             }
             finally
             {
@@ -324,200 +311,174 @@ public class TetrisClockExtension : IDisposable
             _animationTask = null;
             _backBuffer?.Dispose();
             _backBuffer = null;
+            _fillPaint?.Dispose();
+            _fillPaint = null;
             _canvas.Clear();
             IsRunning = false;
         }
     }
 
-    /// <summary>
-    ///     Clear all cached number states to force refresh
-    /// </summary>
     public void Refresh()
     {
-        _currentNumbers.Clear();
-        //_canvas.Clear();
+        foreach (var s in _slots) s.Reset();
         Stop();
         Start();
     }
 
-    /// <summary>
-    ///     Draw numbers with Tetris animation
-    /// </summary>
-    /// <param name="value">Number to display (null for clock mode)</param>
-    /// <param name="spacing">Spacing between digits</param>
-    /// <param name="x">X position</param>
-    /// <param name="y">Y position</param>
-    /// <param name="scale">Block scale</param>
-    /// <param name="delay">Animation delay (0 for random)</param>
-    /// <param name="randomColors">Use random colors</param>
-    /// <param name="forceRefresh">Force redraw all digits</param>
-    /// <param name="clockMode">Display current time in HH:MM:SS format</param>
-    public void SetNumbers(int? value, int spacing, int x, int y, int scale = 5, int delay = 0,
-        bool randomColors = true, bool forceRefresh = false, bool clockMode = false, CancellationToken ct = default)
+    private void SyncDigits(string hhmmss)
     {
-        if (!clockMode && value is null)
-            throw new ArgumentNullException(nameof(value), "You need to provide a value if 'clockMode' is false.");
-
-        // Avoid string allocations for clock mode
-        Span<char> valueChars = stackalloc char[10];
-        int valueLength;
-
-        if (clockMode)
+        for (var i = 0; i < 6; i++)
         {
-            var now = DateTime.Now;
-            valueChars[0] = (char)('0' + now.Hour / 10);
-            valueChars[1] = (char)('0' + now.Hour % 10);
-            valueChars[2] = (char)('0' + now.Minute / 10);
-            valueChars[3] = (char)('0' + now.Minute % 10);
-            valueChars[4] = (char)('0' + now.Second / 10);
-            valueChars[5] = (char)('0' + now.Second % 10);
-            valueLength = 6;
+            var n = hhmmss[i] - '0';
+            var delay = i == 5 ? SecondsFallDelay : AnimationDelay;
+            if (_slots[i].Value == n && !_slots[i].Animating) continue;
+            if (_slots[i].Value == n && _slots[i].Animating) continue;
+
+            _slots[i].Begin(n, Math.Max(1, delay), PickColor(n, 0));
         }
+    }
+
+    private SKColor PickColor(int number, int blockIndex)
+    {
+        if (RandomColors) return _randomColorPalette[_random.Next(256)];
+        var frag = TetrisNumber.GetAnimationFragment(number, blockIndex);
+        return TetrisColors[Math.Clamp(frag.Color, 0, TetrisColors.Length - 1)];
+    }
+
+    private void StepDigits(int dtMs)
+    {
+        foreach (var slot in _slots)
+        {
+            if (!slot.Animating) continue;
+            slot.AccruedMs += dtMs;
+            var delay = Math.Max(1, slot.StepDelayMs);
+            while (slot.Animating && slot.AccruedMs >= delay)
+            {
+                slot.AccruedMs -= delay;
+                AdvanceSlot(slot);
+            }
+        }
+    }
+
+    private void RenderFrame()
+    {
+        var bb = _backBuffer;
+        if (bb == null || _fillPaint == null) return;
+
+        using var canvas = new SKCanvas(bb);
+        if (_backgroundColor.Alpha > 0)
+            canvas.Clear(_backgroundColor);
         else
+            canvas.Clear(SKColors.Transparent);
+
+        var x = ClockX;
+        var y = ClockY;
+        var spacing = DigitSpacing;
+        for (var i = 0; i < 6; i++)
         {
-            var valueStr = value!.Value.ToString();
-            valueStr.AsSpan().CopyTo(valueChars);
-            valueLength = valueStr.Length;
-        }
-
-        var xOffset = 0;
-        _scale = scale;
-
-        for (var i = 0; i < valueLength; i++)
-        {
-            var number = valueChars[i] - '0';
-            var fallingDelay = delay == 0 ? _random.Next(1, 50) : delay;
-
-            if (clockMode && ShowColon && i is 2 or 4)
+            if (ShowColon && i is 2 or 4)
             {
-                DrawColon(x + xOffset, y, ColonColor);
-                xOffset += spacing / 2;
+                DrawColon(canvas, x, y, ColonColor);
+                x += spacing / 2;
             }
 
-            if (forceRefresh || !_currentNumbers.ContainsKey(i) || _currentNumbers[i] != number)
-            {
-                if (_currentNumbers.ContainsKey(i)) _currentNumbers.Remove(i);
-
-                _currentNumbers.Add(i, number);
-                _ = DrawNumberAsync(number, x + xOffset, y, clockMode && i is 5 ? 1 : fallingDelay, randomColors, ct);
-            }
-
-            xOffset += spacing;
+            DrawDigit(canvas, _slots[i], x, y);
+            x += spacing;
         }
+
+        canvas.Flush();
+        _canvas.SubmitCompletedFrame(bb);
     }
 
-    /// <summary>
-    ///     Set numbers without animation (backward compatibility)
-    /// </summary>
-    [Obsolete("Use SetNumbers with all parameters for better control")]
-    public void SetNumbers(int value, bool forceRefresh)
+    private void DrawDigit(SKCanvas canvas, DigitSlot slot, int x, int yFinish)
     {
-        SetNumbers(value, DigitSpacing, 0, 0, BlockScale, AnimationDelay, RandomColors, forceRefresh);
+        if (slot.Value < 0) return;
+        var dropTop = yFinish - TETRIS_Y_DROP_DEFAULT * _scale;
+        foreach (var b in slot.Landed)
+            DrawShape(canvas, _scale, b.BlockType, b.Color,
+                x + b.XPos * _scale,
+                RestY(dropTop, b.YStop),
+                RestRot(b.NumRot, b.YStop - 1, b.YStop));
+
+        if (!slot.Animating) return;
+        var frag = TetrisNumber.GetAnimationFragment(slot.Value, slot.BlockIndex);
+        var fallIndex = Math.Max(0, slot.FallIndex);
+        var rot = RestRot(frag.NumRot, fallIndex, frag.YStop);
+        DrawShape(canvas, _scale, frag.BlockType, slot.FallingColor,
+            x + frag.XPos * _scale,
+            dropTop + fallIndex * _scale - _scale,
+            rot);
     }
 
-    /// <summary>
-    ///     Draw numbers async (backward compatibility)
-    /// </summary>
-    [Obsolete("Use DrawNumberAsync instead")]
-    public async Task<bool> DrawNumbersAsync(int x, int yFinish, bool displayColon)
+    private int RestY(int dropTop, int yStop)
     {
-        // Simple sync version for backward compatibility
-        return true;
+        var fallIndex = Math.Max(0, yStop - 1);
+        return dropTop + fallIndex * _scale - _scale;
     }
 
-    /// <summary>
-    ///     Draw a single animated number
-    /// </summary>
-    public async Task DrawNumberAsync(int number, int x, int yFinish, int delay, bool randomColor = true,
-        CancellationToken ct = default)
+    private static int RestRot(int numRot, int fallIndex, int yStop)
     {
-        if (ct.IsCancellationRequested) return;
-
-        var scaledYOffset = _scale > 1 ? _scale : 1;
-        var y = yFinish - TETRIS_Y_DROP_DEFAULT * _scale;
-        var transparent = _backgroundColor.Alpha == 0;
-
-        if (number is >= 0 and < 10)
+        var rotations = numRot;
+        if (rotations == 1 && fallIndex < yStop / 2) rotations = 0;
+        if (rotations == 2)
         {
-            // Clear the digit area (to transparent when the background is transparent, so layers show through).
-            if (transparent)
-                _canvas.ClearRect(x, y, 6 * _scale, TETRIS_Y_DROP_DEFAULT * _scale);
-            else
-                _canvas.DrawRect(x, y, 6 * _scale, TETRIS_Y_DROP_DEFAULT * _scale, _backgroundColor, SKPaintStyle.Fill);
-
-            for (var blockIndex = 0; blockIndex < TetrisNumber.BlocksPerNumber[number]; blockIndex++)
-            {
-                var currentState = TetrisNumber.GetAnimationFragment(number, blockIndex);
-
-                var blockColor = randomColor
-                    ? _randomColorPalette[_random.Next(256)]
-                    : TetrisColors[currentState.Color];
-
-                int prevX = -1, prevY = -1, prevRot = -1;
-
-                for (var fallIndex = 0; fallIndex < currentState.YStop; fallIndex++)
-                {
-                    if (ct.IsCancellationRequested) return;
-                    var rotations = currentState.NumRot;
-                    if (rotations == 1)
-                        if (fallIndex < currentState.YStop / 2)
-                            rotations = 0;
-
-                    if (rotations == 2)
-                    {
-                        if (fallIndex < currentState.YStop / 3) rotations = 0;
-                        if (fallIndex < currentState.YStop / 3 * 2) rotations = 1;
-                    }
-
-                    if (rotations == 3)
-                    {
-                        if (fallIndex < currentState.YStop / 4) rotations = 0;
-                        if (fallIndex < currentState.YStop / 4 * 2) rotations = 1;
-                        if (fallIndex < currentState.YStop / 4 * 3) rotations = 2;
-                    }
-
-                    if (prevX >= 0 && fallIndex != 0)
-                        // Erase the previous block precisely: transparent (alpha 0) erases each cell to
-                        // transparent (see the cell-level DrawShape); otherwise paint it black.
-                        DrawShape(_scale, currentState.BlockType,
-                            transparent ? SKColors.Transparent : SKColors.Black, prevX, prevY, prevRot);
-
-                    var currentX = x + currentState.XPos * _scale;
-                    var currentY = y + fallIndex * scaledYOffset - scaledYOffset;
-
-                    DrawShape(_scale, currentState.BlockType, blockColor,
-                        currentX, currentY, rotations);
-
-                    prevX = currentX;
-                    prevY = currentY;
-                    prevRot = rotations;
-
-                    if (delay != -1)
-                        await Task.Delay(delay);
-                }
-            }
+            if (fallIndex < yStop / 3) rotations = 0;
+            else if (fallIndex < yStop / 3 * 2) rotations = 1;
         }
+
+        if (numRot == 3)
+        {
+            rotations = numRot;
+            if (fallIndex < yStop / 4) rotations = 0;
+            else if (fallIndex < yStop / 4 * 2) rotations = 1;
+            else if (fallIndex < yStop / 4 * 3) rotations = 2;
+        }
+
+        return rotations;
     }
 
-    private void DrawColon(int x, int y, SKColor colonColor)
+    private void AdvanceSlot(DigitSlot slot)
     {
+        var frag = TetrisNumber.GetAnimationFragment(slot.Value, slot.BlockIndex);
+        if (slot.FallIndex + 1 >= frag.YStop)
+        {
+            slot.Landed.Add(new LandedBlock(frag.BlockType, frag.XPos, frag.YStop, frag.NumRot, slot.FallingColor));
+            slot.BlockIndex++;
+            slot.FallIndex = 0;
+            if (slot.BlockIndex >= TetrisNumber.BlocksPerNumber[slot.Value])
+            {
+                slot.Animating = false;
+                return;
+            }
+
+            slot.FallingColor = PickColor(slot.Value, slot.BlockIndex);
+            return;
+        }
+
+        slot.FallIndex++;
+    }
+
+    private void DrawColon(SKCanvas canvas, int x, int y, SKColor colonColor)
+    {
+        if (_fillPaint == null) return;
+        _fillPaint.Color = colonColor;
         var colonSize = 2 * _scale;
-        _canvas.DrawRect(x, y - 9 * _scale, colonSize, colonSize, colonColor, SKPaintStyle.Fill);
-        _canvas.DrawRect(x, y - 6 * _scale, colonSize, colonSize, colonColor, SKPaintStyle.Fill);
+        canvas.DrawRect(x, y - 9 * _scale, colonSize, colonSize, _fillPaint);
+        canvas.DrawRect(x, y - 6 * _scale, colonSize, colonSize, _fillPaint);
+    }
+
+    private void DrawShape(SKCanvas canvas, int scale, int blockType, SKColor color, int xPos, int yPos,
+        int numberOfRotations)
+    {
+        _draw = canvas;
+        DrawShape(scale, blockType, color, xPos, yPos, numberOfRotations);
     }
 
     private void DrawShape(int xPos, int yPos, int scale, SKColor color)
     {
-        // A transparent (alpha 0) colour means "erase this cell" — clear it to transparent so a transparent
-        // background reveals the layer beneath (a plain fill with a transparent colour would be a no-op).
-        if (color.Alpha == 0)
-        {
-            _canvas.ClearRect(xPos, yPos, scale, scale);
-            return;
-        }
-
-        _canvas.DrawRect(xPos, yPos, scale, scale, color, SKPaintStyle.Fill);
-        if (_drawOutline) _canvas.DrawRect(xPos, yPos, scale, scale, _outlineColor, SKPaintStyle.Stroke);
+        if (_draw == null || _fillPaint == null || color.Alpha == 0) return;
+        _fillPaint.Color = color;
+        _draw.DrawRect(xPos, yPos, scale, scale, _fillPaint);
     }
 
     public void DrawShape(int scale, int blockType, SKColor color, int xPos, int yPos, int numberOfRotations)
@@ -673,4 +634,40 @@ public class TetrisClockExtension : IDisposable
                 break;
         }
     }
+
+    private sealed class DigitSlot
+    {
+        public int Value = -1;
+        public bool Animating;
+        public int BlockIndex;
+        public int FallIndex;
+        public int AccruedMs;
+        public int StepDelayMs = 1;
+        public SKColor FallingColor;
+        public readonly List<LandedBlock> Landed = new();
+
+        public void Reset()
+        {
+            Value = -1;
+            Animating = false;
+            BlockIndex = 0;
+            FallIndex = 0;
+            AccruedMs = 0;
+            Landed.Clear();
+        }
+
+        public void Begin(int value, int delayMs, SKColor color)
+        {
+            Value = value;
+            Animating = true;
+            BlockIndex = 0;
+            FallIndex = 0;
+            AccruedMs = 0;
+            StepDelayMs = delayMs;
+            FallingColor = color;
+            Landed.Clear();
+        }
+    }
+
+    private readonly record struct LandedBlock(int BlockType, int XPos, int YStop, int NumRot, SKColor Color);
 }

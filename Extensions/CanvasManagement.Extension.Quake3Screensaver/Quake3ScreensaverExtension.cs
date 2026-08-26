@@ -135,6 +135,13 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
         DefaultValue = true)]
     public bool ShowText { get; set; } = true;
 
+    [ExtensionParameter("Use BDF Font", "Render quotes with the crisp bitmap (BDF) font", DefaultValue = false)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "Quote height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 48, Unit = "px")]
+    public int FontSize { get; set; }
+
     [ExtensionParameter("Custom Text", "Custom text to display (empty for random quotes)",
         DefaultValue = "")]
     public string CustomText { get; set; } = string.Empty;
@@ -515,19 +522,10 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
 
         try
         {
-            // Always use SKCanvas text rendering for the back buffer
-            // BDF text would draw to the ICanvas internal buffer, not our back buffer
-            using var typeface = SKTypeface.FromFamilyName("Consolas", SKFontStyle.Bold);
-            using var font = new SKFont(typeface ?? SKTypeface.Default, Math.Max(5f, _canvas.ScaleSizeF(10)));
-            using var paint = new SKPaint
-            {
-                Color = textColor,
-                IsAntialias = false
-            };
-            
-            var textWidth = font.MeasureText(text);
+            var size = CanvasText.ResolveSize(FontSize, Math.Max(5f, _canvas.ScaleSizeF(10)));
+            var textWidth = CanvasText.Measure(_canvas, text, size, UseBdfFont);
             var textX = (_canvas.Width - textWidth) / 2;
-            canvas.DrawText(text, textX, textY, SKTextAlign.Left, font, paint);
+            CanvasText.Draw(canvas, _canvas, text, textColor, textX, textY, size, SKTextAlign.Left, UseBdfFont);
         }
         catch (Exception ex)
         {

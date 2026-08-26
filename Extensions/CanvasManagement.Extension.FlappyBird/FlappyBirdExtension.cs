@@ -6,23 +6,64 @@ using Timer = System.Timers.Timer;
 namespace CanvasManagement.Extension.FlappyBird;
 
 /// <summary>
-///     Self-playing Flappy Bird: the bird auto-flaps to thread the pipe gaps. Scales to any panel; the flap
-///     decision is a single call so a controller can replace the AI later.
+///     Flappy Bird with pixel-art bird, pipes and ground. Autopilot until a key is pressed in Studio
+///     (Space / Up), then the player takes over.
 /// </summary>
 [ExtensionInfo("Flappy Bird",
-    "The flappy bird game, played automatically",
+    "Flappy Bird — autopilot, or play with Space / Up in Studio",
     "Games",
     IconResourceName = "flappy-bird.svg")]
 public class FlappyBirdExtension : ICanvasExtension, IDisposable
 {
+    // d outline, y body, B belly, o/n beak, w/k eye, r wing, p blush, .=empty
+    private static readonly string[] BirdUp =
+    {
+        ".....dddddd.....",
+        "...ddyyyyyydd...",
+        "..dyyyyyyyyyyd..",
+        ".dyywwkkyyyyyyd.",
+        ".dyywwkkyyyyyyod",
+        "ddyyyyypyyyyynod",
+        "dyyBBBBBBBByyynd",
+        "dyyBBBBBBBByyyd.",
+        "drrrryyyyyyyyd..",
+        ".drrrdddddddd...",
+        "..ddd..........."
+    };
+
+    private static readonly string[] BirdDown =
+    {
+        ".....dddddd.....",
+        "...ddyyyyyydd...",
+        "..dyyyyyyyyyyd..",
+        ".dyywwkkyyyyyyd.",
+        ".dyywwkkyyyyyyod",
+        "ddyyyyypyyyyynod",
+        "dyyBBBBBBBByyynd",
+        "dyyBBBBBBBByyyd.",
+        "dyyyyyyrrrrrd...",
+        ".dddddrrrrrd....",
+        ".......dddd....."
+    };
+
+    private static readonly string[] Cloud =
+    {
+        "...11111....",
+        ".111111111..",
+        "11111111111.",
+        ".1111111111."
+    };
+
     private readonly ICanvas _canvas;
     private readonly object _lock = new();
     private readonly Random _random = new();
     private readonly List<Pipe> _pipes = new();
+    private readonly List<CloudPos> _clouds = new();
 
     private SKBitmap? _backBuffer;
     private Timer? _timer;
     private float _scale = 1f;
+    private int _px = 2;
     private int _frame;
 
     private float _birdX;
@@ -30,15 +71,17 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
     private float _vy;
     private float _gravity;
     private float _flapV;
-    private int _birdR;
+    private int _birdW, _birdH;
+    private float _hitR;
 
     private float _pipeW;
     private float _gap;
     private float _speed;
-    private float _spawnX;
+    private int _groundH;
     private int _score;
     private int _best;
     private int _crashTimer;
+    private bool _human;
 
     internal FlappyBirdExtension(ICanvas canvas)
     {
@@ -49,9 +92,9 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         MinValue = 16, MaxValue = 80, Unit = "ms", Order = 1)]
     public int GameSpeed { get; set; } = 30;
 
-    [ExtensionParameter("Gap Size", "Pipe gap (% of height)", DefaultValue = 38, MinValue = 22, MaxValue = 55,
+    [ExtensionParameter("Gap Size", "Pipe gap (% of play area)", DefaultValue = 42, MinValue = 28, MaxValue = 58,
         Unit = "%", Order = 2)]
-    public int GapPercent { get; set; } = 38;
+    public int GapPercent { get; set; } = 42;
 
     [ExtensionParameter("Difficulty", "Scroll speed & pipe spacing", DefaultValue = 3, MinValue = 1, MaxValue = 10,
         Order = 3)]
@@ -60,8 +103,21 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Show Score", "Show the score", DefaultValue = true, Order = 4)]
     public bool ShowScore { get; set; } = true;
 
+    [ExtensionParameter("Use BDF Font", "Render the score with the crisp bitmap (BDF) font", DefaultValue = false,
+        Order = 5)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "Score height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 48, Unit = "px", Order = 6)]
+    public int FontSize { get; set; }
+
+    [ExtensionParameter("Auto Pilot", "AI flies until you press a key in Studio", DefaultValue = true, Order = 7)]
+    public bool AutoPilot { get; set; } = true;
+
     public string Name => "Flappy Bird";
     public bool IsRunning { get; private set; }
+
+    private float PlayH => _canvas.Height - _groundH;
 
     public void Dispose()
     {
@@ -76,6 +132,8 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         {
             if (IsRunning) return;
             _scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
+            _px = Math.Max(1, (int)Math.Round(_canvas.Height / 64f));
+            _human = false;
             Reset();
             _backBuffer?.Dispose();
             _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
@@ -104,22 +162,40 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
 
     private void Reset()
     {
-        _birdR = Math.Max(2, (int)Math.Round(4 * _scale));
-        _birdX = _canvas.Width * 0.28f;
-        _birdY = _canvas.Height * 0.45f;
+        _groundH = Math.Max(8, _canvas.Height * 14 / 100);
+        _px = Math.Max(1, (int)Math.Round(_canvas.Height / 64f));
+        _birdW = BirdUp[0].Length * _px;
+        _birdH = BirdUp.Length * _px;
+        _hitR = Math.Max(2f, Math.Min(_birdW, _birdH) * 0.28f);
+        _birdX = _canvas.Width * 0.26f;
+        _birdY = PlayH * 0.45f;
         _vy = 0;
-        _pipeW = Math.Max(6, 12 * _scale);
-        _gap = _canvas.Height * (GapPercent / 100f);
-        // Tie physics to the gap so a single flap bobs the bird ~1/3 of the gap (tight, controllable arc)
-        // instead of a weak-gravity flap that overshoots out the top.
-        _gravity = Math.Max(0.12f, _gap * 0.02f);
-        _flapV = -Math.Max(1.8f, _gap * 0.12f);
-        _speed = Math.Max(1.2f, (1.5f + Difficulty * 0.25f) * _scale);
+        _pipeW = Math.Max(8, 7 * _px);
+        TunePhysics();
         _pipes.Clear();
-        _spawnX = _canvas.Width + _pipeW;
+        _clouds.Clear();
+        for (var i = 0; i < 3; i++)
+            _clouds.Add(new CloudPos
+            {
+                X = i * _canvas.Width / 3f + _random.Next(20),
+                Y = 4 + _random.Next(Math.Max(4, (int)(PlayH * 0.28f)))
+            });
         _score = 0;
         _crashTimer = 0;
-        SpawnPipe(_canvas.Width * 0.9f);
+        // First pipe well to the right, gap near centre so the opening is readable.
+        SpawnPipe(_canvas.Width + _pipeW, centerBias: 0.85f);
+    }
+
+    private void TunePhysics()
+    {
+        _gap = PlayH * (GapPercent / 100f);
+        var minGap = _hitR * 5f + 6 * _px;
+        _gap = Math.Clamp(_gap, minGap, PlayH * 0.62f);
+        // One flap peaks at ~30% of the gap — controllable, not a ceiling slam.
+        _gravity = Math.Max(0.16f, PlayH * 0.0038f);
+        var apex = _gap * 0.30f;
+        _flapV = -(float)Math.Sqrt(Math.Max(0.5, 2 * _gravity * apex));
+        _speed = Math.Max(1.1f, (1.35f + Difficulty * 0.18f) * Math.Max(0.45f, _scale * 1.4f));
     }
 
     private void OnTick(object? sender, ElapsedEventArgs e)
@@ -153,70 +229,171 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
 
     private void Update()
     {
-        _gap = _canvas.Height * (GapPercent / 100f);
-        _gravity = Math.Max(0.12f, _gap * 0.02f);
-        _flapV = -Math.Max(1.8f, _gap * 0.12f);
-        _speed = Math.Max(1.2f, (1.5f + Difficulty * 0.25f) * _scale);
+        TunePhysics();
 
-        // Spacing between pipes scales with gap/difficulty.
-        var spacing = _canvas.Width * (0.55f - Difficulty * 0.02f);
+        var spacing = _canvas.Width * (0.48f - Difficulty * 0.015f);
+        spacing = Math.Max(spacing, _pipeW * 4f + _birdW);
         if (_pipes.Count == 0 || _canvas.Width - _pipes[^1].X > spacing)
-            SpawnPipe(_canvas.Width + _pipeW);
+            SpawnPipe(_canvas.Width + _pipeW, centerBias: _score < 2 ? 0.55f : 0.15f);
 
         for (var i = _pipes.Count - 1; i >= 0; i--)
         {
             var p = _pipes[i];
             p.X -= _speed;
-            if (!p.Scored && p.X + _pipeW < _birdX) { p.Scored = true; _score++; _best = Math.Max(_best, _score); }
+            if (!p.Scored && p.X + _pipeW < _birdX)
+            {
+                p.Scored = true;
+                _score++;
+                _best = Math.Max(_best, _score);
+            }
+
             _pipes[i] = p;
-            if (p.X + _pipeW < 0) _pipes.RemoveAt(i);
+            if (p.X + _pipeW < -4) _pipes.RemoveAt(i);
         }
 
-        RunAi();
+        for (var i = 0; i < _clouds.Count; i++)
+        {
+            var c = _clouds[i];
+            c.X -= _speed * 0.22f;
+            if (c.X + 14 * _px < 0)
+            {
+                c.X = _canvas.Width + _random.Next(30);
+                c.Y = 4 + _random.Next(Math.Max(4, (int)(PlayH * 0.28f)));
+            }
+
+            _clouds[i] = c;
+        }
+
+        if (AutoPilot && !_human) RunAi();
 
         _vy += _gravity;
         _birdY += _vy;
 
-        // Collisions: ground/ceiling + pipes.
-        if (_birdY - _birdR < 0 || _birdY + _birdR > _canvas.Height) { Crash(); return; }
+        if (_birdY - _hitR < 1 || _birdY + _hitR > PlayH - 1)
+        {
+            Crash();
+            return;
+        }
+
         foreach (var p in _pipes)
         {
-            if (_birdX + _birdR < p.X || _birdX - _birdR > p.X + _pipeW) continue;
-            if (_birdY - _birdR < p.GapTop || _birdY + _birdR > p.GapTop + _gap) { Crash(); return; }
+            if (_birdX + _hitR < p.X || _birdX - _hitR > p.X + _pipeW) continue;
+            if (_birdY - _hitR < p.GapTop || _birdY + _hitR > p.GapTop + _gap)
+            {
+                Crash();
+                return;
+            }
         }
     }
 
     private void RunAi()
     {
-        // Aim for the centre of the NEXT gap and flap when our near-future position would sink below it.
-        var aim = _canvas.Height * 0.5f;
+        Pipe? next = null;
         foreach (var p in _pipes)
         {
-            if (p.X + _pipeW < _birdX - _birdR) continue; // already passed
-            aim = p.GapTop + _gap * 0.5f;
+            if (p.X + _pipeW < _birdX - _hitR) continue;
+            next = p;
             break;
         }
 
-        // Don't flap into the ceiling.
-        if (_birdY <= _birdR * 2 && _vy < 0) return;
+        var target = PlayH * 0.45f;
+        var gapTop = 2f;
+        var gapBot = PlayH - 2f;
+        var frames = 8;
+        if (next != null)
+        {
+            var p = next.Value;
+            gapTop = p.GapTop;
+            gapBot = p.GapTop + _gap;
+            target = p.GapTop + _gap * 0.42f;
+            var dist = p.X - (_birdX + _hitR);
+            var through = (dist + _pipeW + _hitR * 2f) / Math.Max(0.5f, _speed);
+            frames = Math.Clamp((int)Math.Ceiling(through), 2, 28);
+        }
 
-        if (_birdY + _vy * 2f > aim) Flap();
+        if (_vy < 0 && _birdY - _hitR <= gapTop + _hitR + _px)
+            return;
+
+        // Far from the pipe: hold altitude near the upcoming gap. A single flap does not last
+        // 20+ frames, so last-moment simulation only kicks in when we are actually at the pipe.
+        if (next == null || frames > 12)
+        {
+            if (_birdY > target + Math.Max(2f, _hitR * 0.6f) && _vy >= 0)
+                DoFlap();
+            return;
+        }
+
+        if (FlapClears(0, frames, gapTop, gapBot))
+        {
+            if (!FlapClears(1, frames, gapTop, gapBot))
+                DoFlap();
+            return;
+        }
+
+        if (_vy > 0 && _birdY > target)
+            DoFlap();
     }
 
-    private void Flap()
+    /// <summary>
+    ///     True if flapping after <paramref name="wait"/> idle frames keeps the bird inside the gap
+    ///     for <paramref name="frames"/> steps (through the pipe).
+    /// </summary>
+    private bool FlapClears(int wait, int frames, float gapTop, float gapBot)
     {
-        _vy = _flapV;
+        var y = _birdY;
+        var v = _vy;
+        var margin = _hitR + Math.Max(1, _px);
+        var pipeStart = Math.Max(0,
+            frames - (int)Math.Ceiling((_pipeW + _hitR * 2f) / Math.Max(0.5f, _speed)) - 1);
+
+        for (var i = 0; i < frames; i++)
+        {
+            if (i == wait)
+                v = _flapV;
+            v += _gravity;
+            y += v;
+
+            if (y - _hitR < 1 || y + _hitR > PlayH - 1)
+                return false;
+
+            if (i >= pipeStart && (y - margin <= gapTop || y + margin >= gapBot))
+                return false;
+        }
+
+        return true;
     }
 
-    private void Crash()
+    private void DoFlap() => _vy = _flapV;
+
+    [ExtensionMethod("Flap", "Flap the bird — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Space|Up", Order = 1)]
+    public void Flap()
     {
-        _crashTimer = 30;
+        lock (_lock)
+        {
+            _human = true;
+            if (_crashTimer > 0)
+            {
+                _crashTimer = 0;
+                Reset();
+            }
+
+            DoFlap();
+        }
     }
 
-    private void SpawnPipe(float x)
+    private void Crash() => _crashTimer = 32;
+
+    private void SpawnPipe(float x, float centerBias)
     {
-        var margin = _canvas.Height * 0.12f;
-        var gapTop = margin + (float)_random.NextDouble() * (_canvas.Height - _gap - margin * 2);
+        var margin = Math.Max(_hitR * 2.5f, PlayH * 0.1f);
+        var lo = margin;
+        var hi = PlayH - _gap - margin;
+        if (hi < lo) { lo = 2; hi = Math.Max(lo + 1, PlayH - _gap - 2); }
+        var randomTop = lo + (float)_random.NextDouble() * (hi - lo);
+        var centerTop = (PlayH - _gap) * 0.5f;
+        var gapTop = randomTop + (centerTop - randomTop) * Math.Clamp(centerBias, 0, 1);
+        gapTop = Math.Clamp(gapTop, lo, hi);
         _pipes.Add(new Pipe { X = x, GapTop = gapTop, Scored = false });
     }
 
@@ -226,45 +403,146 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         if (bb == null) return;
 
         using var canvas = new SKCanvas(bb);
-        canvas.Clear(new SKColor(80, 192, 240)); // sky
-        using var paint = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = false };
+        var h = _canvas.Height;
+        var w = _canvas.Width;
 
-        // Pipes.
-        foreach (var p in _pipes)
+        // Sky gradient.
+        using (var sky = new SKPaint())
         {
-            paint.Color = new SKColor(46, 168, 79);
-            canvas.DrawRect(p.X, 0, _pipeW, p.GapTop, paint);
-            canvas.DrawRect(p.X, p.GapTop + _gap, _pipeW, _canvas.Height - (p.GapTop + _gap), paint);
-            // Lips.
-            paint.Color = new SKColor(34, 130, 60);
-            var lip = Math.Max(2, _pipeW * 0.25f);
-            canvas.DrawRect(p.X - lip / 2, p.GapTop - lip, _pipeW + lip, lip, paint);
-            canvas.DrawRect(p.X - lip / 2, p.GapTop + _gap, _pipeW + lip, lip, paint);
+            sky.Shader = SKShader.CreateLinearGradient(
+                new SKPoint(0, 0), new SKPoint(0, PlayH),
+                new[] { new SKColor(92, 196, 220), new SKColor(168, 224, 236) },
+                SKShaderTileMode.Clamp);
+            canvas.DrawRect(0, 0, w, PlayH, sky);
         }
 
-        // Bird.
-        var flapUp = _vy < 0;
-        paint.Color = new SKColor(255, 216, 61);
-        canvas.DrawCircle(_birdX, _birdY, _birdR, paint);
-        paint.Color = new SKColor(255, 127, 17); // beak
-        canvas.DrawRect(_birdX + _birdR * 0.6f, _birdY - _birdR * 0.2f, _birdR, _birdR * 0.5f, paint);
-        paint.Color = SKColors.White; // eye
-        canvas.DrawCircle(_birdX + _birdR * 0.4f, _birdY - _birdR * 0.4f, Math.Max(1, _birdR * 0.35f), paint);
-        paint.Color = new SKColor(255, 183, 3); // wing
-        var wingY = _birdY + (flapUp ? -_birdR * 0.3f : _birdR * 0.3f);
-        canvas.DrawRect(_birdX - _birdR, wingY, _birdR, Math.Max(1, _birdR * 0.5f), paint);
+        using var paint = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = false };
+
+        paint.Color = new SKColor(236, 248, 255);
+        foreach (var c in _clouds)
+            DrawMask(canvas, Cloud, c.X, c.Y, paint);
+
+        foreach (var p in _pipes)
+            DrawPipe(canvas, paint, p);
+
+        DrawGround(canvas, paint);
+
+        var sprite = _vy < 0 ? BirdUp : BirdDown;
+        DrawBird(canvas, sprite, _birdX - _birdW * 0.45f, _birdY - _birdH * 0.5f);
 
         if (ShowScore)
         {
-            using var font = new SKFont { Size = Math.Max(10f, _canvas.Height * 0.13f) };
-            using var tp = new SKPaint { Color = SKColors.White, IsAntialias = true };
-            using var shadow = new SKPaint { Color = new SKColor(0, 0, 0, 120), IsAntialias = true };
-            canvas.DrawText($"{_score}", _canvas.Width / 2f + 1, _canvas.Height * 0.2f + 1, SKTextAlign.Center, font, shadow);
-            canvas.DrawText($"{_score}", _canvas.Width / 2f, _canvas.Height * 0.2f, SKTextAlign.Center, font, tp);
+            var size = CanvasText.ResolveSize(FontSize, Math.Max(10f, h * 0.13f));
+            CanvasText.Draw(canvas, _canvas, $"{_score}", new SKColor(0, 0, 0, 140),
+                w / 2f + 1, h * 0.16f + 1, size, SKTextAlign.Center, UseBdfFont);
+            CanvasText.Draw(canvas, _canvas, $"{_score}", SKColors.White,
+                w / 2f, h * 0.16f, size, SKTextAlign.Center, UseBdfFont);
         }
 
         canvas.Flush();
         _canvas.SubmitCompletedFrame(bb);
+    }
+
+    private void DrawPipe(SKCanvas canvas, SKPaint paint, Pipe p)
+    {
+        var x = p.X;
+        var w = _pipeW;
+        var lip = Math.Max(2, _px + 1);
+        var capH = Math.Max(3, 2 * _px + 1);
+        var body = new SKColor(82, 176, 58);
+        var hi = new SKColor(168, 224, 86);
+        var lo = new SKColor(46, 118, 40);
+        var rim = new SKColor(34, 86, 32);
+
+        void Column(float top, float height)
+        {
+            if (height <= 0) return;
+            var edge = Math.Max(1, _px);
+            paint.Color = hi;
+            canvas.DrawRect(x, top, edge, height, paint);
+            paint.Color = body;
+            canvas.DrawRect(x + edge, top, w - edge * 2, height, paint);
+            paint.Color = lo;
+            canvas.DrawRect(x + w - edge, top, edge, height, paint);
+            // Brick lines.
+            paint.Color = new SKColor(58, 140, 48, 160);
+            var step = Math.Max(3, 3 * _px);
+            for (var by = top + step; by < top + height - 1; by += step)
+                canvas.DrawRect(x + edge, by, w - edge * 2, 1, paint);
+        }
+
+        Column(0, p.GapTop - capH);
+        Column(p.GapTop + _gap + capH, PlayH - (p.GapTop + _gap + capH));
+
+        void Cap(float top)
+        {
+            paint.Color = rim;
+            canvas.DrawRect(x - lip, top, w + lip * 2, capH, paint);
+            paint.Color = hi;
+            canvas.DrawRect(x - lip + 1, top + 1, Math.Max(1, _px), capH - 2, paint);
+            paint.Color = body;
+            canvas.DrawRect(x - lip + 1 + _px, top + 1, w + lip * 2 - 2 - _px * 2, capH - 2, paint);
+            paint.Color = lo;
+            canvas.DrawRect(x + w + lip - 1 - _px, top + 1, Math.Max(1, _px), capH - 2, paint);
+        }
+
+        Cap(p.GapTop - capH);
+        Cap(p.GapTop + _gap);
+    }
+
+    private void DrawGround(SKCanvas canvas, SKPaint paint)
+    {
+        var y = PlayH;
+        paint.Color = new SKColor(214, 168, 70);
+        canvas.DrawRect(0, y, _canvas.Width, _groundH, paint);
+        paint.Color = new SKColor(116, 191, 46);
+        canvas.DrawRect(0, y, _canvas.Width, Math.Max(2, _px + 1), paint);
+        paint.Color = new SKColor(88, 150, 34);
+        canvas.DrawRect(0, y + Math.Max(2, _px + 1), _canvas.Width, 1, paint);
+
+        paint.Color = new SKColor(186, 138, 52);
+        var tile = Math.Max(6, 5 * _px);
+        var scroll = (int)(_frame * _speed) % tile;
+        for (var x = -scroll; x < _canvas.Width; x += tile)
+            canvas.DrawRect(x, y + _groundH * 0.45f, Math.Max(2, _px), Math.Max(2, _px), paint);
+    }
+
+    private void DrawBird(SKCanvas canvas, string[] rows, float x, float y)
+    {
+        using var paint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
+        for (var ry = 0; ry < rows.Length; ry++)
+        {
+            var row = rows[ry];
+            for (var rx = 0; rx < row.Length; rx++)
+            {
+                paint.Color = row[rx] switch
+                {
+                    'd' => new SKColor(36, 28, 24),
+                    'y' => new SKColor(255, 214, 48),
+                    'B' => new SKColor(255, 244, 196),
+                    'o' => new SKColor(255, 148, 36),
+                    'n' => new SKColor(220, 84, 16),
+                    'w' => SKColors.White,
+                    'k' => new SKColor(24, 20, 18),
+                    'r' => new SKColor(236, 76, 52),
+                    'p' => new SKColor(255, 150, 140),
+                    _ => SKColors.Transparent
+                };
+                if (paint.Color.Alpha == 0) continue;
+                canvas.DrawRect(x + rx * _px, y + ry * _px, _px, _px, paint);
+            }
+        }
+    }
+
+    private void DrawMask(SKCanvas canvas, string[] rows, float x, float y, SKPaint paint)
+    {
+        for (var ry = 0; ry < rows.Length; ry++)
+        {
+            var row = rows[ry];
+            for (var rx = 0; rx < row.Length; rx++)
+                if (row[rx] == '1')
+                    canvas.DrawRect(x + rx * _px, y + ry * _px, _px, _px, paint);
+        }
     }
 
     private struct Pipe
@@ -272,5 +550,11 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         public float X;
         public float GapTop;
         public bool Scored;
+    }
+
+    private struct CloudPos
+    {
+        public float X;
+        public float Y;
     }
 }

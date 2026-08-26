@@ -39,6 +39,14 @@ public class TerminatorExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Show Marker", "Draw a ping at the chosen place", DefaultValue = true, Order = 4)]
     public bool ShowMarker { get; set; } = true;
 
+    [ExtensionParameter("Use BDF Font", "Render the place name with the crisp bitmap (BDF) font",
+        DefaultValue = false, Order = 5)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "Place-name height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 48, Unit = "px", Order = 6)]
+    public int FontSize { get; set; }
+
     public string Name => "Day/Night Terminator";
     public bool IsRunning { get; private set; }
 
@@ -166,14 +174,13 @@ public class TerminatorExtension : ICanvasExtension, IDisposable
             var label = (Location ?? "").Trim();
             if (label.Length > 0)
             {
-                var size = Math.Max(7f, h * 0.08f);
-                using var font = new SKFont(SKTypeface.Default, size);
-                using var text = new SKPaint { Color = new SKColor(255, 245, 220), IsAntialias = true };
-                using var shadow = new SKPaint { Color = new SKColor(0, 0, 0, 180), IsAntialias = true };
+                var size = CanvasText.ResolveSize(FontSize, Math.Max(7f, h * 0.08f));
                 var tx = Math.Clamp(mx + 5, 2, w - 4);
                 var ty = Math.Clamp(my - 4, size + 1, h - 2);
-                canvas.DrawText(label, tx + 1, ty + 1, font, shadow);
-                canvas.DrawText(label, tx, ty, font, text);
+                CanvasText.Draw(canvas, _canvas, label, new SKColor(0, 0, 0, 180),
+                    tx + 1, ty + 1, size, SKTextAlign.Left, UseBdfFont);
+                CanvasText.Draw(canvas, _canvas, label, new SKColor(255, 245, 220),
+                    tx, ty, size, SKTextAlign.Left, UseBdfFont);
             }
         }
 

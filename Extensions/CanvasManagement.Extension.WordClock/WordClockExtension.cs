@@ -192,19 +192,6 @@ public class WordClockExtension : IDisposable
                 }
 
                 // Draw letters
-                using var font = new SKFont
-                {
-                    Size = actualLetterSize,
-                    Typeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold)
-                };
-                // Anti-aliasing makes tiny LED letters mushy/invisible; only enable it once
-                // letters are reasonably large.
-                var crisp = actualLetterSize < 12;
-                using var textPaint = new SKPaint
-                {
-                    IsAntialias = !crisp
-                };
-
                 for (var row = 0; row < rows; row++)
                 for (var col = 0; col < cols; col++)
                 {
@@ -214,9 +201,7 @@ public class WordClockExtension : IDisposable
                     var x = startX + col * cellSize + actualLetterSize / 2;
                     var y = startY + row * cellSize + actualLetterSize;
 
-                    // Draw glow effect for active letters (blur scaled to letter size so it does
-                    // not smear small letters into invisibility on low-res panels).
-                    if (isActive && GlowEffect && actualLetterSize >= 8)
+                    if (isActive && GlowEffect && actualLetterSize >= 8 && !UseBdfFont)
                     {
                         using var glowPaint = new SKPaint
                         {
@@ -228,12 +213,17 @@ public class WordClockExtension : IDisposable
                             IsAntialias = true,
                             MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, Math.Max(1f, actualLetterSize / 4f))
                         };
+                        using var font = new SKFont
+                        {
+                            Size = actualLetterSize,
+                            Typeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold)
+                        };
                         canvas.DrawText(letter.ToString(), x, y, SKTextAlign.Center, font, glowPaint);
                     }
 
-                    // Draw letter
-                    textPaint.Color = isActive ? ActiveColor : InactiveColor;
-                    canvas.DrawText(letter.ToString(), x, y, SKTextAlign.Center, font, textPaint);
+                    var color = isActive ? ActiveColor : InactiveColor;
+                    CanvasText.Draw(canvas, _canvas, letter.ToString(), color, x, y, actualLetterSize,
+                        SKTextAlign.Center, UseBdfFont);
                 }
 
                 canvas.Flush();// Atomic submission
@@ -437,8 +427,8 @@ public class WordClockExtension : IDisposable
     [ExtensionParameter("Background Color", "Background color for the clock",
         DefaultValue = "#000000")]
     public SKColor BackgroundColor { get; set; } = SKColors.Black;
-    [ExtensionParameter("Letter Size", "Size of each letter",
-        DefaultValue = 0, MinValue = 0, MaxValue = 100)]
+    [ExtensionParameter("Letter Size", "Letter height in pixels (0 = auto-fit, also used for BDF)",
+        DefaultValue = 0, MinValue = 0, MaxValue = 100, Unit = "px")]
     public int LetterSize { get; set; } = 0; // 0 = auto-fit
 
     [ExtensionParameter("Letter Spacing", "Space between letters",
@@ -456,6 +446,9 @@ public class WordClockExtension : IDisposable
     [ExtensionParameter("Layout Mode", "Grid layout (0=Auto, 1=Portrait, 2=Landscape)",
         DefaultValue = 0, MinValue = 0, MaxValue = 2)]
     public int LayoutMode { get; set; } = 0;
+
+    [ExtensionParameter("Use BDF Font", "Render letters with the crisp bitmap (BDF) font", DefaultValue = false)]
+    public bool UseBdfFont { get; set; }
 
     #endregion
 }

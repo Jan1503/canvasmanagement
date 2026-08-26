@@ -378,20 +378,14 @@ public class DigitalClockExtension : ICanvasExtension, IDisposable
 
         if (UseBdfFont)
         {
-            // BDF: pick the bitmap font closest to the requested height. When auto-fitting, scale the
-            // rendered bitmap into the rect; otherwise scale so its glyph height matches targetH exactly.
-            var fontName = BdfFontRegistry.GetBestFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
+            var fontName = _canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
             using var bmp = _canvas.RenderBdfTextToBitmap(text, color, fontName);
             if (bmp is not { Width: > 0, Height: > 0 }) return;
-            var scale = fit
-                ? Math.Min(rw / bmp.Width, rh / bmp.Height)
-                : targetH / bmp.Height;
-            if (scale <= 0) return;
-            var dw = bmp.Width * scale;
-            var dh = bmp.Height * scale;
+            var fitH = fit ? rh : targetH;
+            var (dw, dh) = CanvasText.DestSize(bmp, fitH, rw);
             var bx = AlignX(rx, rw, dw);
             var by = AlignTop(ry, rh, dh);
-            c.DrawBitmap(bmp, new SKRect(bx, by, bx + dw, by + dh));
+            CanvasText.Blit(c, bmp, bx, by, dw, dh);
             return;
         }
 

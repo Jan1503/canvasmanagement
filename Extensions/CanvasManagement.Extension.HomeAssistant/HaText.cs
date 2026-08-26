@@ -22,16 +22,10 @@ internal static class HaText
 
         if (useBdf)
         {
-            var fontName = BdfFontRegistry.GetBestFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
+            var fontName = canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
             using var bmp = canvas.RenderBdfTextToBitmap(shown, color, fontName);
             if (bmp is not { Width: > 0, Height: > 0 }) return;
-            var scale = shrinkToWidth
-                ? Math.Min(rw / bmp.Width, rh / bmp.Height)
-                : Math.Min(rh / bmp.Height, targetH / bmp.Height);
-            if (scale <= 0) return;
-            var dw = bmp.Width * scale;
-            var dh = bmp.Height * scale;
-            if (shrinkToWidth && dw > rw) { /* scale already min'd */ }
+            var (dw, dh) = CanvasText.DestSize(bmp, Math.Min(targetH, rh), shrinkToWidth ? rw : 0);
             var left = align switch
             {
                 SKTextAlign.Left => rx,
@@ -39,7 +33,7 @@ internal static class HaText
                 _ => rx + (rw - dw) / 2f
             };
             var top = ry + (rh - dh) / 2f;
-            c.DrawBitmap(bmp, new SKRect(left, top, left + dw, top + dh));
+            CanvasText.Blit(c, bmp, left, top, dw, dh);
             return;
         }
 
@@ -67,7 +61,7 @@ internal static class HaText
             var fontName = BdfFontRegistry.GetBestFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
             using var bmp = canvas.RenderBdfTextToBitmap(text, SKColors.White, fontName);
             if (bmp is not { Width: > 0, Height: > 0 }) return 0;
-            return bmp.Width * (targetH / bmp.Height);
+            return CanvasText.DestSize(bmp, targetH).w;
         }
 
         using var font = new SKFont { Size = Math.Max(4f, targetH), Subpixel = true };

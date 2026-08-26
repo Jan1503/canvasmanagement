@@ -6,7 +6,7 @@ using Timer = System.Timers.Timer;
 namespace CanvasManagement.Extension.Snake;
 
 [ExtensionInfo("Snake Game",
-    "Classic snake game with AI autopilot and configurable difficulty",
+    "Classic snake — autopilot, or play with arrows / WASD in Studio",
     "Games",
     IconResourceName = "snake.svg")]
 public class SnakeExtension : IDisposable
@@ -28,6 +28,7 @@ public class SnakeExtension : IDisposable
     private int _appliedGridSize = -1;
     private Direction _nextDirection = Direction.Right;
     private readonly Random _random = new();
+    private bool _human;
 
     private readonly List<Point> _snake = new();
 
@@ -60,6 +61,7 @@ public class SnakeExtension : IDisposable
 
         lock (_gameLock)
         {
+            _human = false;
             InitializeGame();
 
             // Create back buffer
@@ -154,7 +156,7 @@ public class SnakeExtension : IDisposable
             if (!_gameOver)
             {
                 // AI decision
-                if (AutoPilot) _nextDirection = GetAIDirection();
+                if (AutoPilot && !_human) _nextDirection = GetAIDirection();
 
                 // Apply direction change
                 if (!IsOppositeDirection(_nextDirection, _direction)) _direction = _nextDirection;
@@ -368,33 +370,15 @@ public class SnakeExtension : IDisposable
                 DrawLeaf(canvas, _food.X * _gridSize + _gridSize / 2f, _food.Y * _gridSize + _gridSize / 2f);
 
                 // Draw score
-                using var scoreFont = new SKFont
-                {
-                    Size = Math.Max(6f, _canvas.ScaleSizeF(16)),
-                    Typeface = SKTypeface.FromFamilyName("Arial")
-                };
-                using var textPaint = new SKPaint
-                {
-                    Color = SKColors.White,
-                    IsAntialias = true
-                };
-                canvas.DrawText($"Score: {Score}", _canvas.ScaleSize(10), _canvas.ScaleSize(20), SKTextAlign.Left,
-                    scoreFont, textPaint);
+                var scoreSize = CanvasText.ResolveSize(FontSize, Math.Max(6f, _canvas.ScaleSizeF(16)));
+                CanvasText.Draw(canvas, _canvas, $"Score: {Score}", SKColors.White, _canvas.ScaleSize(10),
+                    _canvas.ScaleSize(20), scoreSize, SKTextAlign.Left, UseBdfFont);
 
                 if (_gameOver)
                 {
-                    using var gameOverFont = new SKFont
-                    {
-                        Size = Math.Max(7f, _canvas.ScaleSizeF(24)),
-                        Typeface = SKTypeface.FromFamilyName("Arial")
-                    };
-                    using var gameOverPaint = new SKPaint
-                    {
-                        Color = SKColors.Red,
-                        IsAntialias = true
-                    };
-                    canvas.DrawText("GAME OVER", _canvas.Width / 2f, _canvas.Height / 2f, SKTextAlign.Center,
-                        gameOverFont, gameOverPaint);
+                    var overSize = CanvasText.ResolveSize(FontSize, Math.Max(7f, _canvas.ScaleSizeF(24)));
+                    CanvasText.Draw(canvas, _canvas, "GAME OVER", SKColors.Red, _canvas.Width / 2f,
+                        _canvas.Height / 2f, overSize, SKTextAlign.Center, UseBdfFont);
                 }
 
                 // Blit to canvas in one operation
@@ -658,6 +642,31 @@ public class SnakeExtension : IDisposable
         canvas.DrawPath(leafPath, leafOutline);
     }
 
+    private void Steer(Direction dir)
+    {
+        lock (_gameLock)
+        {
+            _human = true;
+            _nextDirection = dir;
+        }
+    }
+
+    [ExtensionMethod("Go Up", "Turn up — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Up|W", Order = 1)]
+    public void GoUp() => Steer(Direction.Up);
+
+    [ExtensionMethod("Go Down", "Turn down — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Down|S", Order = 2)]
+    public void GoDown() => Steer(Direction.Down);
+
+    [ExtensionMethod("Go Left", "Turn left — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Left|A", Order = 3)]
+    public void GoLeft() => Steer(Direction.Left);
+
+    [ExtensionMethod("Go Right", "Turn right — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Right|D", Order = 4)]
+    public void GoRight() => Steer(Direction.Right);
+
     #region Parameters
 
     [ExtensionParameter("Game Speed", "Game speed (higher = faster)",
@@ -687,6 +696,13 @@ public class SnakeExtension : IDisposable
     [ExtensionParameter("Grid Lines", "Show grid lines",
         DefaultValue = true)]
     public bool ShowGrid { get; set; } = true;
+
+    [ExtensionParameter("Use BDF Font", "Render score text with the crisp bitmap (BDF) font", DefaultValue = false)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "Score height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 48, Unit = "px")]
+    public int FontSize { get; set; }
 
     [ExtensionParameter("Auto Pilot", "AI controls the snake",
         DefaultValue = true)]

@@ -43,19 +43,23 @@ public class HomeAssistantMediaExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = false, Order = 6)]
     public bool UseBdfFont { get; set; }
 
-    [ExtensionParameter("Align", "Horizontal alignment of the title", DefaultValue = HaTileAlign.Left, Order = 7)]
+    [ExtensionParameter("Value Size", "Title height in px (0 = auto-fit)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 200, Unit = "px", Order = 7)]
+    public int ValueSize { get; set; }
+
+    [ExtensionParameter("Align", "Horizontal alignment of the title", DefaultValue = HaTileAlign.Left, Order = 8)]
     public HaTileAlign Align { get; set; } = HaTileAlign.Left;
 
-    [ExtensionParameter("Value Color", "Colour of the track title", DefaultValue = "#FFFFFF", Order = 8)]
+    [ExtensionParameter("Value Color", "Colour of the track title", DefaultValue = "#FFFFFF", Order = 9)]
     public SKColor ValueColor { get; set; } = SKColors.White;
 
-    [ExtensionParameter("Label Color", "Colour of the artist / album", DefaultValue = "#B4BEC8", Order = 9)]
+    [ExtensionParameter("Label Color", "Colour of the artist / album", DefaultValue = "#B4BEC8", Order = 10)]
     public SKColor LabelColor { get; set; } = new(180, 190, 200);
 
-    [ExtensionParameter("Accent Color", "Progress / idle accent", DefaultValue = "#1DB954", Order = 10)]
+    [ExtensionParameter("Accent Color", "Progress / idle accent", DefaultValue = "#1DB954", Order = 11)]
     public SKColor AccentColor { get; set; } = new(29, 185, 84);
 
-    [ExtensionParameter("Background Color", "Background (alpha 0 for overlay)", DefaultValue = "#101015", Order = 11)]
+    [ExtensionParameter("Background Color", "Background (alpha 0 for overlay)", DefaultValue = "#101015", Order = 12)]
     public SKColor BackgroundColor { get; set; } = new(16, 16, 21);
 
     public string Name => "HA Now Playing";
@@ -151,10 +155,14 @@ public class HomeAssistantMediaExtension : ICanvasExtension, IDisposable
         var tx = ShowArt ? 8 + artSize : 4;
         var tw = w - tx - 4;
         var align = HaText.ToSk(Align);
-        HaText.Draw(c, _canvas, title, ValueColor, tx, 2, tw, h * 0.4f, h * 0.28f, align, UseBdfFont);
+        var titleH = ValueSize > 0 ? ValueSize : h * 0.28f;
+        HaText.Draw(c, _canvas, title, ValueColor, tx, 2, tw, h * 0.4f, titleH, align, UseBdfFont);
         var sub = string.IsNullOrWhiteSpace(artist) ? album : artist;
         if (ShowArtist && !string.IsNullOrWhiteSpace(sub))
-            HaText.Draw(c, _canvas, sub, LabelColor, tx, h * 0.4f, tw, h * 0.28f, h * 0.2f, align, UseBdfFont);
+        {
+            var subH = ValueSize > 0 ? Math.Max(6f, ValueSize * 0.7f) : h * 0.2f;
+            HaText.Draw(c, _canvas, sub, LabelColor, tx, h * 0.4f, tw, h * 0.28f, subH, align, UseBdfFont);
+        }
 
         if (ShowProgress)
         {

@@ -169,32 +169,34 @@ public class ScrollTextPlayerExtension : IDisposable
         {
             _textBitmap?.Dispose();
 
-            // ? Use ICanvas.RenderBdfTextToBitmap() - interface method, no tight coupling!
-            var baseBitmap = _canvas.RenderBdfTextToBitmap(
-                Text,
-                TextColor,
-                string.IsNullOrWhiteSpace(BdfFont) ? null : BdfFont // Transparent background
-            );
+            var targetH = FontSize > 0 ? FontSize : Math.Max(8f, _canvas.Height * 0.8f);
+            var fontName = !string.IsNullOrWhiteSpace(BdfFont)
+                ? BdfFont
+                : _canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
+
+            var baseBitmap = _canvas.RenderBdfTextToBitmap(Text, TextColor, fontName);
 
             if (baseBitmap == null || baseBitmap.Width == 0 || baseBitmap.Height == 0)
                 throw new InvalidOperationException("BDF rendering returned empty bitmap");
 
+            var (dw, dh) = CanvasText.DestSize(baseBitmap, targetH);
+            var destW = Math.Max(1, (int)Math.Ceiling(dw));
+            var destH = Math.Max(1, (int)Math.Ceiling(dh));
+
             // Handle vertical alignment by creating a canvas-height bitmap
-            _textBitmap = new SKBitmap(baseBitmap.Width, _canvas.Height);
+            _textBitmap = new SKBitmap(destW, _canvas.Height);
             using var canvas = new SKCanvas(_textBitmap);
             canvas.Clear(SKColors.Transparent);
 
-            // Calculate Y position for vertical alignment
             var yPos = CurrentVerticalAlignment switch
             {
                 VerticalAlign.Top => 0,
-                VerticalAlign.Center => (_canvas.Height - baseBitmap.Height) / 2,
-                VerticalAlign.Bottom => _canvas.Height - baseBitmap.Height,
-                _ => (_canvas.Height - baseBitmap.Height) / 2
+                VerticalAlign.Center => (_canvas.Height - destH) / 2,
+                VerticalAlign.Bottom => _canvas.Height - destH,
+                _ => (_canvas.Height - destH) / 2
             };
 
-            // Draw the BDF text bitmap at the correct vertical position
-            canvas.DrawBitmap(baseBitmap, 0, yPos);
+            CanvasText.Blit(canvas, baseBitmap, 0, yPos, dw, dh);
 
             baseBitmap.Dispose();
 
@@ -578,7 +580,7 @@ public class ScrollTextPlayerExtension : IDisposable
         DefaultValue = "")]
     public string BdfFont { get; set; } = "";
 
-    [ExtensionParameter("Font Size", "Font size in pixels (0 = auto-fit, only for Skia rendering)",
+    [ExtensionParameter("Font Size", "Font size in pixels (0 = auto-fit)",
         DefaultValue = 0, MinValue = 0, MaxValue = 200)]
     public int FontSize { get; set; } = 0;
 

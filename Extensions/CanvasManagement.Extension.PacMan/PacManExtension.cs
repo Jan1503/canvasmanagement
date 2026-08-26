@@ -9,7 +9,7 @@ namespace CanvasManagement.Extension.PacMan;
 ///     Pac-Man game extension with intelligent AI-controlled Pac-Man.
 /// </summary>
 [ExtensionInfo("Pac-Man",
-    "Classic Pac-Man arcade game with AI-controlled player",
+    "Classic Pac-Man — autopilot, or play with the arrow keys in Studio",
     "Games",
     IconResourceName = "pacman.svg")]
 public class PacManExtension(ICanvas canvas) : ICanvasExtension
@@ -21,6 +21,7 @@ public class PacManExtension(ICanvas canvas) : ICanvasExtension
 
     // AI keeps a committed direction so BFS ties don't cause oscillation.
     private Direction _committedDirection = Direction.None;
+    private bool _human;
     private int _gameOverTimer;
     private Timer? _gameTimer;
     private int _lastDifficulty;
@@ -76,6 +77,17 @@ public class PacManExtension(ICanvas canvas) : ICanvasExtension
         DefaultValue = false, Order = 6)]
     public bool ShowDebugInfo { get; set; } = false;
 
+    [ExtensionParameter("Use BDF Font", "Render HUD text with the crisp bitmap (BDF) font", DefaultValue = false,
+        Order = 7)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "HUD height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 48, Unit = "px", Order = 8)]
+    public int FontSize { get; set; }
+
+    [ExtensionParameter("Auto Pilot", "AI plays until you press a key in Studio", DefaultValue = true, Order = 9)]
+    public bool AutoPilot { get; set; } = true;
+
     // ── Live status (read-only) ──
     [ExtensionParameter("Score", "Current game score", ReadOnly = true, Order = 10)]
     public int Score => _state?.Score ?? 0;
@@ -102,11 +114,14 @@ public class PacManExtension(ICanvas canvas) : ICanvasExtension
             _renderer = new GameRenderer(_canvas)
             {
                 ShowDebugInfo = ShowDebugInfo,
-                BackgroundColor = _backgroundColor
+                BackgroundColor = _backgroundColor,
+                UseBdfFont = UseBdfFont,
+                FontSize = FontSize
             };
 
             // Reset AI state
             _committedDirection = Direction.None;
+            _human = false;
 
             _lastGameSpeed = GameSpeed;
             _lastGhostCount = GhostCount;
@@ -164,7 +179,7 @@ public class PacManExtension(ICanvas canvas) : ICanvasExtension
                 // Decide only at tile centres (real decision points). Re-deciding every tick made Pac-Man
                 // flip back and forth on the spot; committing to a lane between intersections fixes that.
                 if (!_state.IsDeathAnimation && !_state.IsLevelStartAnimation && !_state.GameOver &&
-                    !_state.LevelComplete && _state.PacMan.AtCellCenter)
+                    !_state.LevelComplete && _state.PacMan.AtCellCenter && AutoPilot && !_human)
                 {
                     var aiDirection = GetAIDirection();
                     _state.PacMan.SetNextDirection(aiDirection);
@@ -219,9 +234,11 @@ public class PacManExtension(ICanvas canvas) : ICanvasExtension
             _lastGhostCount = GhostCount;
         }
 
-        if (_renderer != null && ShowDebugInfo != _lastShowDebugInfo)
+        if (_renderer != null)
         {
             _renderer.ShowDebugInfo = ShowDebugInfo;
+            _renderer.UseBdfFont = UseBdfFont;
+            _renderer.FontSize = FontSize;
             _lastShowDebugInfo = ShowDebugInfo;
         }
 
@@ -389,6 +406,31 @@ public class PacManExtension(ICanvas canvas) : ICanvasExtension
         if (maze.IsOpenCell(x, y + 1)) count++;
         return count;
     }
+
+    private void Steer(Direction dir)
+    {
+        lock (_lock)
+        {
+            _human = true;
+            _state?.PacMan.SetNextDirection(dir);
+        }
+    }
+
+    [ExtensionMethod("Go Up", "Steer up — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Up|W", Order = 1)]
+    public void GoUp() => Steer(Direction.Up);
+
+    [ExtensionMethod("Go Down", "Steer down — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Down|S", Order = 2)]
+    public void GoDown() => Steer(Direction.Down);
+
+    [ExtensionMethod("Go Left", "Steer left — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Left|A", Order = 3)]
+    public void GoLeft() => Steer(Direction.Left);
+
+    [ExtensionMethod("Go Right", "Steer right — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Right|D", Order = 4)]
+    public void GoRight() => Steer(Direction.Right);
 
     public void Dispose()
     {

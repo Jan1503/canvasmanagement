@@ -201,16 +201,13 @@ public class HomeAssistantGraphExtension : ICanvasExtension, IDisposable
 
         if (UseBdfFont)
         {
-            var fontName = BdfFontRegistry.GetBestFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
+            var fontName = _canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
             using var bmp = _canvas.RenderBdfTextToBitmap(text, color, fontName);
             if (bmp is not { Width: > 0, Height: > 0 }) return;
-            var scale = Math.Min(rw / bmp.Width, rh / bmp.Height);
-            if (scale <= 0) return;
-            var dw = bmp.Width * scale;
-            var dh = bmp.Height * scale;
+            var (dw, dh) = CanvasText.DestSize(bmp, Math.Min(targetH, rh), rw);
             var left = align == SKTextAlign.Right ? rx + rw - dw : align == SKTextAlign.Center ? rx + (rw - dw) / 2f : rx;
             var top = ry + (rh - dh) / 2f;
-            c.DrawBitmap(bmp, new SKRect(left, top, left + dw, top + dh));
+            CanvasText.Blit(c, bmp, left, top, dw, dh);
             return;
         }
 

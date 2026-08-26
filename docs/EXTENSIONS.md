@@ -176,6 +176,18 @@ Optional. Public methods tagged with `[ExtensionMethod]` show up as buttons / AP
 public void Reset() { /* … */ }
 ```
 
+`KeyboardShortcut` is a hint the host can bind. verpixeld Studio only maps keys for methods whose **`Category` is `"Controls"`** (so audio volume shortcuts never steal arrow keys from a game). Specs are `|`-separated aliases; append `:up` for key-up:
+
+```csharp
+[ExtensionMethod("Go Left", "Hold left", Category = "Controls", KeyboardShortcut = "Left|A")]
+public void GoLeft() { /* … */ }
+
+[ExtensionMethod("Stop Left", "Release left", Category = "Controls", KeyboardShortcut = "Left:up|A:up")]
+public void StopLeft() { /* … */ }
+```
+
+Games should AutoPilot until the first human input, then skip AI until `Start()` again. The wall has no keyboard — play happens in the Studio browser.
+
 ## 6. Icon
 
 - 48×48 SVG in `Icons/my-thing.svg`.
@@ -192,6 +204,7 @@ You can draw through `ICanvas` from the **host thread** (or after `SubmitComplet
 | Method | Use |
 |--------|-----|
 | `DrawBdfText` / `MeasureBdfText` / `RenderBdfTextToBitmap` | pixel-perfect labels |
+| `GetBestBdfFontForHeight` | largest registered BDF that still fits |
 | `DrawRect` / `DrawFilledCircle` / `DrawLine` / `DrawPolygon` | shapes |
 | `DrawBitmap` / `DrawBitmapWithAlpha` / `DrawBitmapRegion` | images / sprites |
 | `FillGradient` | backgrounds |
@@ -199,6 +212,8 @@ You can draw through `ICanvas` from the **host thread** (or after `SubmitComplet
 | `Width` / `Height` | always read live (layer editor resizes) |
 
 BDF font names are the files in `Fonts/` (e.g. `"7x13"`, `"5x7"`). Pass `null` for the host default.
+
+For LED sprites use **`PixelArt`** (`Scale`, `Blit`, `Disc`, `Ring`, `Hsv`): author in characters, blit 1:1 (scale 1 on a 128-tall wall). Do not anti-alias or use fractional `_px`. For HUD labels use **`CanvasText.Draw`** so BDF / Skia share the same baseline and “Use BDF Font” toggle.
 
 ## 8. Home Assistant
 

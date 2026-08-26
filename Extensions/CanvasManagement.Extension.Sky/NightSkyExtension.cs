@@ -47,6 +47,14 @@ public class NightSkyExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Background Color", "Zenith colour", DefaultValue = "#050816", Order = 6)]
     public SKColor BackgroundColor { get; set; } = new(5, 8, 22);
 
+    [ExtensionParameter("Use BDF Font", "Render labels with the crisp bitmap (BDF) font", DefaultValue = false,
+        Order = 7)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "Label height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 48, Unit = "px", Order = 8)]
+    public int FontSize { get; set; }
+
     public string Name => "Night Sky";
     public bool IsRunning { get; private set; }
 
@@ -154,10 +162,9 @@ public class NightSkyExtension : ICanvasExtension, IDisposable
         var label = (Location ?? "").Trim();
         if (label.Length > 0)
         {
-            var size = Math.Max(7f, bb.Height * 0.09f);
-            using var font = new SKFont(SKTypeface.Default, size);
-            using var text = new SKPaint { Color = new SKColor(200, 210, 230, 180), IsAntialias = true };
-            c.DrawText(label, 4, bb.Height - 4, font, text);
+            var size = CanvasText.ResolveSize(FontSize, Math.Max(7f, bb.Height * 0.09f));
+            CanvasText.Draw(c, _canvas, label, new SKColor(200, 210, 230, 180),
+                4, bb.Height - 4, size, SKTextAlign.Left, UseBdfFont);
         }
 
         c.Flush();
@@ -278,10 +285,9 @@ public class NightSkyExtension : ICanvasExtension, IDisposable
         using var core = new SKPaint { Color = new SKColor(255, 230, 210), IsAntialias = true };
         c.DrawCircle(x, y, 5.5f, glow);
         c.DrawCircle(x, y, 1.8f, core);
-        var size = Math.Max(6f, h * 0.07f);
-        using var font = new SKFont(SKTypeface.Default, size);
-        using var text = new SKPaint { Color = new SKColor(255, 180, 140), IsAntialias = true };
-        c.DrawText("ISS", x + 4, y - 2, font, text);
+        var size = CanvasText.ResolveSize(FontSize, Math.Max(6f, h * 0.07f));
+        CanvasText.Draw(c, _canvas, "ISS", new SKColor(255, 180, 140),
+            x + 4, y - 2, size, SKTextAlign.Left, UseBdfFont);
     }
 
     private static double MoonPhase()

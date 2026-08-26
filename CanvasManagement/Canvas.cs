@@ -1519,6 +1519,11 @@ public class Canvas : ICanvas, IDisposable
         }
     }
 
+    public string? GetBestBdfFontForHeight(int targetHeight)
+    {
+        return BdfFontRegistry.GetBestFontForHeight(Math.Max(1, targetHeight));
+    }
+
     private BdfFontManager.BdfFontManager? _bdfFontManager;
 
     /// <summary>

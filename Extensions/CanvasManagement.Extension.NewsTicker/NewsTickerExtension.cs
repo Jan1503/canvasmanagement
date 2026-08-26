@@ -58,6 +58,10 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
         MaxValue = 48, Order = 6)]
     public int FontSize { get; set; }
 
+    [ExtensionParameter("Use BDF Font", "Render headlines with the crisp bitmap (BDF) font", DefaultValue = false,
+        Order = 6)]
+    public bool UseBdfFont { get; set; }
+
     [ExtensionParameter("Refresh (min)", "How often to refetch headlines", DefaultValue = 10, MinValue = 2,
         MaxValue = 120, Unit = "min", Order = 7)]
     public int RefreshMinutes { get; set; } = 10;
@@ -223,17 +227,17 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
         using var canvas = new SKCanvas(bb);
         canvas.Clear(BackgroundColor);
 
-        var fontSize = FontSize > 0 ? FontSize : Math.Clamp(_canvas.Height * 0.55f, 8f, 40f);
-        using var font = new SKFont { Size = fontSize };
-        using var paint = new SKPaint { Color = TextColor, IsAntialias = true };
+        var fontSize = CanvasText.ResolveSize(FontSize, Math.Clamp(_canvas.Height * 0.55f, 8f, 40f));
 
         string text;
         lock (_lock) text = _ticker;
 
-        if (Math.Abs(fontSize - _lastFontSize) > 0.1f || _textWidth < 0)
+        var sig = $"{text}|{fontSize}|{UseBdfFont}|{TextColor}";
+        if (sig != _lastSig || _textWidth < 0)
         {
-            _textWidth = font.MeasureText(text);
+            _textWidth = CanvasText.Measure(_canvas, text, fontSize, UseBdfFont);
             _lastFontSize = fontSize;
+            _lastSig = sig;
         }
 
         var baseline = _canvas.Height / 2f + fontSize * 0.36f;
@@ -242,9 +246,8 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
         var loop = Math.Max(_textWidth + _canvas.Width * 0.15f, _canvas.Width);
         if (_scrollX <= -loop) _scrollX += loop;
 
-        // Draw as many copies as needed to cover the whole width (handles short tickers without gaps).
         for (var x = _scrollX; x < _canvas.Width; x += loop)
-            canvas.DrawText(text, x, baseline, SKTextAlign.Left, font, paint);
+            CanvasText.Draw(canvas, _canvas, text, TextColor, x, baseline, fontSize, SKTextAlign.Left, UseBdfFont);
 
         canvas.Flush();
         _canvas.SubmitCompletedFrame(bb);

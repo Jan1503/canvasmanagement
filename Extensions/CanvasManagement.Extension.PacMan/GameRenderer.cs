@@ -18,8 +18,12 @@ public class GameRenderer : IDisposable
         _canvas = canvas;
     }
 
-    public bool ShowDebugInfo { get; set; } = false;
+    public bool ShowDebugInfo { get; set; }
     public SKColor BackgroundColor { get; set; } = SKColors.Black;
+    public bool UseBdfFont { get; set; }
+    public int FontSize { get; set; }
+
+    private float TextH(float auto) => CanvasText.ResolveSize(FontSize, auto);
 
     public void Dispose()
     {
@@ -180,13 +184,8 @@ public class GameRenderer : IDisposable
         if (progress > 0.2f && progress < 0.8f)
         {
             var textAlpha = progress < 0.5f ? (progress - 0.2f) / 0.3f : (0.8f - progress) / 0.3f;
-            using var font = new SKFont { Size = Math.Max(16, cellSize * 2) };
-            using var textPaint = new SKPaint
-            {
-                Color = new SKColor(255, 50, 50, (byte)(255 * textAlpha)),
-                IsAntialias = true
-            };
-            canvas.DrawText("OUCH!", width / 2f, height / 2f - cellSize, SKTextAlign.Center, font, textPaint);
+            CanvasText.Draw(canvas, _canvas, "OUCH!", new SKColor(255, 50, 50, (byte)(255 * textAlpha)),
+                width / 2f, height / 2f - cellSize, TextH(Math.Max(16, cellSize * 2)), SKTextAlign.Center, UseBdfFont);
         }
     }
 
@@ -208,24 +207,12 @@ public class GameRenderer : IDisposable
         if (progress < 0.8f)
         {
             var textScale = 1f + 0.1f * (float)Math.Sin(progress * Math.PI * 4);
-            using var font = new SKFont { Size = Math.Max(14, cellSize * 1.5f) * textScale };
-            using var textPaint = new SKPaint
-            {
-                Color = SKColors.Yellow,
-                IsAntialias = true
-            };
-            canvas.DrawText("READY!", width / 2f, height / 2f, SKTextAlign.Center, font, textPaint);
+            CanvasText.Draw(canvas, _canvas, "READY!", SKColors.Yellow, width / 2f, height / 2f,
+                TextH(Math.Max(14, cellSize * 1.5f) * (UseBdfFont ? 1f : textScale)), SKTextAlign.Center, UseBdfFont);
         }
 
-        // Level number
-        using var levelFont = new SKFont { Size = Math.Max(12, cellSize * 1.2f) };
-        using var levelPaint = new SKPaint
-        {
-            Color = SKColors.Cyan,
-            IsAntialias = true
-        };
-        canvas.DrawText($"LEVEL {state.Level}", width / 2f, height / 2f + cellSize * 2, SKTextAlign.Center, levelFont,
-            levelPaint);
+        CanvasText.Draw(canvas, _canvas, $"LEVEL {state.Level}", SKColors.Cyan, width / 2f,
+            height / 2f + cellSize * 2, TextH(Math.Max(12, cellSize * 1.2f)), SKTextAlign.Center, UseBdfFont);
     }
 
     private void RenderGameOver(SKCanvas canvas, GameState state, int width, int height)
@@ -241,35 +228,15 @@ public class GameRenderer : IDisposable
 
         // Pulsing "GAME OVER" text
         var pulse = 1f + 0.1f * (float)Math.Sin(_frameCount * 0.1);
-        using var gameOverFont = new SKFont { Size = Math.Max(20, cellSize * 2.5f) * pulse };
-        using var gameOverPaint = new SKPaint
-        {
-            Color = SKColors.Red,
-            IsAntialias = true
-        };
-        canvas.DrawText("GAME OVER", width / 2f, height / 2f - cellSize, SKTextAlign.Center, gameOverFont,
-            gameOverPaint);
+        CanvasText.Draw(canvas, _canvas, "GAME OVER", SKColors.Red, width / 2f, height / 2f - cellSize,
+            TextH(Math.Max(20, cellSize * 2.5f) * (UseBdfFont ? 1f : pulse)), SKTextAlign.Center, UseBdfFont);
 
-        // Final score
-        using var scoreFont = new SKFont { Size = Math.Max(12, cellSize * 1.2f) };
-        using var scorePaint = new SKPaint
-        {
-            Color = SKColors.White,
-            IsAntialias = true
-        };
-        canvas.DrawText($"FINAL SCORE: {state.Score}", width / 2f, height / 2f + cellSize, SKTextAlign.Center,
-            scoreFont, scorePaint);
+        CanvasText.Draw(canvas, _canvas, $"FINAL SCORE: {state.Score}", SKColors.White, width / 2f,
+            height / 2f + cellSize, TextH(Math.Max(12, cellSize * 1.2f)), SKTextAlign.Center, UseBdfFont);
 
-        // Restart hint
         var hintAlpha = 0.5f + 0.5f * (float)Math.Sin(_frameCount * 0.05);
-        using var hintFont = new SKFont { Size = Math.Max(10, cellSize) };
-        using var hintPaint = new SKPaint
-        {
-            Color = new SKColor(200, 200, 200, (byte)(255 * hintAlpha)),
-            IsAntialias = true
-        };
-        canvas.DrawText("Restarting...", width / 2f, height / 2f + cellSize * 3, SKTextAlign.Center, hintFont,
-            hintPaint);
+        CanvasText.Draw(canvas, _canvas, "Restarting...", new SKColor(200, 200, 200, (byte)(255 * hintAlpha)),
+            width / 2f, height / 2f + cellSize * 3, TextH(Math.Max(10, cellSize)), SKTextAlign.Center, UseBdfFont);
     }
 
     private void RenderLevelComplete(SKCanvas canvas, GameState state, int width, int height)
@@ -291,25 +258,12 @@ public class GameRenderer : IDisposable
         float hue = _frameCount * 5 % 360;
         var textColor = SKColor.FromHsl(hue, 100, 50);
 
-        using var completeFont = new SKFont { Size = Math.Max(16, cellSize * 2) };
-        using var completePaint = new SKPaint
-        {
-            Color = textColor,
-            IsAntialias = true
-        };
-        canvas.DrawText("LEVEL COMPLETE!", width / 2f, height / 2f - cellSize, SKTextAlign.Center, completeFont,
-            completePaint);
+        CanvasText.Draw(canvas, _canvas, "LEVEL COMPLETE!", textColor, width / 2f, height / 2f - cellSize,
+            TextH(Math.Max(16, cellSize * 2)), SKTextAlign.Center, UseBdfFont);
 
-        // Bonus points
-        using var bonusFont = new SKFont { Size = Math.Max(12, cellSize * 1.2f) };
-        using var bonusPaint = new SKPaint
-        {
-            Color = SKColors.Yellow,
-            IsAntialias = true
-        };
         var bonus = state.Level * 1000;
-        canvas.DrawText($"BONUS: {bonus} pts", width / 2f, height / 2f + cellSize, SKTextAlign.Center, bonusFont,
-            bonusPaint);
+        CanvasText.Draw(canvas, _canvas, $"BONUS: {bonus} pts", SKColors.Yellow, width / 2f,
+            height / 2f + cellSize, TextH(Math.Max(12, cellSize * 1.2f)), SKTextAlign.Center, UseBdfFont);
 
         // Firework particles
         RenderCelebrationParticles(canvas, width, height);
@@ -587,33 +541,25 @@ public class GameRenderer : IDisposable
 
     private void RenderHUD(SKCanvas canvas, GameState state, int width, int height)
     {
-        var fontSize = Math.Max(8, Math.Min(14, state.Maze.CellSize * 0.9f));
-
-        using var font = new SKFont { Size = fontSize };
-        using var textPaint = new SKPaint
-        {
-            Color = SKColors.White,
-            IsAntialias = true
-        };
-
-        using var shadowPaint = new SKPaint
-        {
-            Color = new SKColor(0, 0, 0, 150),
-            IsAntialias = true
-        };
-
+        var fontSize = TextH(Math.Max(8, Math.Min(14, state.Maze.CellSize * 0.9f)));
         var scoreText = $"SCORE: {state.Score}";
-        canvas.DrawText(scoreText, 4, fontSize + 1, SKTextAlign.Left, font, shadowPaint);
-        canvas.DrawText(scoreText, 3, fontSize, SKTextAlign.Left, font, textPaint);
+        CanvasText.Draw(canvas, _canvas, scoreText, new SKColor(0, 0, 0, 150), 4, fontSize + 1, fontSize,
+            SKTextAlign.Left, UseBdfFont);
+        CanvasText.Draw(canvas, _canvas, scoreText, SKColors.White, 3, fontSize, fontSize,
+            SKTextAlign.Left, UseBdfFont);
 
         var livesText = $"LIVES: {state.Lives}";
-        var livesWidth = font.MeasureText(livesText);
-        canvas.DrawText(livesText, width - livesWidth - 2, fontSize + 1, SKTextAlign.Left, font, shadowPaint);
-        canvas.DrawText(livesText, width - livesWidth - 3, fontSize, SKTextAlign.Left, font, textPaint);
+        var livesWidth = CanvasText.Measure(_canvas, livesText, fontSize, UseBdfFont);
+        CanvasText.Draw(canvas, _canvas, livesText, new SKColor(0, 0, 0, 150), width - livesWidth - 2, fontSize + 1,
+            fontSize, SKTextAlign.Left, UseBdfFont);
+        CanvasText.Draw(canvas, _canvas, livesText, SKColors.White, width - livesWidth - 3, fontSize, fontSize,
+            SKTextAlign.Left, UseBdfFont);
 
         var levelText = $"LEVEL {state.Level}";
-        canvas.DrawText(levelText, 4, height - 3, SKTextAlign.Left, font, shadowPaint);
-        canvas.DrawText(levelText, 3, height - 4, SKTextAlign.Left, font, textPaint);
+        CanvasText.Draw(canvas, _canvas, levelText, new SKColor(0, 0, 0, 150), 4, height - 3, fontSize,
+            SKTextAlign.Left, UseBdfFont);
+        CanvasText.Draw(canvas, _canvas, levelText, SKColors.White, 3, height - 4, fontSize,
+            SKTextAlign.Left, UseBdfFont);
     }
 
     private void RenderDebugInfo(SKCanvas canvas, GameState state)
@@ -624,24 +570,19 @@ public class GameRenderer : IDisposable
         };
         canvas.DrawRect(0, 25, 200, 50, bgPaint);
 
-        using var font = new SKFont { Size = 10 };
-        using var paint = new SKPaint
-        {
-            Color = SKColors.Lime,
-            IsAntialias = true
-        };
-
         var pacman = state.PacMan;
         var y = 36;
-        canvas.DrawText($"Pos: ({pacman.Position.X:F1}, {pacman.Position.Y:F1}) Dir: {pacman.Direction}", 5, y,
-            SKTextAlign.Left, font, paint);
+        CanvasText.Draw(canvas, _canvas,
+            $"Pos: ({pacman.Position.X:F1}, {pacman.Position.Y:F1}) Dir: {pacman.Direction}",
+            SKColors.Lime, 5, y, 10, SKTextAlign.Left, UseBdfFont);
 
         y += 12;
         var activeGhosts = state.Ghosts.Count(g => g.State != GhostState.Dead);
-        canvas.DrawText($"Ghosts: {activeGhosts}/{state.Ghosts.Count} | Frame: {_frameCount}", 5, y, SKTextAlign.Left,
-            font, paint);
+        CanvasText.Draw(canvas, _canvas, $"Ghosts: {activeGhosts}/{state.Ghosts.Count} | Frame: {_frameCount}",
+            SKColors.Lime, 5, y, 10, SKTextAlign.Left, UseBdfFont);
 
         y += 12;
-        canvas.DrawText($"Pellets: {state.Maze.CountPellets()}", 5, y, SKTextAlign.Left, font, paint);
+        CanvasText.Draw(canvas, _canvas, $"Pellets: {state.Maze.CountPellets()}", SKColors.Lime, 5, y, 10,
+            SKTextAlign.Left, UseBdfFont);
     }
 }

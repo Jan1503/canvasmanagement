@@ -139,33 +139,25 @@ public class BinaryClockExtension : IDisposable
                 // Draw labels - properly centered above each column
                 if (ShowLabels)
                 {
-                    using var labelFont = new SKFont
-                    {
-                        Size = _canvas.ScaleSizeF(12),
-                        Typeface = SKTypeface.FromFamilyName("Arial")
-                    };
-                    using var labelPaint = new SKPaint
-                    {
-                        Color = SKColors.Gray,
-                        IsAntialias = true
-                    };
-
+                    var labelSize = CanvasText.ResolveSize(FontSize > 0 ? Math.Max(6, (int)(FontSize * 0.65f)) : 0,
+                        _canvas.ScaleSizeF(12));
                     var labelY = startY - _canvas.ScaleSize(10);
                     var colWidth = LEDSize + LEDSpacing;
-
-                    canvas.DrawText("H", startX + LEDSize / 2, labelY, SKTextAlign.Center, labelFont, labelPaint);
-                    canvas.DrawText("H", startX + colWidth + LEDSize / 2, labelY, SKTextAlign.Center, labelFont,
-                        labelPaint);
-                    canvas.DrawText("M", startX + colWidth * 2 + LEDSize / 2, labelY, SKTextAlign.Center, labelFont,
-                        labelPaint);
-                    canvas.DrawText("M", startX + colWidth * 3 + LEDSize / 2, labelY, SKTextAlign.Center, labelFont,
-                        labelPaint);
+                    var grey = SKColors.Gray;
+                    CanvasText.Draw(canvas, _canvas, "H", grey, startX + LEDSize / 2, labelY, labelSize,
+                        SKTextAlign.Center, UseBdfFont);
+                    CanvasText.Draw(canvas, _canvas, "H", grey, startX + colWidth + LEDSize / 2, labelY, labelSize,
+                        SKTextAlign.Center, UseBdfFont);
+                    CanvasText.Draw(canvas, _canvas, "M", grey, startX + colWidth * 2 + LEDSize / 2, labelY, labelSize,
+                        SKTextAlign.Center, UseBdfFont);
+                    CanvasText.Draw(canvas, _canvas, "M", grey, startX + colWidth * 3 + LEDSize / 2, labelY, labelSize,
+                        SKTextAlign.Center, UseBdfFont);
                     if (ShowSeconds)
                     {
-                        canvas.DrawText("S", startX + colWidth * 4 + LEDSize / 2, labelY, SKTextAlign.Center, labelFont,
-                            labelPaint);
-                        canvas.DrawText("S", startX + colWidth * 5 + LEDSize / 2, labelY, SKTextAlign.Center, labelFont,
-                            labelPaint);
+                        CanvasText.Draw(canvas, _canvas, "S", grey, startX + colWidth * 4 + LEDSize / 2, labelY,
+                            labelSize, SKTextAlign.Center, UseBdfFont);
+                        CanvasText.Draw(canvas, _canvas, "S", grey, startX + colWidth * 5 + LEDSize / 2, labelY,
+                            labelSize, SKTextAlign.Center, UseBdfFont);
                     }
                 }
 
@@ -219,20 +211,10 @@ public class BinaryClockExtension : IDisposable
 
                     if (!TwentyFourHour) timeText += now.Hour >= 12 ? " PM" : " AM";
 
-                    using var timeFont = new SKFont
-                    {
-                        Size = _canvas.ScaleSizeF(20),
-                        Typeface = SKTypeface.FromFamilyName("Arial")
-                    };
-                    using var timePaint = new SKPaint
-                    {
-                        Color = SKColors.White,
-                        IsAntialias = true
-                    };
-
-                    // Center the text below the LEDs
+                    var timeSize = CanvasText.ResolveSize(FontSize, _canvas.ScaleSizeF(20));
                     var textY = startY + totalHeight + _canvas.ScaleSize(35);
-                    canvas.DrawText(timeText, _canvas.Width / 2, textY, SKTextAlign.Center, timeFont, timePaint);
+                    CanvasText.Draw(canvas, _canvas, timeText, SKColors.White, _canvas.Width / 2, textY, timeSize,
+                        SKTextAlign.Center, UseBdfFont);
                 }
 
                 canvas.Flush();// Blit to canvas
@@ -361,6 +343,14 @@ public class BinaryClockExtension : IDisposable
     [ExtensionParameter("Show Seconds", "Display seconds column",
         DefaultValue = true)]
     public bool ShowSeconds { get; set; } = true;
+
+    [ExtensionParameter("Use BDF Font", "Render labels and time text with the crisp bitmap (BDF) font",
+        DefaultValue = false)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "Time-text height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 48, Unit = "px")]
+    public int FontSize { get; set; }
 
     #endregion
 }

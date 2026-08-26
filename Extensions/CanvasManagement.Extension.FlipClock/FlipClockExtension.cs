@@ -204,7 +204,6 @@ public class FlipClockExtension : IDisposable
 
     private void DrawFlipCard(SKCanvas canvas, DigitState digit, int x, int y, int width, int height)
     {
-        // Card shadow
         if (CardShadow)
         {
             using var shadowPaint = new SKPaint
@@ -213,136 +212,102 @@ public class FlipClockExtension : IDisposable
                 Style = SKPaintStyle.Fill,
                 IsAntialias = true
             };
-            canvas.DrawRoundRect(x + 4, y + 4, width, height, 8, 8, shadowPaint);
+            canvas.DrawRoundRect(x + 3, y + 3, width, height, 6, 6, shadowPaint);
         }
 
-        var halfHeight = height / 2;
-
-        // Draw card background
+        var radius = Math.Max(2f, width * 0.08f);
         using var cardPaint = new SKPaint
         {
             Color = CardColor,
             Style = SKPaintStyle.Fill,
             IsAntialias = true
         };
-        canvas.DrawRoundRect(x, y, width, height, 8, 8, cardPaint);
+        canvas.DrawRoundRect(x, y, width, height, radius, radius, cardPaint);
 
-        // Save for top half
-        canvas.Save();
-        canvas.ClipRect(new SKRect(x, y, x + width, y + halfHeight));
+        var p = Math.Clamp(digit.FlipProgress, 0f, 1f);
+        var flipping = p < 0.999f;
+        var oldDigit = flipping ? digit.PreviousValue : digit.CurrentValue;
+        var newDigit = digit.CurrentValue;
+        var mid = y + height / 2f;
 
-        // Top half - always shows current (or animating to current)
-        if (digit.FlipProgress >= 0.5f)
+        // Split-flap: the back of the top half is always the incoming digit; the back of the
+        // bottom half is always the outgoing digit. The moving flap is the top of OLD folding
+        // down (0–50 %), then the bottom of NEW unfolding (50–100 %).
+        DrawDigitHalf(canvas, newDigit, x, y, width, height, true, 0);
+        DrawDigitHalf(canvas, oldDigit, x, y, width, height, false, 0);
+
+        if (flipping && p < 0.5f)
         {
-            // Second half of animation - new number flipping down
-            var topAngle = (digit.FlipProgress - 0.5f) * 360f;
-            DrawDigitHalf(canvas, digit.CurrentValue, x, y, width, height, true, topAngle);
+            var scaleY = Math.Abs((float)Math.Cos(p * Math.PI));
+            DrawFlap(canvas, oldDigit, x, y, width, height, true, scaleY, p * 2f);
         }
-        else
+        else if (flipping)
         {
-            // Static display of current
-            DrawDigitHalf(canvas, digit.CurrentValue, x, y, width, height, true, 0);
-        }
-
-        canvas.Restore();
-
-        // Save for bottom half
-        canvas.Save();
-        canvas.ClipRect(new SKRect(x, y + halfHeight, x + width, y + height));
-
-        // Bottom half
-        if (digit.FlipProgress < 0.5f && digit.FlipProgress > 0)
-        {
-            // First half of animation - old number flipping up
-            var bottomAngle = digit.FlipProgress * 360f;
-            DrawDigitHalf(canvas, digit.PreviousValue, x, y, width, height, false, bottomAngle);
-        }
-        else
-        {
-            // Static display of current
-            DrawDigitHalf(canvas, digit.CurrentValue, x, y, width, height, false, 0);
+            var t = (p - 0.5f) * 2f;
+            var scaleY = Math.Abs((float)Math.Sin(t * Math.PI / 2f));
+            DrawFlap(canvas, newDigit, x, y, width, height, false, scaleY, t);
         }
 
-        canvas.Restore();
-
-        // Draw center line
-        using var linePaint = new SKPaint
+        using var hinge = new SKPaint
         {
-            Color = new SKColor(0, 0, 0, 120),
-            StrokeWidth = 2,
+            Color = new SKColor(0, 0, 0, 160),
+            StrokeWidth = Math.Max(1f, height * 0.02f),
             IsAntialias = false
         };
-        canvas.DrawLine(x, y + halfHeight, x + width, y + halfHeight, linePaint);
+        canvas.DrawLine(x + 2, mid, x + width - 2, mid, hinge);
 
-        // Card border
-        using var borderPaint = new SKPaint
+        using var highlight = new SKPaint
         {
-            Color = new SKColor(255, 255, 255, 30),
+            Color = new SKColor(255, 255, 255, 28),
             Style = SKPaintStyle.Stroke,
-            StrokeWidth = 2,
+            StrokeWidth = 1,
             IsAntialias = true
         };
-        canvas.DrawRoundRect(x, y, width, height, 8, 8, borderPaint);
+        canvas.DrawRoundRect(x, y, width, height, radius, radius, highlight);
+    }
+
+    private void DrawFlap(SKCanvas canvas, int digit, int x, int y, int width, int height, bool isTop,
+        float scaleY, float darkness)
+    {
+        scaleY = Math.Max(0.02f, scaleY);
+        var pivotY = y + height / 2f;
+        canvas.Save();
+        if (isTop)
+            canvas.ClipRect(new SKRect(x, y, x + width, pivotY));
+        else
+            canvas.ClipRect(new SKRect(x, pivotY, x + width, y + height));
+
+        canvas.Translate(0, pivotY);
+        canvas.Scale(1, isTop ? scaleY : scaleY);
+        canvas.Translate(0, -pivotY);
+
+        var shade = (byte)(255 * (0.45f + (1f - darkness) * 0.55f));
+        var face = new SKColor(
+            (byte)(CardColor.Red * shade / 255),
+            (byte)(CardColor.Green * shade / 255),
+            (byte)(CardColor.Blue * shade / 255));
+        using var facePaint = new SKPaint { Color = face, Style = SKPaintStyle.Fill, IsAntialias = true };
+        canvas.DrawRect(x, y, width, height, facePaint);
+        DrawDigitHalf(canvas, digit, x, y, width, height, isTop, 0, shade);
+        canvas.Restore();
     }
 
     private void DrawDigitHalf(SKCanvas canvas, int digit, int x, int y, int width, int height, bool isTopHalf,
-        float angle)
+        float unusedAngle, byte alpha = 255)
     {
-        var pivotY = y + height / 2f;
-        var isAnimating = angle > 0 && angle < 180;
+        _ = unusedAngle;
+        var mid = y + height / 2f;
+        canvas.Save();
+        canvas.ClipRect(isTopHalf
+            ? new SKRect(x, y, x + width, mid)
+            : new SKRect(x, mid, x + width, y + height));
 
-        if (isAnimating)
-        {
-            canvas.Save();
-
-            // Calculate 3D perspective
-            var radians = angle * (float)Math.PI / 180f;
-            var scale = Math.Abs((float)Math.Cos(radians));
-
-            // Apply transform
-            canvas.Translate(0, pivotY);
-            canvas.Scale(1, scale);
-            canvas.Translate(0, -pivotY);
-        }
-
-        // Use modern SKFont for text rendering
-        using var font = new SKFont
-        {
-            Size = height * 0.55f,
-            Typeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold)
-        };
-
-        // Draw digit text with modern API
-        var textColor = TextColor;
-
-        // Apply darkness during flip
-        if (isAnimating)
-        {
-            var radians = angle * (float)Math.PI / 180f;
-            var scaleValue = Math.Abs((float)Math.Cos(radians));
-            var alpha = (byte)(255 * (0.6f + scaleValue * 0.4f));
-            textColor = new SKColor(
-                TextColor.Red,
-                TextColor.Green,
-                TextColor.Blue,
-                alpha);
-        }
-
-        using var textPaint = new SKPaint
-        {
-            Color = textColor,
-            IsAntialias = false // Disabled for LED display optimization
-        };
-
+        var color = new SKColor(TextColor.Red, TextColor.Green, TextColor.Blue, alpha);
+        var size = CanvasText.ResolveSize(FontSize, height * 0.62f);
         var text = digit.ToString();
-        var textBounds = new SKRect();
-        font.MeasureText(text, out textBounds);
-
-        var textX = x + width / 2f;
-        var textY = y + height / 2f - textBounds.MidY;
-        canvas.DrawText(text, textX, textY, SKTextAlign.Center, font, textPaint);
-
-        if (isAnimating) canvas.Restore();
+        CanvasText.Draw(canvas, _canvas, text, color, x + width / 2f, y + height * 0.72f, size,
+            SKTextAlign.Center, UseBdfFont);
+        canvas.Restore();
     }
 
     private void DrawSeparator(SKCanvas canvas, int x, int y, int height)
@@ -393,6 +358,13 @@ public class FlipClockExtension : IDisposable
     [ExtensionParameter("Card Shadow", "Add shadow to cards",
         DefaultValue = true)]
     public bool CardShadow { get; set; } = true;
+
+    [ExtensionParameter("Use BDF Font", "Render digits with the crisp bitmap (BDF) font", DefaultValue = false)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "Digit height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 96, Unit = "px")]
+    public int FontSize { get; set; }
 
     #endregion
 }

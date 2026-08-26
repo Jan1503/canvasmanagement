@@ -34,6 +34,14 @@ If you want a look (CRT scanlines, blur, seasonal overlay): start with [docs/FIL
 
 Dated from the public GitHub history. Newest first.
 
+### 2026-08-26 — Playable LED games, 1:1 pixel art
+
+Seven new original games, all drawn **one sprite glyph = one LED pixel** (`PixelArt`, integer scale on taller walls): **Tetris** (7-bag, hold, next×3, ghost piece), **Pixel Plumber** (side-scroller, stomp, coins and power-ups), **Street Crosser**, **Rainbow Breakout**, **Bubble Pop**, **Bomber Maze**, **Fruit Fall**. Pac-Man, Snake, Pong, Space Invaders, Dino Runner and Flappy Bird use the same art path and BDF HUDs.
+
+Games **auto-play** until the first key in [verpixeld](https://github.com/Jan1503/verpixeld) Studio. The wall has no keyboard — Studio maps `KeyboardShortcut` on methods in category **Controls**. Dino Runner has an optional **Modern Look**. Pac-Man ghosts pathfind with BFS instead of greedy Euclidean on generated mazes.
+
+Shared helpers in `CanvasManagement.Interfaces`: `PixelArt` (blit / disc / ring / HSV) and `CanvasText` (BDF or Skia labels). `ICanvas.GetBestBdfFontForHeight` picks the largest registered BDF that still fits.
+
 ### 2026-08-24 — Fonts on a data volume
 
 `BdfFontRegistry` also looks in `Data/Fonts` next to the app so [verpixeld](https://github.com/Jan1503/verpixeld) can seed BDFs on a Docker **Data** volume without an extra fonts mount. Pi hosts that keep fonts next to the DLL are unchanged.
@@ -74,7 +82,7 @@ This property is a **host/layout** control (web UI / persisted canvas JSON). Ext
 
 ```
 CanvasManagement/                 compositor (CanvasManager, Canvas)
-CanvasManagement.Interfaces/      ICanvas, ICanvasExtension, ICanvasFilter, attributes
+CanvasManagement.Interfaces/      ICanvas, PixelArt, CanvasText, attributes
 CanvasManagement.BdfFontManager/  bitmap font renderer
 CanvasManagement.Tests/           xUnit: scale, z-order, pixelate, pixels/brightness
 CanvasManagement.WinForms.Demo/   run extensions on a window (no Pi, no panel)
@@ -151,7 +159,7 @@ Details, templates and a checklist: [docs/EXTENSIONS.md](docs/EXTENSIONS.md) and
 Clocks: Analog, Digital, Binary, Flip, Word, Tetris Clock.  
 Content: Weather, News Ticker, Now Playing, Home Assistant (sensor, grid, graph, energy, weather, now-playing, climate, waste, **departures**), Advertising, Slideshow, Scroll text, GIF, YouTube, VLC, Audio, Network Stream (TPM2.NET), LAV1.  
 Visuals: Starfield, Aquarium, Lava Lamp, Falling Sand, Game of Life, Arena screensaver.  
-Games (original SkiaSharp drawing, fan-style): Pac-Man, Snake, Pong, Space Invaders, Dino Runner, Flappy Bird.
+Games (original SkiaSharp, 1:1 pixel art, playable from Studio): Pac-Man, Snake, Pong, Space Invaders, Dino Runner, Flappy Bird, **Tetris**, **Pixel Plumber**, **Street Crosser**, **Rainbow Breakout**, **Bubble Pop**, **Bomber Maze**, **Fruit Fall**. AutoPilot until the first Studio key; `KeyboardShortcut` on **Controls** methods.
 
 ## Stock filters (overview)
 

@@ -10,13 +10,13 @@ public class GameState
     private const int FrightenedDuration = 300;
     private const int GhostRespawnDelay = 60;
 
-    // Classic scatter/chase wave schedule (in ticks); after it runs out the ghosts chase permanently.
+    // Scatter is brief so ghosts actually hunt on generated mazes; then they chase for a long stretch.
     private static readonly (GhostMode mode, int frames)[] ModeSchedule =
     {
-        (GhostMode.Scatter, 180), (GhostMode.Chase, 560),
-        (GhostMode.Scatter, 180), (GhostMode.Chase, 560),
-        (GhostMode.Scatter, 140), (GhostMode.Chase, 600),
-        (GhostMode.Scatter, 140)
+        (GhostMode.Scatter, 70), (GhostMode.Chase, 720),
+        (GhostMode.Scatter, 50), (GhostMode.Chase, 720),
+        (GhostMode.Scatter, 40), (GhostMode.Chase, 800),
+        (GhostMode.Scatter, 30)
     };
 
     // Store original canvas dimensions to prevent shrinkage on reset

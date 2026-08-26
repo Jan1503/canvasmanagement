@@ -53,6 +53,10 @@ public class WeatherExtension : ICanvasExtension, IDisposable
         Order = 8)]
     public bool UseBdfFont { get; set; }
 
+    [ExtensionParameter("Font Size", "Temperature height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 96, Unit = "px", Order = 9)]
+    public int FontSize { get; set; }
+
     [ExtensionParameter("Refresh (min)", "How often to refetch the weather", DefaultValue = 15, MinValue = 5,
         MaxValue = 180, Unit = "min", Order = 6)]
     public int RefreshMinutes { get; set; } = 15;
@@ -249,14 +253,14 @@ public class WeatherExtension : ICanvasExtension, IDisposable
         var availW = Math.Max(8f, w - tempLeft - pad);
         var tempH = mainH * 0.62f;
         DrawTextDual(canvas, tempStr, tempLeft, iconCy + tempH * 0.35f, tempH, SKColors.White, SKTextAlign.Left,
-            availW);
+            availW, applyFontSize: true);
 
         // Location · condition, centered and auto-fit.
         var locText = string.IsNullOrWhiteSpace(Location)
             ? ConditionText(data.Code)
             : $"{Location} · {ConditionText(data.Code)}";
         DrawTextDual(canvas, locText, w / 2f, mainH + infoH * 0.8f, infoH * 0.82f, new SKColor(180, 205, 235),
-            SKTextAlign.Center, w - pad * 2);
+            SKTextAlign.Center, w - pad * 2, applyFontSize: true);
 
         // Forecast strip: per-day column, all centred.
         if (forecastH > 0)
@@ -285,31 +289,12 @@ public class WeatherExtension : ICanvasExtension, IDisposable
 
     /// <summary>Draws text either with the system font (auto-fit) or the crisp BDF bitmap font.</summary>
     private void DrawTextDual(SKCanvas canvas, string text, float anchorX, float baselineY, float targetH,
-        SKColor color, SKTextAlign align, float maxW)
+        SKColor color, SKTextAlign align, float maxW, bool applyFontSize = false)
     {
         if (string.IsNullOrEmpty(text)) return;
 
-        if (UseBdfFont)
-        {
-            var fontName = BdfFontRegistry.GetBestFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
-            using var bmp = _canvas.RenderBdfTextToBitmap(text, color, fontName);
-            if (bmp is not { Width: > 0, Height: > 0 }) return;
-
-            var scale = maxW > 0 && bmp.Width > maxW ? maxW / bmp.Width : 1f;
-            var dw = bmp.Width * scale;
-            var dh = bmp.Height * scale;
-            var left = align == SKTextAlign.Center ? anchorX - dw / 2f :
-                align == SKTextAlign.Right ? anchorX - dw : anchorX;
-            var top = baselineY - dh; // BDF bitmap height ≈ glyph height; align its bottom near the baseline
-            canvas.DrawBitmap(bmp, new SKRect(left, top, left + dw, top + dh));
-            return;
-        }
-
-        using var font = new SKFont { Size = targetH };
-        using var paint = new SKPaint { Color = color, IsAntialias = true };
-        var tw = font.MeasureText(text);
-        if (maxW > 0 && tw > maxW && tw > 0) font.Size *= maxW / tw;
-        canvas.DrawText(text, anchorX, baselineY, align, font, paint);
+        var size = applyFontSize ? CanvasText.ResolveSize(FontSize, targetH) : targetH;
+        CanvasText.Draw(canvas, _canvas, text, color, anchorX, baselineY, size, align, UseBdfFont, maxW);
     }
 
     private static string ConditionText(int code)

@@ -11,7 +11,7 @@ namespace CanvasManagement.Extension.SpaceInvaders;
 ///     a tiny action struct so a real controller can drive it later instead of the AI.
 /// </summary>
 [ExtensionInfo("Space Invaders",
-    "Classic Space Invaders arcade game with an AI-controlled cannon",
+    "Space Invaders — autopilot, or play with arrows / Space in Studio",
     "Games",
     IconResourceName = "space-invaders.svg")]
 public class SpaceInvadersExtension : ICanvasExtension, IDisposable
@@ -85,6 +85,9 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
 
     private int _gameOverTimer;
     private int _respawnTimer;
+    private bool _human;
+    private bool _leftHeld;
+    private bool _rightHeld;
 
     internal SpaceInvadersExtension(ICanvas canvas)
     {
@@ -104,6 +107,17 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
 
     [ExtensionParameter("Show HUD", "Show score / lives / wave", DefaultValue = true, Order = 4)]
     public bool ShowHud { get; set; } = true;
+
+    [ExtensionParameter("Use BDF Font", "Render HUD text with the crisp bitmap (BDF) font", DefaultValue = false,
+        Order = 5)]
+    public bool UseBdfFont { get; set; }
+
+    [ExtensionParameter("Font Size", "HUD text height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
+        MaxValue = 48, Unit = "px", Order = 6)]
+    public int FontSize { get; set; }
+
+    [ExtensionParameter("Auto Pilot", "AI shoots until you press a key in Studio", DefaultValue = true, Order = 7)]
+    public bool AutoPilot { get; set; } = true;
 
     [ExtensionParameter("Score", "Current score", ReadOnly = true, Order = 10)]
     public int Score { get; private set; }
@@ -129,6 +143,9 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         lock (_lock)
         {
             if (IsRunning) return;
+            _human = false;
+            _leftHeld = false;
+            _rightHeld = false;
             Layout();
             NewGame();
 
@@ -179,7 +196,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         _shipW = 11 * _px;
         _shipH = 4 * _px;
         _shipY = h - _shipH - _px * 2;
-        _shipSpeed = Math.Max(1f, 2.2f * scale * _px);
+        _shipSpeed = Math.Max(1f, Math.Min(2.4f * scale, _px * 1.4f));
 
         _bulletSpeed = Math.Max(2f, 3.5f * scale * _px);
         _bombSpeed = Math.Max(1f, 1.6f * scale * _px);
@@ -279,7 +296,15 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         UpdateBullet();
         UpdateBombs();
         UpdateUfo();
-        if (_respawnTimer == 0) RunAi();
+        if (_respawnTimer == 0)
+        {
+            if (AutoPilot && !_human) RunAi();
+            else
+            {
+                var hold = (_rightHeld ? 1 : 0) - (_leftHeld ? 1 : 0);
+                if (hold != 0) MoveShip(hold);
+            }
+        }
 
         // Wave cleared?
         if (AliveCount() == 0) { Wave++; StartWave(); }
@@ -409,46 +434,80 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
     {
         var shipCenter = _shipX + _shipW / 2f;
 
-        // 1) Dodge: is a bomb about to hit us?
-        Bomb? threat = null;
-        var threatDist = float.MaxValue;
+        // 1) Dodge bombs that are actually on a collision course, not merely nearby.
+        var dodge = 0;
+        var closestThreat = float.MaxValue;
         foreach (var b in _bombs)
         {
             if (b.Y > _shipY) continue;
-            if (Math.Abs(b.X - shipCenter) > _shipW) continue;
-            var d = _shipY - b.Y;
-            if (d < threatDist) { threatDist = d; threat = b; }
+            var frames = (_shipY - b.Y) / Math.Max(0.4f, _bombSpeed + Difficulty * 0.15f);
+            if (frames > 22) continue;
+            var hit = b.X >= _shipX - _px && b.X <= _shipX + _shipW + _px;
+            if (!hit) continue;
+            if (frames < closestThreat)
+            {
+                closestThreat = frames;
+                var roomLeft = _shipX;
+                var roomRight = _canvas.Width - (_shipX + _shipW);
+                dodge = roomLeft >= roomRight ? -1 : 1;
+                if (b.X < shipCenter && roomRight > _shipW * 0.3f) dodge = 1;
+                if (b.X > shipCenter && roomLeft > _shipW * 0.3f) dodge = -1;
+            }
         }
 
-        if (threat != null && threatDist < _canvas.Height * 0.5f)
+        if (dodge != 0)
         {
-            // Step away from the bomb (toward whichever side has more room).
-            var dir = threat.Value.X > shipCenter ? -1 : 1;
-            if (shipCenter < _shipW || shipCenter > _canvas.Width - _shipW)
-                dir = shipCenter < _canvas.Width / 2f ? 1 : -1;
-            MoveShip(dir);
+            MoveShip(dodge);
+            TryShoot(shipCenter);
             return;
         }
 
-        // 2) Aim at the nearest alive invader column and fire when lined up.
-        var bestX = shipCenter;
-        var best = float.MaxValue;
-        for (var c = 0; c < _cols; c++)
-        for (var r = _rows - 1; r >= 0; r--)
+        var targetX = PickTargetX(shipCenter);
+        var err = targetX - shipCenter;
+        var align = Math.Max(_invW * 0.4f, _shipSpeed);
+        if (Math.Abs(err) > align)
+            MoveShip(err > 0 ? 1 : -1);
+        TryShoot(shipCenter + Math.Clamp(err, -_shipSpeed, _shipSpeed));
+    }
+
+    private float PickTargetX(float shipCenter)
+    {
+        if (_ufo != null)
         {
-            if (!_alive[c, r]) continue;
-            var (ix, _) = InvaderPos(c, r);
-            var cx = ix + _invW / 2f;
-            var d = Math.Abs(cx - shipCenter);
-            if (d < best) { best = d; bestX = cx; }
-            break; // only the front (lowest) invader of each column matters for aiming
+            var ufoX = _ufo.X + _invW / 2f;
+            if (ufoX > _px && ufoX < _canvas.Width - _px)
+                return ufoX;
         }
 
-        // Prefer the UFO if it's up there (big points).
-        if (_ufo != null) { bestX = _ufo.X + _invW / 2f; best = Math.Abs(bestX - shipCenter); }
+        var bestX = shipCenter;
+        var bestScore = float.MaxValue;
+        for (var c = 0; c < _cols; c++)
+        {
+            var front = -1;
+            for (var r = _rows - 1; r >= 0; r--)
+                if (_alive[c, r]) { front = r; break; }
+            if (front < 0) continue;
 
-        if (best > _px) MoveShip(bestX > shipCenter ? 1 : -1);
-        else if (!_bulletActive) Fire();
+            var (ix, iy) = InvaderPos(c, front);
+            var cx = ix + _invW / 2f;
+            // Prefer the lowest (nearest) invaders, then the closest column.
+            var score = (_rows - 1 - front) * _canvas.Width + Math.Abs(cx - shipCenter);
+            if (score < bestScore)
+            {
+                bestScore = score;
+                bestX = cx;
+            }
+        }
+
+        return bestX;
+    }
+
+    private void TryShoot(float aimX)
+    {
+        if (_bulletActive || _respawnTimer > 0) return;
+        var shipCenter = _shipX + _shipW / 2f;
+        if (Math.Abs(aimX - shipCenter) > _invW * 0.55f) return;
+        Fire();
     }
 
     private void MoveShip(int dir)
@@ -461,6 +520,45 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         _bulletActive = true;
         _bulletX = _shipX + _shipW / 2f;
         _bulletY = _shipY;
+    }
+
+    [ExtensionMethod("Move Left", "Hold left — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Left|A", Order = 1)]
+    public void MoveLeft()
+    {
+        lock (_lock) { _human = true; _leftHeld = true; }
+    }
+
+    [ExtensionMethod("Move Right", "Hold right — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Right|D", Order = 2)]
+    public void MoveRight()
+    {
+        lock (_lock) { _human = true; _rightHeld = true; }
+    }
+
+    [ExtensionMethod("Release Left", "Release left",
+        Category = "Controls", KeyboardShortcut = "Left:up|A:up", Order = 3)]
+    public void ReleaseLeft()
+    {
+        lock (_lock) _leftHeld = false;
+    }
+
+    [ExtensionMethod("Release Right", "Release right",
+        Category = "Controls", KeyboardShortcut = "Right:up|D:up", Order = 4)]
+    public void ReleaseRight()
+    {
+        lock (_lock) _rightHeld = false;
+    }
+
+    [ExtensionMethod("Shoot", "Fire — takes over from autopilot",
+        Category = "Controls", KeyboardShortcut = "Space|Up", Order = 5)]
+    public void Shoot()
+    {
+        lock (_lock)
+        {
+            _human = true;
+            if (!_bulletActive && _respawnTimer == 0) Fire();
+        }
     }
 
     private void LoseLife()
@@ -505,6 +603,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         return n;
     }
 
+    // Authentic arcade: player shots and invader bombs both nibble the bunkers.
     private bool HitShield(int x, int y)
     {
         foreach (var s in _shields)
@@ -603,16 +702,14 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
 
     private void DrawHud(SKCanvas canvas)
     {
-        var size = Math.Max(8f, Math.Min(14f, _canvas.Height * 0.09f));
-        using var font = new SKFont { Size = size };
-        using var text = new SKPaint { Color = SKColors.White, IsAntialias = true };
-        canvas.DrawText($"SCORE {Score}", 3, size, SKTextAlign.Left, font, text);
+        var size = CanvasText.ResolveSize(FontSize, Math.Max(8f, Math.Min(14f, _canvas.Height * 0.09f)));
+        CanvasText.Draw(canvas, _canvas, $"SCORE {Score}", SKColors.White, 3, size, size, SKTextAlign.Left,
+            UseBdfFont);
 
         if (_gameOverTimer > 0)
         {
-            using var big = new SKFont { Size = Math.Max(14f, _canvas.Height * 0.16f) };
-            using var rp = new SKPaint { Color = SKColors.Red, IsAntialias = true };
-            canvas.DrawText("GAME OVER", _canvas.Width / 2f, _canvas.Height / 2f, SKTextAlign.Center, big, rp);
+            CanvasText.Draw(canvas, _canvas, "GAME OVER", SKColors.Red, _canvas.Width / 2f, _canvas.Height / 2f,
+                CanvasText.ResolveSize(FontSize, Math.Max(14f, _canvas.Height * 0.16f)), SKTextAlign.Center, UseBdfFont);
         }
 
         // Lives as little cannons.
