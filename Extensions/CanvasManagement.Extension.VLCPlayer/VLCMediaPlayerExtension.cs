@@ -36,7 +36,42 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
     private string _smbPassword = "";
     private int _volume = 100;
     private bool _mute = false;
+    private bool _playAudio = true;
     
+    /// <summary>
+    ///     The NAS image has no usable playback device. <c>/proc/asound</c> can still list a card
+    ///     while opening <c>default</c> fails, and LibVLC then retries ALSA on every audio block.
+    /// </summary>
+    private static bool RunningInContainer() => File.Exists("/.dockerenv");
+
+    /// <summary>
+    ///     Linux without a playback device has no ALSA card. Opening "default" then fails in a tight
+    ///     loop and the log fills with ALSA errors. Windows and a Pi with a card still play audio.
+    /// </summary>
+    private static bool HasSoundDevice()
+    {
+        if (!OperatingSystem.IsLinux())
+            return true;
+
+        try
+        {
+            if (!Directory.Exists("/dev/snd"))
+                return false;
+
+            const string cardsPath = "/proc/asound/cards";
+            if (!File.Exists(cardsPath))
+                return false;
+
+            var cards = File.ReadAllText(cardsPath);
+            return !cards.Contains("no soundcards", StringComparison.OrdinalIgnoreCase)
+                   && cards.Contains("]:", StringComparison.Ordinal);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public VLCMediaPlayerExtension(ICanvas canvas)
     {
         _canvas = canvas ?? throw new ArgumentNullException(nameof(canvas));
@@ -134,7 +169,7 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
         set
         {
             _volume = Math.Clamp(value, 0, 100);
-            if (_mediaPlayer != null && IsRunning)
+            if (_mediaPlayer != null && IsRunning && _playAudio)
                 try
                 {
                     _mediaPlayer.Volume = _volume;
@@ -212,7 +247,7 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
         set
         {
             _mute = value;
-            if (_mediaPlayer != null && IsRunning)
+            if (_mediaPlayer != null && IsRunning && _playAudio)
                 try
                 {
                     _mediaPlayer.Mute = _mute;
@@ -684,6 +719,9 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
 
                 LibVLC? testLibVLC = null;
                 string? successfulConfig = null;
+                _playAudio = EnableAudio && !RunningInContainer() && HasSoundDevice();
+                if (!_playAudio)
+                    Console.WriteLine("[VLC] Audio off — no sound card. ALSA is not opened.");
 
                 // Try each config until one initializes successfully
                 foreach (var config in hwDecoderConfigs)
@@ -694,9 +732,11 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
                     // SMB credentials must be embedded in the URL (smb://user:pass@server/share)
                     // Don't add SMB options here as they cause initialization to fail
 
-                    // Audio configuration
-                    if (!EnableAudio)
+                    // Without a card, LibVLC retries "default" forever and the log fills with ALSA errors.
+                    // --ignore-config stops a saved vlcrc from forcing the alsa module back on.
+                    if (!_playAudio)
                     {
+                        args.Add("--ignore-config");
                         args.Add("--no-audio");
                     }
                     else
@@ -758,8 +798,10 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
                 Console.WriteLine("[VLC] Setting video callbacks...");
                 _mediaPlayer.SetVideoCallbacks(LockVideo, null, DisplayVideo);
 
-                // Set volume
-                _mediaPlayer.Volume = _volume;
+                // Set volume. Mute as well when there is no device, so a later unmute cannot reopen ALSA.
+                _mediaPlayer.Volume = _playAudio ? _volume : 0;
+                if (!_playAudio)
+                    _mediaPlayer.Mute = true;
                 
                 // Handle end reached for loop functionality
                 _mediaPlayer.EndReached += OnEndReached;
@@ -961,6 +1003,8 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
                 Console.WriteLine($"[VLC] Final URL: {HidePassword(mediaUrl)}");
 
                 var media = new Media(_libVLC, mediaUrl, fromType);
+                if (!_playAudio)
+                    media.AddOption(":no-audio");
 
                 // For YouTube URLs, add required HTTP headers to avoid 403 Forbidden
                 // YouTube validates that the request comes from the same client type that fetched the URL
@@ -976,8 +1020,9 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
                     media.AddOption(":no-video-title-show");
                 }
 
-                // If we have a separate audio stream (YouTube adaptive), use --input-slave
-                if (!string.IsNullOrWhiteSpace(audioSlaveUrl))
+                // If we have a separate audio stream (YouTube adaptive), use --input-slave.
+                // Skip it when audio is off — the slave would open ALSA again.
+                if (_playAudio && !string.IsNullOrWhiteSpace(audioSlaveUrl))
                 {
                     Console.WriteLine("[VLC] Adding audio slave for adaptive stream...");
                     media.AddOption($":input-slave={audioSlaveUrl}");

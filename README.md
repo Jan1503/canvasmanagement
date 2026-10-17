@@ -34,6 +34,10 @@ If you want a look (CRT scanlines, blur, seasonal overlay): start with [docs/FIL
 
 Dated from the public GitHub history. Newest first.
 
+### 2026-10-17 — Live display resize
+
+`CanvasManager.Resize` swaps the composite bitmap while the render loop is running. Existing canvases keep their size and position; pixels outside them stay black. The VLC extension leaves audio off inside a container, and on Linux when no ALSA card can be opened, so a missing sound device does not retry forever.
+
 ### 2026-08-26 — Playable LED games, 1:1 pixel art
 
 Seven new original games, all drawn **one sprite glyph = one LED pixel** (`PixelArt`, integer scale on taller walls): **Tetris** (7-bag, hold, next×3, ghost piece), **Pixel Plumber** (side-scroller, stomp, coins and power-ups), **Street Crosser**, **Rainbow Breakout**, **Bubble Pop**, **Bomber Maze**, **Fruit Fall**. Pac-Man, Snake, Pong, Space Invaders, Dino Runner and Flappy Bird use the same art path and BDF HUDs.

@@ -19,8 +19,8 @@ public class CanvasManager : IDisposable
     // per-pixel alpha (SrcOver) so transparent regions reveal the layer beneath instead of forcing opaque.
     private readonly SKPaint _alphaCompositePaint;
     private readonly List<ICanvasFilter> _filters = new();
-    private readonly SKCanvas _mainCanvas;
-    private readonly SKBitmap _mainCanvasBitmap;
+    private SKCanvas _mainCanvas;
+    private SKBitmap _mainCanvasBitmap;
     private readonly object _swapLock = new();
     private float _brightness = 1.0f;
 
@@ -132,6 +132,33 @@ public class CanvasManager : IDisposable
     ///     Height of the display / main render surface in pixels.
     /// </summary>
     public int Height => _mainCanvasBitmap.Height;
+
+    /// <summary>
+    ///     Replace the composite surface. Existing canvases keep their size and position; pixels outside
+    ///     them stay black. Safe to call while the render loop is running — it waits for the current frame.
+    /// </summary>
+    public void Resize(int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width), "Display size must be positive.");
+
+        lock (_swapLock)
+        {
+            if (_mainCanvasBitmap.Width == width && _mainCanvasBitmap.Height == height) return;
+
+            var next = new SKBitmap(width, height);
+            var canvas = new SKCanvas(next);
+            var oldCanvas = _mainCanvas;
+            var oldBitmap = _mainCanvasBitmap;
+            _mainCanvasBitmap = next;
+            _mainCanvas = canvas;
+            oldCanvas.Dispose();
+            oldBitmap.Dispose();
+            _canvasesDirty = true;
+        }
+
+        Console.WriteLine($"[CANVAS] display resized to {width}x{height}");
+    }
 
     #region Filter Discovery
 
