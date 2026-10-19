@@ -65,8 +65,7 @@ namespace CanvasManagement.Extension.MyThing;
 public sealed class MyThingExtension : ICanvasExtension, IDisposable
 {
     private readonly ICanvas _canvas;
-    private CancellationTokenSource? _cts;
-    private Task? _loop;
+    private ExtensionLoop? _loop;
     private SKBitmap? _backBuffer;
 
     internal MyThingExtension(ICanvas canvas) => _canvas = canvas;
@@ -83,17 +82,23 @@ public sealed class MyThingExtension : ICanvasExtension, IDisposable
         IsRunning = true;
         _backBuffer = new SKBitmap(new SKImageInfo(_canvas.Width, _canvas.Height,
             SKColorType.Bgra8888, SKAlphaType.Premul));
-        _cts = new CancellationTokenSource();
-        _loop = Task.Run(() => RunAsync(_cts.Token));
+        _loop = new ExtensionLoop(20, ct =>
+        {
+            using (var sk = new SKCanvas(_backBuffer))
+            {
+                sk.Clear(SKColors.Black);
+                // draw into _backBuffer — read _canvas.Width / Height every frame
+            }
+            _canvas.SubmitCompletedFrame(_backBuffer);
+            return Task.CompletedTask;
+        });
+        _loop.Start();
     }
 
     public void Stop()
     {
         if (!IsRunning) return;
-        _cts?.Cancel();
-        try { _loop?.Wait(TimeSpan.FromSeconds(2)); } catch { /* ignore */ }
-        _cts?.Dispose();
-        _cts = null;
+        _loop?.Dispose();
         _loop = null;
         _backBuffer?.Dispose();
         _backBuffer = null;
@@ -102,25 +107,6 @@ public sealed class MyThingExtension : ICanvasExtension, IDisposable
     }
 
     public void Dispose() => Stop();
-
-    private async Task RunAsync(CancellationToken ct)
-    {
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                using (var sk = new SKCanvas(_backBuffer))
-                {
-                    sk.Clear(SKColors.Black);
-                    // draw into _backBuffer …
-                }
-                _canvas.SubmitCompletedFrame(_backBuffer);
-                await Task.Delay(16, ct); // ~60 fps; host also caps the wall
-            }
-        }
-        catch (OperationCanceledException) { }
-        finally { IsRunning = false; }
-    }
 }
 ```
 

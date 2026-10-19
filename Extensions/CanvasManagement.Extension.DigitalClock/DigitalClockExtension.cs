@@ -83,8 +83,8 @@ public class DigitalClockExtension : ICanvasExtension, IDisposable
         MinValue = 0, MaxValue = 256, Unit = "px", Order = 21)]
     public int FontSize { get; set; }
 
-    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = false, Order = 22)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = true, Order = 22)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Bold", "Use a bold weight (system font only)", DefaultValue = true, Order = 23)]
     public bool Bold { get; set; } = true;

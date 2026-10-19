@@ -61,9 +61,9 @@ public class HomeAssistantSensorExtension : ICanvasExtension, IDisposable
         MaxValue = 200, Unit = "px", Order = 7)]
     public int ValueSize { get; set; }
 
-    [ExtensionParameter("BDF Font", "Use the crisp bitmap (BDF) font for which text", DefaultValue = HaBdfMode.None,
+    [ExtensionParameter("BDF Font", "Use the crisp bitmap (BDF) font for which text", DefaultValue = HaBdfMode.Both,
         Order = 8)]
-    public HaBdfMode BdfFont { get; set; } = HaBdfMode.None;
+    public HaBdfMode BdfFont { get; set; } = HaBdfMode.Both;
 
     [ExtensionParameter("Align", "Horizontal alignment", DefaultValue = HaTileAlign.Center, Order = 9)]
     public HaTileAlign Align { get; set; } = HaTileAlign.Center;
@@ -388,7 +388,7 @@ public class HomeAssistantSensorExtension : ICanvasExtension, IDisposable
         }
 
         using var font = new SKFont { Size = Math.Max(4f, targetH), Subpixel = true };
-        using var paint = new SKPaint { Color = color, IsAntialias = true };
+        using var paint = new SKPaint { Color = color, IsAntialias = false };
         var tw = font.MeasureText(text);
         if (fit && tw > rw && tw > 0) font.Size *= rw / tw;
 

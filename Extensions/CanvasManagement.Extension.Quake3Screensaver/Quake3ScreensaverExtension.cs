@@ -135,8 +135,8 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
         DefaultValue = true)]
     public bool ShowText { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render quotes with the crisp bitmap (BDF) font", DefaultValue = false)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render quotes with the crisp bitmap (BDF) font", DefaultValue = true)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Quote height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 48, Unit = "px")]

@@ -47,9 +47,9 @@ public class NightSkyExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Background Color", "Zenith colour", DefaultValue = "#050816", Order = 6)]
     public SKColor BackgroundColor { get; set; } = new(5, 8, 22);
 
-    [ExtensionParameter("Use BDF Font", "Render labels with the crisp bitmap (BDF) font", DefaultValue = false,
+    [ExtensionParameter("Use BDF Font", "Render labels with the crisp bitmap (BDF) font", DefaultValue = true,
         Order = 7)]
-    public bool UseBdfFont { get; set; }
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Label height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 48, Unit = "px", Order = 8)]

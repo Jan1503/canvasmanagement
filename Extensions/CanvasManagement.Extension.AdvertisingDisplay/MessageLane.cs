@@ -2421,7 +2421,7 @@ internal sealed class MessageLane : IDisposable
         using var canvas = new SKCanvas(mask);
         canvas.Clear(SKColors.Transparent);
 
-        using var paint = new SKPaint { Color = SKColors.White, IsAntialias = size >= 12 };
+        using var paint = new SKPaint { Color = SKColors.White, IsAntialias = false };
         var x = 1f;
         var baseline = maxAsc + 1;
         foreach (var (s, tf) in runs)

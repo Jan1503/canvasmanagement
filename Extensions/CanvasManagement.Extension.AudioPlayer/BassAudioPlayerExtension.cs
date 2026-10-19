@@ -697,12 +697,12 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
 
         var size = Math.Max(8f, _canvas.Height * 0.12f);
         using (var font = new SKFont { Size = size })
-        using (var paint = new SKPaint { Color = new SKColor(255, 120, 120), IsAntialias = true })
+        using (var paint = new SKPaint { Color = new SKColor(255, 120, 120), IsAntialias = false })
             canvas.DrawText("Audio unavailable", _canvas.Width / 2f, _canvas.Height / 2f - size * 0.2f,
                 SKTextAlign.Center, font, paint);
 
         using (var font = new SKFont { Size = Math.Max(6f, size * 0.55f) })
-        using (var paint = new SKPaint { Color = new SKColor(170, 175, 190), IsAntialias = true })
+        using (var paint = new SKPaint { Color = new SKColor(170, 175, 190), IsAntialias = false })
             canvas.DrawText("install libbass.so", _canvas.Width / 2f, _canvas.Height / 2f + size * 0.8f,
                 SKTextAlign.Center, font, paint);
 
@@ -827,7 +827,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
         using var textPaint = new SKPaint
         {
             Color = SKColors.White,
-            IsAntialias = true
+            IsAntialias = false
         };
         canvas.DrawText(label, x + 5, y + height / 2 + fontSize / 3, SKTextAlign.Left, font, textPaint);
     }
@@ -860,7 +860,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
             using var textPaint = new SKPaint
             {
                 Color = SKColors.White,
-                IsAntialias = true
+                IsAntialias = false
             };
 
             for (var i = 0; i < labels.Length; i++)
@@ -891,7 +891,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
             Color = SKColors.DarkGray,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 10,
-            IsAntialias = true
+            IsAntialias = false
         };
 
         using var path = new SKPath();
@@ -906,7 +906,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
             Color = color,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 10,
-            IsAntialias = true
+            IsAntialias = false
         };
 
         using var levelPath = new SKPath();
@@ -928,7 +928,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
             using var textPaint = new SKPaint
             {
                 Color = SKColors.White,
-                IsAntialias = true
+                IsAntialias = false
             };
             canvas.DrawText("No waveform data", width / 2, centerY, SKTextAlign.Center, font, textPaint);
             return;
@@ -959,7 +959,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
             Color = PrimaryColor,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2,
-            IsAntialias = true
+            IsAntialias = false
         };
         canvas.DrawPath(path, waveformPaint);
 
@@ -975,7 +975,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
         using var markerPaint = new SKPaint
         {
             Color = SKColors.Gray,
-            IsAntialias = true
+            IsAntialias = false
         };
         canvas.DrawText("+1.0", 5, 15 + markerSize / 2, SKTextAlign.Left, markerFont, markerPaint);
         canvas.DrawText("0.0", 5, centerY + markerSize / 2, SKTextAlign.Left, markerFont, markerPaint);
@@ -998,7 +998,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
             Color = SKColors.DarkGray,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2,
-            IsAntialias = true
+            IsAntialias = false
         };
         canvas.DrawOval(rect, circlePaint);
 
@@ -1038,7 +1038,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
             Color = PrimaryColor,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
-            IsAntialias = true
+            IsAntialias = false
         };
         canvas.DrawPath(path, tracePaint);
 
@@ -1048,7 +1048,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
         //{ 
         //    Color = SKColors.White, 
         //    TextSize = fontSize, 
-        //    IsAntialias = true 
+        //    IsAntialias = false 
         //};
         //canvas.DrawText("L", 5, centerY + fontSize / 3, labelPaint);
         //canvas.DrawText("R", centerX - fontSize / 2, 15, labelPaint);
@@ -1076,7 +1076,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
                 Color = color,
                 Style = SKPaintStyle.Stroke,
                 StrokeWidth = 10,
-                IsAntialias = true
+                IsAntialias = false
             };
             canvas.DrawOval(rect, beatPaint);
         }
@@ -1102,7 +1102,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
                 Color = pulseColor,
                 Style = SKPaintStyle.Stroke,
                 StrokeWidth = 20,
-                IsAntialias = true
+                IsAntialias = false
             };
             canvas.DrawOval(pulseRect, pulsePaint);
         }
@@ -1124,7 +1124,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
             using var bpmPaint = new SKPaint
             {
                 Color = SKColors.White,
-                IsAntialias = true
+                IsAntialias = false
             };
             canvas.DrawText(bpmText, centerX, centerY, SKTextAlign.Center, bpmFont, bpmPaint);
         }
@@ -1135,7 +1135,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
         if (waterfallData == null || waterfallData.Count == 0)
         {
             using var font = new SKFont { Size = 16 };
-            using var textPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+            using var textPaint = new SKPaint { Color = SKColors.White, IsAntialias = false };
             canvas.DrawText("Building history...", _canvas.Width / 2 - 60, _canvas.Height / 2, SKTextAlign.Left, font,
                 textPaint);
             return;
@@ -1199,7 +1199,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
         var fontSize = Math.Max(6, Math.Min(10, width / 100));
 
         using var labelFont = new SKFont { Size = fontSize };
-        using var labelPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        using var labelPaint = new SKPaint { Color = SKColors.White, IsAntialias = false };
 
         for (var i = 0; i < Math.Min(bands, labels.Length); i++)
         {
@@ -1212,12 +1212,12 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
         // Draw title
         var titleSize = Math.Max(10, Math.Min(14, width / 50));
         using var titleFont = new SKFont { Size = titleSize };
-        using var titlePaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        using var titlePaint = new SKPaint { Color = SKColors.White, IsAntialias = false };
         canvas.DrawText("WATERFALL SPECTRUM", 10, 15, SKTextAlign.Left, titleFont, titlePaint);
 
         var timeSize = Math.Max(8, titleSize - 2);
         using var timeFont = new SKFont { Size = timeSize };
-        using var timePaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        using var timePaint = new SKPaint { Color = SKColors.White, IsAntialias = false };
         canvas.DrawText("? Time", width - 50, 15, SKTextAlign.Left, timeFont, timePaint);
     }
 
@@ -1272,7 +1272,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
         using var textPaint = new SKPaint
         {
             Color = SKColors.White,
-            IsAntialias = true
+            IsAntialias = false
         };
         canvas.DrawText(label, x + width / 2, y - 5, SKTextAlign.Center, font, textPaint);
     }
@@ -1312,9 +1312,7 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
 
         var fontSize = Math.Max(8, Math.Min(14, height / 10));
         var textColor = ScrollTextColor;
-
-        var charWidth = fontSize * 0.6f;
-        var textWidth = text.Length * charWidth;
+        var textWidth = Math.Max(fontSize, CanvasText.Measure(_canvas, text, fontSize, true));
 
         _scrollPosition -= _scrollSpeed;
 
@@ -1330,17 +1328,9 @@ public sealed class AudioPlayerExtension : ICanvasExtension, IDisposable
         using var bgPaint = new SKPaint { Color = bgColor, Style = SKPaintStyle.Fill };
         canvas.DrawRect(0, barY, width, barHeight, bgPaint);
 
-        // Draw scrolling text
-        using var font = new SKFont { Size = fontSize };
-        using var textPaint = new SKPaint
-        {
-            Color = textColor,
-            IsAntialias = true
-        };
-        canvas.DrawText(text, (int)_scrollPosition, textY, SKTextAlign.Left, font, textPaint);
-
-        // Draw wrapped text for seamless loop
+        CanvasText.Draw(canvas, _canvas, text, textColor, _scrollPosition, textY, fontSize, SKTextAlign.Left, true);
         if (_scrollPosition < 0 && _scrollPosition > -textWidth)
-            canvas.DrawText(text, (int)(_scrollPosition + textWidth + 20), textY, SKTextAlign.Left, font, textPaint);
+            CanvasText.Draw(canvas, _canvas, text, textColor, _scrollPosition + textWidth + 20, textY, fontSize,
+                SKTextAlign.Left, true);
     }
 }

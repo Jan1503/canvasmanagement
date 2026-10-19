@@ -48,8 +48,8 @@ public class HomeAssistantWeatherExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Fahrenheit", "Show °F instead of °C", DefaultValue = false, Order = 7)]
     public bool Fahrenheit { get; set; }
 
-    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = false, Order = 8)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = true, Order = 8)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Align", "Horizontal alignment of the text column", DefaultValue = HaTileAlign.Left,
         Order = 9)]
@@ -221,7 +221,7 @@ public class HomeAssistantWeatherExtension : ICanvasExtension, IDisposable
 
         if (night)
         {
-            using var star = new SKPaint { Color = SKColors.White, IsAntialias = true };
+            using var star = new SKPaint { Color = SKColors.White, IsAntialias = false };
             for (var i = 0; i < 28; i++)
             {
                 var x = Hash(i, 1) * w;
@@ -234,7 +234,7 @@ public class HomeAssistantWeatherExtension : ICanvasExtension, IDisposable
 
         if (cloud || rain || snow || storm)
         {
-            using var puff = new SKPaint { Color = new SKColor(220, 228, 240, 180), IsAntialias = true };
+            using var puff = new SKPaint { Color = new SKColor(220, 228, 240, 180), IsAntialias = false };
             for (var i = 0; i < 4; i++)
             {
                 var x = ((Hash(i, 4) * w) + _frame * (0.4f + i * 0.15f)) % (w + 40) - 20;
@@ -250,7 +250,7 @@ public class HomeAssistantWeatherExtension : ICanvasExtension, IDisposable
         {
             using var drop = new SKPaint
             {
-                Color = new SKColor(180, 210, 255, 200), StrokeWidth = 1.2f, IsAntialias = true,
+                Color = new SKColor(180, 210, 255, 200), StrokeWidth = 1.2f, IsAntialias = false,
                 Style = SKPaintStyle.Stroke
             };
             for (var i = 0; i < 18; i++)
@@ -266,12 +266,12 @@ public class HomeAssistantWeatherExtension : ICanvasExtension, IDisposable
     {
         var r = size * 0.5f;
         var night = cond.Contains("night", StringComparison.OrdinalIgnoreCase);
-        using var sun = new SKPaint { Color = night ? new SKColor(225, 230, 245) : new SKColor(255, 200, 60), IsAntialias = true };
-        using var cloud = new SKPaint { Color = new SKColor(210, 220, 235), IsAntialias = true };
-        using var dark = new SKPaint { Color = new SKColor(150, 162, 180), IsAntialias = true };
+        using var sun = new SKPaint { Color = night ? new SKColor(225, 230, 245) : new SKColor(255, 200, 60), IsAntialias = false };
+        using var cloud = new SKPaint { Color = new SKColor(210, 220, 235), IsAntialias = false };
+        using var dark = new SKPaint { Color = new SKColor(150, 162, 180), IsAntialias = false };
         using var rain = new SKPaint
         {
-            Color = new SKColor(90, 150, 240), IsAntialias = true, StrokeWidth = Math.Max(1, size * 0.05f),
+            Color = new SKColor(90, 150, 240), IsAntialias = false, StrokeWidth = Math.Max(1, size * 0.05f),
             Style = SKPaintStyle.Stroke
         };
 
@@ -290,7 +290,7 @@ public class HomeAssistantWeatherExtension : ICanvasExtension, IDisposable
         if (cond.Contains("lightning", StringComparison.OrdinalIgnoreCase))
         {
             Cloud();
-            using var bolt = new SKPaint { Color = new SKColor(255, 220, 70), IsAntialias = true };
+            using var bolt = new SKPaint { Color = new SKColor(255, 220, 70), IsAntialias = false };
             using var p = new SKPath();
             p.MoveTo(cx, cy + r * 0.1f);
             p.LineTo(cx - r * 0.15f, cy + r * 0.45f);

@@ -72,9 +72,9 @@ public sealed class TrailerExtension : ICanvasExtension, IDisposable
         Order = 5)]
     public bool ShowTitle { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render titles with the crisp bitmap (BDF) font", DefaultValue = false,
+    [ExtensionParameter("Use BDF Font", "Render titles with the crisp bitmap (BDF) font", DefaultValue = true,
         Order = 6)]
-    public bool UseBdfFont { get; set; }
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Title height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 64, Unit = "px", Order = 7)]

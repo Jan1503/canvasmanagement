@@ -50,8 +50,8 @@ public class HomeAssistantDeparturesExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Show Delay", "Show +N min when delayed", DefaultValue = true, Order = 6)]
     public bool ShowDelay { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = false, Order = 7)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = true, Order = 7)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Align", "Horizontal alignment of the destination", DefaultValue = HaTileAlign.Left, Order = 8)]
     public HaTileAlign Align { get; set; } = HaTileAlign.Left;

@@ -44,8 +44,8 @@ public static class CanvasText
             return;
         }
 
-        using var font = new SKFont { Size = size, Subpixel = true };
-        using var paint = new SKPaint { Color = color, IsAntialias = true };
+        using var font = new SKFont { Size = size, Subpixel = false };
+        using var paint = new SKPaint { Color = color, IsAntialias = false };
         if (maxWidth > 0)
         {
             var tw = font.MeasureText(text);

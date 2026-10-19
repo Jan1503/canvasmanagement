@@ -42,35 +42,9 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
     ///     The NAS image has no usable playback device. <c>/proc/asound</c> can still list a card
     ///     while opening <c>default</c> fails, and LibVLC then retries ALSA on every audio block.
     /// </summary>
-    private static bool RunningInContainer() => File.Exists("/.dockerenv");
+    private static bool RunningInContainer() => AudioPlayback.RunningInContainer();
 
-    /// <summary>
-    ///     Linux without a playback device has no ALSA card. Opening "default" then fails in a tight
-    ///     loop and the log fills with ALSA errors. Windows and a Pi with a card still play audio.
-    /// </summary>
-    private static bool HasSoundDevice()
-    {
-        if (!OperatingSystem.IsLinux())
-            return true;
-
-        try
-        {
-            if (!Directory.Exists("/dev/snd"))
-                return false;
-
-            const string cardsPath = "/proc/asound/cards";
-            if (!File.Exists(cardsPath))
-                return false;
-
-            var cards = File.ReadAllText(cardsPath);
-            return !cards.Contains("no soundcards", StringComparison.OrdinalIgnoreCase)
-                   && cards.Contains("]:", StringComparison.Ordinal);
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private static bool HasSoundDevice() => AudioPlayback.HasPlaybackDevice();
 
     public VLCMediaPlayerExtension(ICanvas canvas)
     {

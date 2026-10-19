@@ -15,7 +15,7 @@ internal static class HaText
 
     public static void Draw(SKCanvas c, ICanvas canvas, string text, SKColor color,
         float rx, float ry, float rw, float rh, float targetH,
-        SKTextAlign align = SKTextAlign.Center, bool useBdf = false, bool shrinkToWidth = true)
+        SKTextAlign align = SKTextAlign.Center, bool useBdf = true, bool shrinkToWidth = true)
     {
         if (string.IsNullOrEmpty(text) || rw <= 0 || rh <= 0) return;
         var shown = shrinkToWidth ? text : Fit(canvas, text, rw, targetH, useBdf);
@@ -37,8 +37,8 @@ internal static class HaText
             return;
         }
 
-        using var font = new SKFont { Size = Math.Max(4f, targetH), Subpixel = true };
-        using var paint = new SKPaint { Color = color, IsAntialias = true };
+        using var font = new SKFont { Size = Math.Max(4f, targetH), Subpixel = false };
+        using var paint = new SKPaint { Color = color, IsAntialias = false };
         var tw = font.MeasureText(shown);
         if (shrinkToWidth && tw > rw && tw > 0) font.Size *= rw / tw;
 

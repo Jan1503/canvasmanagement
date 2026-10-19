@@ -22,8 +22,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
     private bool _disposed;
 
     // Rendering
-    private CancellationTokenSource? _renderCts;
-    private Task? _renderTask;
+    private ExtensionLoop? _loop;
 
     [ExtensionParameter("Background Color", "Background color for the clock",
         DefaultValue = "#000000")]
@@ -73,8 +72,8 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
     public bool ShowNumbers { get; set; } = true;
 
     [ExtensionParameter("Use BDF Font", "Render hour numerals with the crisp bitmap (BDF) font",
-        DefaultValue = false)]
-    public bool UseBdfFont { get; set; }
+        DefaultValue = true)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Numeral height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 48, Unit = "px")]
@@ -120,7 +119,12 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
             IsRunning = true;
             Console.WriteLine("[AnalogClock] Extension started successfully");
 
-            StartRendering();
+            _loop = new ExtensionLoop(30, _ =>
+            {
+                RenderClock();
+                return Task.CompletedTask;
+            });
+            _loop.Start();
         }
         catch (Exception ex)
         {
@@ -151,47 +155,20 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
 
     private void Cleanup()
     {
-        _renderCts?.Cancel();
-        _renderTask?.Wait(1000);
-
+        _loop?.Dispose();
+        _loop = null;
         _backBuffer?.Dispose();
         _backBuffer = null;
     }
 
-    private void StartRendering()
-    {
-        _renderCts = new CancellationTokenSource();
-        var token = _renderCts.Token;
-
-        _renderTask = Task.Run(async () =>
-        {
-            Console.WriteLine("[AnalogClock] Rendering started");
-
-            while (IsRunning && !token.IsCancellationRequested)
-                try
-                {
-                    RenderClock();
-
-                    // Update at 30 FPS for smooth seconds, 1 FPS for normal
-                    var delay = SmoothSeconds && ShowSeconds ? 33 : 1000;
-                    await Task.Delay(delay, token);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[AnalogClock] Error in render loop: {ex.Message}");
-                }
-
-            Console.WriteLine("[AnalogClock] Rendering stopped");
-        }, token);
-    }
-
     private void RenderClock()
     {
-        if (_backBuffer == null) return;
+        if (_backBuffer == null || _backBuffer.Width != _canvas.Width || _backBuffer.Height != _canvas.Height)
+        {
+            _backBuffer?.Dispose();
+            _backBuffer = new SKBitmap(new SKImageInfo(_canvas.Width, _canvas.Height,
+                SKColorType.Bgra8888, SKAlphaType.Premul));
+        }
 
         var now = DateTime.Now;
 
@@ -251,7 +228,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                {
                    Color = FaceColor,
                    Style = SKPaintStyle.Fill,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             canvas.DrawCircle(centerX, centerY, radius, facePaint);
@@ -265,7 +242,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                 Color = BorderColor,
                 Style = SKPaintStyle.Stroke,
                 StrokeWidth = _borderWidth,
-                IsAntialias = true
+                IsAntialias = false
             };
             canvas.DrawCircle(centerX, centerY, radius, borderPaint);
         }
@@ -295,7 +272,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
             {
                 Color = MarkingsColor,
                 Style = SKPaintStyle.Fill,
-                IsAntialias = true
+                IsAntialias = false
             };
 
             for (var i = 0; i < 12; i += 3)
@@ -324,7 +301,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                {
                    Color = FaceColor,
                    Style = SKPaintStyle.Fill,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             canvas.DrawCircle(centerX, centerY, radius, facePaint);
@@ -338,7 +315,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                 Color = BorderColor,
                 Style = SKPaintStyle.Stroke,
                 StrokeWidth = _borderWidth,
-                IsAntialias = true
+                IsAntialias = false
             };
             canvas.DrawCircle(centerX, centerY, radius, borderPaint);
         }
@@ -371,7 +348,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                        new[] { 0f, 1f },
                        SKShaderTileMode.Clamp),
                    Style = SKPaintStyle.Fill,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             canvas.DrawCircle(centerX, centerY, radius, gradientPaint);
@@ -384,7 +361,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
             {
                 Color = MarkingsColor,
                 Style = SKPaintStyle.Fill,
-                IsAntialias = true
+                IsAntialias = false
             };
 
             for (var i = 0; i < 60; i++)
@@ -414,7 +391,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                {
                    Color = FaceColor,
                    Style = SKPaintStyle.Fill,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             canvas.DrawCircle(centerX, centerY, radius, facePaint);
@@ -428,7 +405,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                 Color = BorderColor,
                 Style = SKPaintStyle.Stroke,
                 StrokeWidth = _borderWidth,
-                IsAntialias = true
+                IsAntialias = false
             };
             canvas.DrawCircle(centerX, centerY, radius, borderPaint);
         }
@@ -456,7 +433,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                {
                    Color = SKColors.White,
                    Style = SKPaintStyle.Fill,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             canvas.DrawCircle(centerX, centerY, radius, facePaint);
@@ -467,7 +444,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                    Color = SKColors.Black,
                    Style = SKPaintStyle.Stroke,
                    StrokeWidth = 4,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             canvas.DrawCircle(centerX, centerY, radius, borderPaint);
@@ -480,7 +457,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
             {
                 Color = SKColors.Black,
                 Style = SKPaintStyle.Fill,
-                IsAntialias = true
+                IsAntialias = false
             };
 
             for (var i = 0; i < 12; i++)
@@ -517,7 +494,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                 Color = BorderColor,
                 Style = SKPaintStyle.Stroke,
                 StrokeWidth = _borderWidth,
-                IsAntialias = true
+                IsAntialias = false
             };
             canvas.DrawCircle(centerX, centerY, radius, borderPaint);
         }
@@ -530,7 +507,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                 Color = MarkingsColor,
                 Style = SKPaintStyle.Stroke,
                 StrokeWidth = 2,
-                IsAntialias = true
+                IsAntialias = false
             };
 
             for (var i = 0; i < 12; i += 3)
@@ -561,7 +538,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                {
                    Color = new SKColor(245, 235, 220),
                    Style = SKPaintStyle.Fill,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             canvas.DrawCircle(centerX, centerY, radius, facePaint);
@@ -573,7 +550,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                    Color = new SKColor(139, 69, 19),
                    Style = SKPaintStyle.Stroke,
                    StrokeWidth = 4,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             canvas.DrawCircle(centerX, centerY, radius, borderPaint);
@@ -586,7 +563,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
             {
                 Color = new SKColor(139, 69, 19),
                 Style = SKPaintStyle.Fill,
-                IsAntialias = true
+                IsAntialias = false
             };
 
             for (var i = 0; i < 12; i++)
@@ -628,7 +605,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
         {
             Color = MarkingsColor,
             Style = SKPaintStyle.Stroke,
-            IsAntialias = true
+            IsAntialias = false
         };
 
         for (var i = 0; i < 60; i++)
@@ -709,7 +686,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                    Color = HourHandColor,
                    StrokeWidth = hourWidth,
                    StrokeCap = strokeCap,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             var hourLength = radius * 0.5f;
@@ -724,7 +701,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                    Color = MinuteHandColor,
                    StrokeWidth = minuteWidth,
                    StrokeCap = strokeCap,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             var minuteLength = radius * 0.75f;
@@ -741,7 +718,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                 Color = SecondHandColor,
                 StrokeWidth = secondWidth,
                 StrokeCap = strokeCap,
-                IsAntialias = true
+                IsAntialias = false
             };
 
             var secondLength = radius * 0.85f;
@@ -755,7 +732,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                {
                    Color = MarkingsColor,
                    Style = SKPaintStyle.Fill,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             canvas.DrawCircle(centerX, centerY, 4, centerPaint);
@@ -780,14 +757,14 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                    Color = SKColors.White,
                    StrokeWidth = 7,
                    StrokeCap = SKStrokeCap.Round,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         using (var hourPaint = new SKPaint
                {
                    Color = SKColors.Black,
                    StrokeWidth = 5,
                    StrokeCap = SKStrokeCap.Round,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             var hourLength = radius * 0.5f;
@@ -803,14 +780,14 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                    Color = SKColors.White,
                    StrokeWidth = 6,
                    StrokeCap = SKStrokeCap.Round,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         using (var minutePaint = new SKPaint
                {
                    Color = SKColors.Black,
                    StrokeWidth = 4,
                    StrokeCap = SKStrokeCap.Round,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             var minuteLength = radius * 0.75f;
@@ -828,7 +805,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                 Color = SKColors.Red,
                 StrokeWidth = 2,
                 StrokeCap = SKStrokeCap.Round,
-                IsAntialias = true
+                IsAntialias = false
             };
 
             var secondLength = radius * 0.85f;
@@ -845,7 +822,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                {
                    Color = SKColors.Black,
                    Style = SKPaintStyle.Fill,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             canvas.DrawCircle(centerX, centerY, 5, centerPaint);
@@ -870,7 +847,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                    Color = HourHandColor,
                    StrokeWidth = 4,
                    Style = SKPaintStyle.Stroke,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             var hourLength = radius * 0.5f;
@@ -885,7 +862,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                    Color = MinuteHandColor,
                    StrokeWidth = 3,
                    Style = SKPaintStyle.Stroke,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             var minuteLength = radius * 0.75f;
@@ -902,7 +879,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                 Color = SecondHandColor,
                 StrokeWidth = 2,
                 Style = SKPaintStyle.Stroke,
-                IsAntialias = true
+                IsAntialias = false
             };
 
             var secondLength = radius * 0.85f;
@@ -917,7 +894,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
                    Color = MarkingsColor,
                    Style = SKPaintStyle.Stroke,
                    StrokeWidth = 2,
-                   IsAntialias = true
+                   IsAntialias = false
                })
         {
             canvas.DrawCircle(centerX, centerY, 5, centerPaint);

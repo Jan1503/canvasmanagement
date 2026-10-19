@@ -447,8 +447,8 @@ public class WordClockExtension : IDisposable
         DefaultValue = 0, MinValue = 0, MaxValue = 2)]
     public int LayoutMode { get; set; } = 0;
 
-    [ExtensionParameter("Use BDF Font", "Render letters with the crisp bitmap (BDF) font", DefaultValue = false)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render letters with the crisp bitmap (BDF) font", DefaultValue = true)]
+    public bool UseBdfFont { get; set; } = true;
 
     #endregion
 }

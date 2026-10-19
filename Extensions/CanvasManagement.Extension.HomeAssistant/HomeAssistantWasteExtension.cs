@@ -64,8 +64,8 @@ public class HomeAssistantWasteExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Bin Icon", "Wheelie-bin glyph for the pickup type", DefaultValue = true, Order = 5)]
     public bool ShowSwatch { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = false, Order = 6)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = true, Order = 6)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Align", "Horizontal alignment of the name", DefaultValue = HaTileAlign.Left, Order = 7)]
     public HaTileAlign Align { get; set; } = HaTileAlign.Left;

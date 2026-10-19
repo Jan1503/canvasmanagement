@@ -210,7 +210,7 @@ public class FlipClockExtension : IDisposable
             {
                 Color = new SKColor(0, 0, 0, 100),
                 Style = SKPaintStyle.Fill,
-                IsAntialias = true
+                IsAntialias = false
             };
             canvas.DrawRoundRect(x + 3, y + 3, width, height, 6, 6, shadowPaint);
         }
@@ -220,7 +220,7 @@ public class FlipClockExtension : IDisposable
         {
             Color = CardColor,
             Style = SKPaintStyle.Fill,
-            IsAntialias = true
+            IsAntialias = false
         };
         canvas.DrawRoundRect(x, y, width, height, radius, radius, cardPaint);
 
@@ -261,7 +261,7 @@ public class FlipClockExtension : IDisposable
             Color = new SKColor(255, 255, 255, 28),
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
-            IsAntialias = true
+            IsAntialias = false
         };
         canvas.DrawRoundRect(x, y, width, height, radius, radius, highlight);
     }
@@ -286,7 +286,7 @@ public class FlipClockExtension : IDisposable
             (byte)(CardColor.Red * shade / 255),
             (byte)(CardColor.Green * shade / 255),
             (byte)(CardColor.Blue * shade / 255));
-        using var facePaint = new SKPaint { Color = face, Style = SKPaintStyle.Fill, IsAntialias = true };
+        using var facePaint = new SKPaint { Color = face, Style = SKPaintStyle.Fill, IsAntialias = false };
         canvas.DrawRect(x, y, width, height, facePaint);
         DrawDigitHalf(canvas, digit, x, y, width, height, isTop, 0, shade);
         canvas.Restore();
@@ -316,7 +316,7 @@ public class FlipClockExtension : IDisposable
         {
             Color = TextColor,
             Style = SKPaintStyle.Fill,
-            IsAntialias = true
+            IsAntialias = false
         };
 
         var dotSize = 6;
@@ -359,8 +359,8 @@ public class FlipClockExtension : IDisposable
         DefaultValue = true)]
     public bool CardShadow { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render digits with the crisp bitmap (BDF) font", DefaultValue = false)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render digits with the crisp bitmap (BDF) font", DefaultValue = true)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Digit height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 96, Unit = "px")]

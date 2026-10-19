@@ -134,6 +134,13 @@ public class CanvasManager : IDisposable
     public int Height => _mainCanvasBitmap.Height;
 
     /// <summary>
+    ///     Raised after <see cref="Resize"/> actually changes the composite surface.
+    ///     Overlay canvases (media, alerts, voice, camera, startup) should follow this size.
+    ///     User canvases keep their geometry.
+    /// </summary>
+    public event EventHandler<DisplayResizedEventArgs>? DisplayResized;
+
+    /// <summary>
     ///     Replace the composite surface. Existing canvases keep their size and position; pixels outside
     ///     them stay black. Safe to call while the render loop is running — it waits for the current frame.
     /// </summary>
@@ -158,6 +165,7 @@ public class CanvasManager : IDisposable
         }
 
         Console.WriteLine($"[CANVAS] display resized to {width}x{height}");
+        DisplayResized?.Invoke(this, new DisplayResizedEventArgs(width, height));
     }
 
     #region Filter Discovery

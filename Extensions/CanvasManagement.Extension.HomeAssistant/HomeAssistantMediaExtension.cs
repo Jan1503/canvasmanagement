@@ -40,8 +40,8 @@ public class HomeAssistantMediaExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Show Art", "Draw the colour block on the left", DefaultValue = true, Order = 5)]
     public bool ShowArt { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = false, Order = 6)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = true, Order = 6)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Value Size", "Title height in px (0 = auto-fit)", DefaultValue = 0, MinValue = 0,
         MaxValue = 200, Unit = "px", Order = 7)]
@@ -146,9 +146,9 @@ public class HomeAssistantMediaExtension : ICanvasExtension, IDisposable
             var art = w * 0.32f;
             artSize = Math.Min(art, h - 8);
             var artColor = HashColor(title);
-            using var artPaint = new SKPaint { Color = artColor, IsAntialias = true };
+            using var artPaint = new SKPaint { Color = artColor, IsAntialias = false };
             c.DrawRoundRect(4, (h - artSize) / 2f, artSize, artSize, 4, 4, artPaint);
-            using var note = new SKPaint { Color = new SKColor(255, 255, 255, 180), IsAntialias = true };
+            using var note = new SKPaint { Color = new SKColor(255, 255, 255, 180), IsAntialias = false };
             c.DrawCircle(4 + artSize * 0.5f, (h - artSize) / 2f + artSize * 0.42f, artSize * 0.12f, note);
         }
 

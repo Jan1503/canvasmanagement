@@ -49,9 +49,9 @@ public class WeatherExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Show Forecast", "Show the multi-day forecast strip", DefaultValue = true, Order = 5)]
     public bool ShowForecast { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render text with the crisp bitmap (BDF) font", DefaultValue = false,
+    [ExtensionParameter("Use BDF Font", "Render text with the crisp bitmap (BDF) font", DefaultValue = true,
         Order = 8)]
-    public bool UseBdfFont { get; set; }
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Temperature height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 96, Unit = "px", Order = 9)]
@@ -226,7 +226,7 @@ public class WeatherExtension : ICanvasExtension, IDisposable
         if (data == null)
         {
             using var f = new SKFont { Size = Math.Max(9f, 12f * _scale) };
-            using var p = new SKPaint { Color = SKColors.White, IsAntialias = true };
+            using var p = new SKPaint { Color = SKColors.White, IsAntialias = false };
             canvas.DrawText(status, w / 2f, h / 2f, SKTextAlign.Center, f, p);
             canvas.Flush();
             _canvas.SubmitCompletedFrame(bb);

@@ -47,9 +47,9 @@ public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Show Unit", "Append the unit to the value", DefaultValue = true, Order = 6)]
     public bool ShowUnit { get; set; } = true;
 
-    [ExtensionParameter("BDF Font", "Use the crisp bitmap (BDF) font for which text", DefaultValue = HaBdfMode.None,
+    [ExtensionParameter("BDF Font", "Use the crisp bitmap (BDF) font for which text", DefaultValue = HaBdfMode.Both,
         Order = 7)]
-    public HaBdfMode BdfFont { get; set; } = HaBdfMode.None;
+    public HaBdfMode BdfFont { get; set; } = HaBdfMode.Both;
 
     [ExtensionParameter("Align", "Horizontal alignment inside each cell", DefaultValue = HaTileAlign.Left, Order = 8)]
     public HaTileAlign Align { get; set; } = HaTileAlign.Left;
@@ -243,7 +243,7 @@ public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
         }
 
         using var font = new SKFont { Size = Math.Max(4f, targetH), Subpixel = true };
-        using var paint = new SKPaint { Color = color, IsAntialias = true };
+        using var paint = new SKPaint { Color = color, IsAntialias = false };
         var tw = font.MeasureText(text);
         if (fit && tw > rw && tw > 0) font.Size *= rw / tw;
 

@@ -47,8 +47,8 @@ public class HomeAssistantClimateExtension : ICanvasExtension, IDisposable
         MaxValue = 2, Order = 6)]
     public int Decimals { get; set; } = 1;
 
-    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = false, Order = 7)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = true, Order = 7)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Align", "Horizontal alignment of the numbers", DefaultValue = HaTileAlign.Center, Order = 8)]
     public HaTileAlign Align { get; set; } = HaTileAlign.Center;
@@ -153,17 +153,17 @@ public class HomeAssistantClimateExtension : ICanvasExtension, IDisposable
 
         using var track = new SKPaint
         {
-            Color = new SKColor(40, 48, 56), IsAntialias = true, Style = SKPaintStyle.Stroke,
+            Color = new SKColor(40, 48, 56), IsAntialias = false, Style = SKPaintStyle.Stroke,
             StrokeWidth = sw, StrokeCap = SKStrokeCap.Round
         };
         using var fill = new SKPaint
         {
-            Color = color, IsAntialias = true, Style = SKPaintStyle.Stroke,
+            Color = color, IsAntialias = false, Style = SKPaintStyle.Stroke,
             StrokeWidth = sw, StrokeCap = SKStrokeCap.Round
         };
         using var mark = new SKPaint
         {
-            Color = SKColors.White, IsAntialias = true, Style = SKPaintStyle.Stroke,
+            Color = SKColors.White, IsAntialias = false, Style = SKPaintStyle.Stroke,
             StrokeWidth = Math.Max(2f, sw * 0.25f), StrokeCap = SKStrokeCap.Round
         };
 

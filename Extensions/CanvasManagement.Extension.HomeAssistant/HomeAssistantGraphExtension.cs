@@ -50,9 +50,9 @@ public class HomeAssistantGraphExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Fill", "Fill the area under the line", DefaultValue = true, Order = 7)]
     public bool Fill { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render labels with the crisp bitmap (BDF) font", DefaultValue = false,
+    [ExtensionParameter("Use BDF Font", "Render labels with the crisp bitmap (BDF) font", DefaultValue = true,
         Order = 8)]
-    public bool UseBdfFont { get; set; }
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Align", "Horizontal alignment of the title", DefaultValue = HaTileAlign.Left, Order = 9)]
     public HaTileAlign Align { get; set; } = HaTileAlign.Left;
@@ -212,7 +212,7 @@ public class HomeAssistantGraphExtension : ICanvasExtension, IDisposable
         }
 
         using var font = new SKFont { Size = Math.Max(4f, targetH), Subpixel = true };
-        using var paint = new SKPaint { Color = color, IsAntialias = true };
+        using var paint = new SKPaint { Color = color, IsAntialias = false };
         var tw = font.MeasureText(text);
         if (tw > rw && tw > 0) font.Size *= rw / tw;
         var metrics = font.Metrics;

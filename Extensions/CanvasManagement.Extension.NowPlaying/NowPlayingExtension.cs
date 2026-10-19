@@ -51,9 +51,9 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Background Color", "Background colour", DefaultValue = "#101015", Order = 4)]
     public SKColor BackgroundColor { get; set; } = new(16, 16, 21);
 
-    [ExtensionParameter("Use BDF Font", "Render track text with the crisp bitmap (BDF) font", DefaultValue = false,
+    [ExtensionParameter("Use BDF Font", "Render track text with the crisp bitmap (BDF) font", DefaultValue = true,
         Order = 5)]
-    public bool UseBdfFont { get; set; }
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Title height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 64, Unit = "px", Order = 6)]
@@ -218,10 +218,10 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
         else
         {
             // Placeholder note icon.
-            using var ph = new SKPaint { Color = new SKColor(40, 40, 52), IsAntialias = true };
+            using var ph = new SKPaint { Color = new SKColor(40, 40, 52), IsAntialias = false };
             canvas.DrawRoundRect(pad, pad, artSize, artSize, pad, pad, ph);
             using var note = new SKFont { Size = artSize * 0.6f };
-            using var np = new SKPaint { Color = AccentColor, IsAntialias = true };
+            using var np = new SKPaint { Color = AccentColor, IsAntialias = false };
             canvas.DrawText("♪", pad + artSize / 2, pad + artSize * 0.72f, SKTextAlign.Center, note, np);
             textX = pad + artSize + pad * 2;
         }
@@ -270,7 +270,7 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
         // Pause glyph when paused.
         if (!_track.IsPlaying)
         {
-            using var pf = new SKPaint { Color = new SKColor(255, 255, 255, 180), IsAntialias = true };
+            using var pf = new SKPaint { Color = new SKColor(255, 255, 255, 180), IsAntialias = false };
             var s = Math.Max(2f, 3f * _scale);
             canvas.DrawRect(w - pad - s * 3, pad, s, s * 3, pf);
             canvas.DrawRect(w - pad - s, pad, s, s * 3, pf);

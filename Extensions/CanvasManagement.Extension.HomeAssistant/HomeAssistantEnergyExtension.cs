@@ -63,8 +63,8 @@ public class HomeAssistantEnergyExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Split Bar", "Horizontal bars instead of a ring", DefaultValue = false, Order = 10)]
     public bool SplitBar { get; set; }
 
-    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = false, Order = 11)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render with the crisp bitmap (BDF) font", DefaultValue = true, Order = 11)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Align", "Horizontal alignment of the centre value", DefaultValue = HaTileAlign.Center,
         Order = 12)]
@@ -194,18 +194,18 @@ public class HomeAssistantEnergyExtension : ICanvasExtension, IDisposable
 
         using var track = new SKPaint
         {
-            Color = new SKColor(40, 50, 58), IsAntialias = true, Style = SKPaintStyle.Stroke,
+            Color = new SKColor(40, 50, 58), IsAntialias = false, Style = SKPaintStyle.Stroke,
             StrokeWidth = sw, StrokeCap = SKStrokeCap.Round
         };
         using var solarP = new SKPaint
         {
-            Color = SolarColor, IsAntialias = true, Style = SKPaintStyle.Stroke,
+            Color = SolarColor, IsAntialias = false, Style = SKPaintStyle.Stroke,
             StrokeWidth = sw, StrokeCap = SKStrokeCap.Round
         };
         using var gridP = new SKPaint
         {
             Color = grid >= 0 ? GridImportColor : GridExportColor,
-            IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = sw * 0.55f, StrokeCap = SKStrokeCap.Round
+            IsAntialias = false, Style = SKPaintStyle.Stroke, StrokeWidth = sw * 0.55f, StrokeCap = SKStrokeCap.Round
         };
 
         var oval = new SKRect(cx - r, cy - r, cx + r, cy + r);
@@ -250,7 +250,7 @@ public class HomeAssistantEnergyExtension : ICanvasExtension, IDisposable
 
     private void DrawLegend(SKCanvas c, float x, float y, float w, float h, SKColor color, string label, string value)
     {
-        using var dot = new SKPaint { Color = color, IsAntialias = true };
+        using var dot = new SKPaint { Color = color, IsAntialias = false };
         var r = Math.Max(2f, h * 0.12f);
         c.DrawCircle(x + r * 2, y + h * 0.5f, r, dot);
         HaText.Draw(c, _canvas, label, LabelColor, x + r * 4, y, w * 0.4f, h * 0.45f, h * 0.28f,
@@ -263,8 +263,8 @@ public class HomeAssistantEnergyExtension : ICanvasExtension, IDisposable
         string label, string text)
     {
         var pad = Math.Max(2f, 3f * _scale);
-        using var track = new SKPaint { Color = new SKColor(40, 50, 58), IsAntialias = true };
-        using var fill = new SKPaint { Color = color, IsAntialias = true };
+        using var track = new SKPaint { Color = new SKColor(40, 50, 58), IsAntialias = false };
+        using var fill = new SKPaint { Color = color, IsAntialias = false };
         var barY = y + h * 0.55f;
         var barH = Math.Max(3f, h * 0.28f);
         var barW = w - pad * 2;

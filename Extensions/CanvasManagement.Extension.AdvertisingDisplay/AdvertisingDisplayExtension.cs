@@ -804,7 +804,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
                 Twinkle = true;
                 Confetti = true;
                 Blink = false;
-                UseBdfFont = false;
+                UseBdfFont = true;
                 _decorations = "* + o";
                 _decorationCount = 12;
                 break;
@@ -881,7 +881,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
                 Sparkle = true;
                 Twinkle = false;
                 Confetti = false;
-                UseBdfFont = false;
+                UseBdfFont = true;
                 _decorations = "";
                 break;
             case SignagePreset.SciFi:
@@ -898,7 +898,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
                 Sparkle = true;
                 Twinkle = false;
                 Confetti = false;
-                UseBdfFont = false;
+                UseBdfFont = true;
                 _decorations = "";
                 break;
             case SignagePreset.Action:
@@ -914,7 +914,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
                 Sparkle = true;
                 Twinkle = false;
                 Confetti = true;
-                UseBdfFont = false;
+                UseBdfFont = true;
                 _decorations = "";
                 break;
             case SignagePreset.Horror:
@@ -931,7 +931,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
                 Sparkle = false;
                 Twinkle = true;
                 Confetti = false;
-                UseBdfFont = false;
+                UseBdfFont = true;
                 _decorations = "";
                 break;
             // ─── Blockbuster Studio Intros ───────────────────────────────────
@@ -949,7 +949,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
                 Sparkle = true;
                 Twinkle = false;
                 Confetti = false;
-                UseBdfFont = false;
+                UseBdfFont = true;
                 _decorations = "";
                 break;
             case SignagePreset.Galaxy:
@@ -964,7 +964,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
                 Sparkle = true;
                 Twinkle = false;
                 Confetti = false;
-                UseBdfFont = false;
+                UseBdfFont = true;
                 _decorations = ". * .";
                 _decorationCount = 20;
                 break;
@@ -979,7 +979,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
                 Sparkle = true;
                 Twinkle = true;
                 Confetti = true;
-                UseBdfFont = false;
+                UseBdfFont = true;
                 _decorations = "* . o";
                 _decorationCount = 10;
                 break;
@@ -996,7 +996,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
                 Sparkle = false;
                 Twinkle = true;
                 Confetti = true;
-                UseBdfFont = false;
+                UseBdfFont = true;
                 _decorations = "";
                 break;
             case SignagePreset.Trailer:
@@ -1012,7 +1012,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
                 Sparkle = true;
                 Twinkle = false;
                 Confetti = false;
-                UseBdfFont = false;
+                UseBdfFont = true;
                 _decorations = "";
                 break;
         }

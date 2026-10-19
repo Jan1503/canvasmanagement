@@ -577,6 +577,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
         if (_onGround) _vy = Math.Min(_vy, 0);
 
         _cam = Math.Max(0, _pxX - _canvas.Width * 0.28f);
+        PruneBehindCamera();
 
         for (var i = _foes.Count - 1; i >= 0; i--)
         {
@@ -1251,6 +1252,16 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
         'b' => new SKColor(168, 56, 40),
         _ => SKColors.Transparent
     };
+
+    private void PruneBehindCamera()
+    {
+        var cutoff = _cam - Math.Max(32, _canvas.Width);
+        _plats.RemoveAll(p => p.X + p.W < cutoff);
+        _pits.RemoveAll(p => p.X + p.W < cutoff);
+        _pickups.RemoveAll(p => p.X < cutoff);
+        _foes.RemoveAll(f => f.X < cutoff);
+        _sparks.RemoveAll(s => s.X < cutoff && s.Life <= 0 || s.X < cutoff);
+    }
 
     private struct Platform
     {

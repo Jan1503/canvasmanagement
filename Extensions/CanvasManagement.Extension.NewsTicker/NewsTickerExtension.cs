@@ -1,9 +1,7 @@
 using System.Net;
-using System.Timers;
 using System.Xml.Linq;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.NewsTicker;
 
@@ -23,7 +21,7 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
     private readonly object _lock = new();
     private HttpClient? _http;
     private SKBitmap? _backBuffer;
-    private Timer? _timer;
+    private ExtensionLoop? _loop;
     private float _scale = 1f;
     private volatile bool _fetching;
     private DateTime _lastFetch = DateTime.MinValue;
@@ -58,9 +56,9 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
         MaxValue = 48, Order = 6)]
     public int FontSize { get; set; }
 
-    [ExtensionParameter("Use BDF Font", "Render headlines with the crisp bitmap (BDF) font", DefaultValue = false,
+    [ExtensionParameter("Use BDF Font", "Render headlines with the crisp bitmap (BDF) font", DefaultValue = true,
         Order = 6)]
-    public bool UseBdfFont { get; set; }
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Refresh (min)", "How often to refetch headlines", DefaultValue = 10, MinValue = 2,
         MaxValue = 120, Unit = "min", Order = 7)]
@@ -98,9 +96,12 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
             _lastFetch = DateTime.MinValue;
             _ = FetchAsync();
 
-            _timer = new Timer(33) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
+            _loop = new ExtensionLoop(20, _ =>
+            {
+                OnTick();
+                return Task.CompletedTask;
+            });
+            _loop.Start();
             IsRunning = true;
         }
     }
@@ -111,9 +112,8 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
         {
             if (!IsRunning) return;
             IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
+            _loop?.Dispose();
+            _loop = null;
             _backBuffer?.Dispose();
             _backBuffer = null;
             try { _canvas.Clear(SKColors.Black); }
@@ -121,7 +121,7 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
         }
     }
 
-    private void OnTick(object? sender, ElapsedEventArgs e)
+    private void OnTick()
     {
         if (!IsRunning) return;
 
