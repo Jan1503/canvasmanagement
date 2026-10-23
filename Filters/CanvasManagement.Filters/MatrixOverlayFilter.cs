@@ -15,11 +15,17 @@ public class MatrixOverlayFilter : ICanvasFilter
     private readonly List<DigitalRainDrop> _drops = new();
     private readonly Random _random = new();
     private bool _initialized;
+    private FilterPace _pace;
+    private float _motion = 1f;
 
     // Sizing tracked from the bitmap so the rain scales with the panel and respawns on-screen.
     private int _width = (int)DisplayScale.ReferenceWidth;
     private float _fontSize = 12f;
     private int _charSpacing = 15;
+
+    [FilterParameter("Speed", "Animation speed. 1 is the calm default, 3 is the old full-speed look.",
+        MinValue = 0.2f, MaxValue = 4f, DefaultValue = 1f)]
+    public float PlaybackSpeed { get; set; } = 1f;
 
     public string Name => "Matrix Overlay";
     public float Intensity { get; set; } = 0.5f;
@@ -50,7 +56,7 @@ public class MatrixOverlayFilter : ICanvasFilter
         // Draw digital rain effect
         DrawDigitalRain(bitmap);
 
-        // Update drops for next frame
+        Tick();
         UpdateDrops(bitmap.Height);
 
         return bitmap;
@@ -120,11 +126,17 @@ public class MatrixOverlayFilter : ICanvasFilter
             }
     }
 
+    private void Tick()
+    {
+        _motion = _pace.Step(PlaybackSpeed);
+        _pace.ConsumeFrames();
+    }
+
     private void UpdateDrops(int height)
     {
         foreach (var drop in _drops)
         {
-            drop.Y += drop.Speed;
+            drop.Y += drop.Speed * _motion;
 
             if (drop.Y > height + drop.Length * _charSpacing)
             {
@@ -138,7 +150,7 @@ public class MatrixOverlayFilter : ICanvasFilter
     private class DigitalRainDrop
     {
         public int X { get; set; }
-        public int Y { get; set; }
+        public float Y { get; set; }
         public int Speed { get; set; }
         public int Length { get; set; }
         public char Char { get; set; }

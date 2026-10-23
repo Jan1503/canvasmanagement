@@ -12,8 +12,10 @@ namespace CanvasManagement.Filters;
     IconResourceName = "oilpainting.svg")]
 public class OilPaintingFilter : ICanvasFilter
 {
+    private SKBitmap? _scratch;
+
     [FilterParameter("Brush Radius", "Size of brush strokes", MinValue = 2, MaxValue = 6, DefaultValue = 2)]
-    public int BrushRadius { get; set; } = 2; // Reduced max from 8 to 6
+    public int BrushRadius { get; set; } = 2;
 
     public string Name => "Oil Painting";
     public float Intensity { get; set; } = 0.5f;
@@ -22,97 +24,97 @@ public class OilPaintingFilter : ICanvasFilter
     public SKBitmap Apply(SKBitmap source, bool inPlace = true)
     {
         if (!Enabled || Intensity <= 0) return source;
+        if (source.BytesPerPixel != 4 || source.Width < 2 || source.Height < 2) return source;
 
-        var result = new SKBitmap(source.Width, source.Height);
-        var radius = Math.Max(1, Math.Min(3, (int)(BrushRadius * Intensity))); // Max 3 instead of 5
+        var scratch = ScratchFor(source);
+        var radius = Math.Max(1, Math.Min(3, (int)(BrushRadius * Intensity)));
+        var width = source.Width;
+        var height = source.Height;
+        var stride = source.RowBytes / 4;
+        if (stride < width) return source;
 
         unsafe
         {
-            var srcPixels = (uint*)source.GetPixels().ToPointer();
-            var dstPixels = (uint*)result.GetPixels().ToPointer();
-            var width = source.Width;
-            var height = source.Height;
+            var srcPixels = (uint*)source.GetPixels();
+            var dstPixels = (uint*)scratch.GetPixels();
+            if (srcPixels == null || dstPixels == null) return source;
 
-            // Process every 2nd pixel for speed, interpolate the rest
             for (var y = 0; y < height; y += 2)
             {
+                var row = y * stride;
                 for (var x = 0; x < width; x += 2)
                 {
-                    var idx = y * width + x;
-
-                    // Edge pixels - just copy
+                    uint color;
                     if (x < radius || x >= width - radius || y < radius || y >= height - radius)
-                    {
-                        dstPixels[idx] = srcPixels[idx];
-                        continue;
-                    }
+                        color = srcPixels[row + x];
+                    else
+                        color = FindBestQuadrant(srcPixels, x, y, stride, width, height, radius);
 
-                    // Simplified Kuwahara - only check 4 quadrants
-                    var color = FindBestQuadrant(srcPixels, x, y, width, radius);
-                    dstPixels[idx] = color;
-
-                    // Fill adjacent pixel
+                    dstPixels[row + x] = color;
                     if (x + 1 < width)
-                        dstPixels[idx + 1] = color;
+                        dstPixels[row + x + 1] = color;
                 }
 
-                // Fill next row by copying current row
                 if (y + 1 < height)
-                    for (var x = 0; x < width; x++)
-                        dstPixels[(y + 1) * width + x] = dstPixels[y * width + x];
+                    Buffer.MemoryCopy(dstPixels + row, dstPixels + (y + 1) * stride, width * 4, width * 4);
             }
         }
 
-        if (inPlace)
-        {
-            result.CopyTo(source);
-            result.Dispose();
-            return source;
-        }
+        if (!inPlace)
+            return scratch.Copy();
 
-        return result;
+        FilterBitmap.Blit(scratch, source);
+        return source;
     }
 
-    private unsafe uint FindBestQuadrant(uint* pixels, int cx, int cy, int width, int radius)
+    private SKBitmap ScratchFor(SKBitmap source)
     {
-        // Fast Kuwahara: sample 9 points per quadrant instead of all pixels
-        var quadrants = new (int sumR, int sumG, int sumB, int count, int variance)[]
+        if (_scratch == null ||
+            _scratch.Width != source.Width ||
+            _scratch.Height != source.Height ||
+            _scratch.ColorType != source.ColorType ||
+            _scratch.AlphaType != source.AlphaType ||
+            _scratch.RowBytes != source.RowBytes)
         {
-            (0, 0, 0, 0, 0), // Top-left
-            (0, 0, 0, 0, 0), // Top-right
-            (0, 0, 0, 0, 0), // Bottom-left
-            (0, 0, 0, 0, 0) // Bottom-right
-        };
+            _scratch?.Dispose();
+            _scratch = new SKBitmap(source.Info);
+        }
 
-        // Sample points instead of scanning all pixels
-        SampleQuadrant(pixels, cx, cy, width, -radius, 0, 0, radius, ref quadrants[0]);
-        SampleQuadrant(pixels, cx, cy, width, 0, radius, 0, radius, ref quadrants[1]);
-        SampleQuadrant(pixels, cx, cy, width, -radius, 0, -radius, 0, ref quadrants[2]);
-        SampleQuadrant(pixels, cx, cy, width, 0, radius, -radius, 0, ref quadrants[3]);
+        return _scratch;
+    }
 
-        // Find quadrant with lowest variance
+    private static unsafe uint FindBestQuadrant(uint* pixels, int cx, int cy, int stride, int width, int height,
+        int radius)
+    {
+        Span<(int sumR, int sumG, int sumB, int count, int variance)> quadrants = stackalloc (int, int, int, int, int)[4];
+
+        SampleQuadrant(pixels, cx, cy, stride, width, height, -radius, 0, 0, radius, ref quadrants[0]);
+        SampleQuadrant(pixels, cx, cy, stride, width, height, 0, radius, 0, radius, ref quadrants[1]);
+        SampleQuadrant(pixels, cx, cy, stride, width, height, -radius, 0, -radius, 0, ref quadrants[2]);
+        SampleQuadrant(pixels, cx, cy, stride, width, height, 0, radius, -radius, 0, ref quadrants[3]);
+
         var bestIdx = 0;
-        var minVariance = quadrants[0].variance;
-
-        for (var i = 1; i < 4; i++)
-            if (quadrants[i].count > 0 && quadrants[i].variance < minVariance)
+        var minVariance = int.MaxValue;
+        for (var i = 0; i < 4; i++)
+        {
+            if (quadrants[i].count <= 0) continue;
+            if (quadrants[i].variance < minVariance)
             {
                 minVariance = quadrants[i].variance;
                 bestIdx = i;
             }
+        }
 
-        // Return average color of best quadrant
         var best = quadrants[bestIdx];
-        if (best.count == 0) return pixels[cy * width + cx];
+        if (best.count == 0) return pixels[cy * stride + cx];
 
         var avgR = (byte)(best.sumR / best.count);
         var avgG = (byte)(best.sumG / best.count);
         var avgB = (byte)(best.sumB / best.count);
-
         return 0xFF000000u | ((uint)avgR << 16) | ((uint)avgG << 8) | avgB;
     }
 
-    private unsafe void SampleQuadrant(uint* pixels, int cx, int cy, int width,
+    private static unsafe void SampleQuadrant(uint* pixels, int cx, int cy, int stride, int width, int height,
         int x1, int x2, int y1, int y2,
         ref (int sumR, int sumG, int sumB, int count, int variance) result)
     {
@@ -121,30 +123,28 @@ public class OilPaintingFilter : ICanvasFilter
         var sumB = 0;
         var count = 0;
 
-        // Sample 9 points in a 3x3 grid within quadrant
-        for (var dy = y1; dy <= y2; dy += Math.Max(1, (y2 - y1) / 2))
-        for (var dx = x1; dx <= x2; dx += Math.Max(1, (x2 - x1) / 2))
+        var yStep = Math.Max(1, (y2 - y1) / 2);
+        var xStep = Math.Max(1, (x2 - x1) / 2);
+        for (var dy = y1; dy <= y2; dy += yStep)
+        for (var dx = x1; dx <= x2; dx += xStep)
         {
-            var pixel = pixels[(cy + dy) * width + cx + dx];
-            var r = (int)((pixel >> 16) & 0xFF);
-            var g = (int)((pixel >> 8) & 0xFF);
-            var b = (int)(pixel & 0xFF);
+            var px = cx + dx;
+            var py = cy + dy;
+            if ((uint)px >= (uint)width || (uint)py >= (uint)height) continue;
 
-            sumR += r;
-            sumG += g;
-            sumB += b;
+            var pixel = pixels[py * stride + px];
+            sumR += (int)((pixel >> 16) & 0xFF);
+            sumG += (int)((pixel >> 8) & 0xFF);
+            sumB += (int)(pixel & 0xFF);
             count++;
         }
 
         if (count == 0) return;
 
-        // Fast variance approximation using range
         var avgR = sumR / count;
         var avgG = sumG / count;
         var avgB = sumB / count;
-
         var variance = Math.Abs(avgR - avgG) + Math.Abs(avgG - avgB) + Math.Abs(avgB - avgR);
-
         result = (sumR, sumG, sumB, count, variance);
     }
 }

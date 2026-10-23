@@ -16,6 +16,9 @@ public class ChristmasFilter : ICanvasFilter
     private readonly List<ShootingStar> _shootingStars = new();
     private readonly List<Snowflake> _snowflakes = new();
     private int _frameCount;
+    private FilterPace _pace;
+    private float _motion = 1f;
+    private int _frames = 1;
     private bool _initialized;
     private int _width = (int)DisplayScale.ReferenceWidth;
 
@@ -51,6 +54,10 @@ public class ChristmasFilter : ICanvasFilter
     [FilterParameter("Northern Lights", "Enable northern lights aurora effect")]
     public bool EnableAurora { get; set; } = true;
 
+    [FilterParameter("Speed", "Animation speed. 1 is the calm default, 3 is the old full-speed look.",
+        MinValue = 0.2f, MaxValue = 4f, DefaultValue = 1f)]
+    public float PlaybackSpeed { get; set; } = 1f;
+
     public string Name => "Christmas Magic";
     public float Intensity { get; set; } = 0.8f;
     public bool Enabled { get; set; } = true;
@@ -68,6 +75,8 @@ public class ChristmasFilter : ICanvasFilter
             InitializeSnowflakes(bitmap.Width, bitmap.Height);
             _initialized = true;
         }
+
+        Tick();
 
         // Apply warm golden color grade
         ApplyChristmasColorGrade(bitmap);
@@ -95,8 +104,6 @@ public class ChristmasFilter : ICanvasFilter
         // Occasional magical shimmer wave
         if (_frameCount % 300 < 30) AddMagicalShimmer(bitmap);
 
-        // Update animation
-        _frameCount++;
         UpdateSnowflakes(bitmap.Height);
 
         return bitmap;
@@ -238,7 +245,7 @@ public class ChristmasFilter : ICanvasFilter
     private void SpawnShootingStar(int width, int height)
     {
         // Random chance to spawn shooting star
-        if (_random.Next(100) < 2) // 2% chance per frame
+        if (_random.NextDouble() < 0.02 * _motion)
             _shootingStars.Add(new ShootingStar
             {
                 X = _random.Next(width),
@@ -307,9 +314,9 @@ public class ChristmasFilter : ICanvasFilter
             star.Trail.Add((star.X, star.Y));
             if (star.Trail.Count > 20) star.Trail.RemoveAt(0);
 
-            star.X += star.VX;
-            star.Y += star.VY;
-            star.Life--;
+            star.X += star.VX * _motion;
+            star.Y += star.VY * _motion;
+            star.Life -= _frames;
         }
     }
 
@@ -490,11 +497,18 @@ public class ChristmasFilter : ICanvasFilter
         pixels[idx] = 0xFF000000u | ((uint)nr << 16) | ((uint)ng << 8) | nb;
     }
 
+    private void Tick()
+    {
+        _motion = _pace.Step(PlaybackSpeed);
+        _frames = _pace.ConsumeFrames();
+        _frameCount += _frames;
+    }
+
     private void UpdateSnowflakes(int height)
     {
         foreach (var flake in _snowflakes)
         {
-            flake.Y += flake.Speed;
+            flake.Y += flake.Speed * _motion;
 
             if (flake.Y > height)
             {

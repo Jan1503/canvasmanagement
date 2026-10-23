@@ -17,6 +17,9 @@ public class WeatherOverlayFilter : ICanvasFilter
     private readonly List<Drop> _drops = new();
     private int _flash;
     private int _h;
+    private FilterPace _pace;
+    private float _motion = 1f;
+    private int _frames = 1;
     private int _lightningCooldown;
     private float _scale = 1f;
     private int _w;
@@ -35,6 +38,10 @@ public class WeatherOverlayFilter : ICanvasFilter
         DefaultValue = 0.0f)]
     public float Lightning { get; set; }
 
+    [FilterParameter("Speed", "Animation speed. 1 is the calm default, 3 is the old full-speed look.",
+        MinValue = 0.2f, MaxValue = 4f, DefaultValue = 1f)]
+    public float PlaybackSpeed { get; set; } = 1f;
+
     public string Name => "Weather Overlay";
     public float Intensity { get; set; } = 0.6f;
     public bool Enabled { get; set; } = true;
@@ -46,6 +53,7 @@ public class WeatherOverlayFilter : ICanvasFilter
         var bitmap = inPlace ? source : source.Copy();
         EnsureField(bitmap.Width, bitmap.Height);
 
+        Tick();
         var snow = Mode >= 1;
         using var canvas = new SKCanvas(bitmap);
         using var paint = new SKPaint { IsAntialias = snow, Style = SKPaintStyle.Fill };
@@ -57,7 +65,7 @@ public class WeatherOverlayFilter : ICanvasFilter
             Color = new SKColor(180, 200, 255, 200)
         };
 
-        var baseSpeed = (snow ? 1.2f : 5f) * _scale;
+        var baseSpeed = (snow ? 1.2f : 5f) * _scale * _motion;
 
         foreach (var d in _drops)
         {
@@ -97,18 +105,17 @@ public class WeatherOverlayFilter : ICanvasFilter
             var a = (byte)(180 * (_flash / 6f) * Intensity);
             using var fp = new SKPaint { Color = new SKColor(255, 255, 255, a) };
             canvas.DrawRect(0, 0, w, h, fp);
-            _flash--;
+            _flash = Math.Max(0, _flash - _frames);
             return;
         }
 
         if (_lightningCooldown > 0)
         {
-            _lightningCooldown--;
+            _lightningCooldown = Math.Max(0, _lightningCooldown - _frames);
             return;
         }
 
-        // Roughly Lightning-scaled chance per frame.
-        if (_random.NextDouble() < Lightning * 0.02)
+        if (_random.NextDouble() < Lightning * 0.02 * _motion)
         {
             _flash = 6;
             _lightningCooldown = 40;
@@ -134,6 +141,12 @@ public class WeatherOverlayFilter : ICanvasFilter
 
             canvas.DrawPath(path, bolt);
         }
+    }
+
+    private void Tick()
+    {
+        _motion = _pace.Step(PlaybackSpeed);
+        _frames = _pace.ConsumeFrames();
     }
 
     private void EnsureField(int width, int height)

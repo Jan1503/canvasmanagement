@@ -89,6 +89,7 @@ public class NeoCodeVisionFilter : ICanvasFilter
     private char[,] _characterMap = new char[0, 0];
     private byte[,] _colorHueMap = new byte[0, 0];
     private int _frameCount;
+    private FilterPace _pace;
     private bool _initialized;
 
     /// <summary>
@@ -110,6 +111,10 @@ public class NeoCodeVisionFilter : ICanvasFilter
     /// </summary>
     [FilterParameter("Fall Speed", "Code stream animation speed", MinValue = 1, MaxValue = 10, DefaultValue = 2)]
     public int FallSpeed { get; set; } = 2;
+
+    [FilterParameter("Speed", "Animation speed. 1 is the calm default, 3 is the old full-speed look.",
+        MinValue = 0.2f, MaxValue = 4f, DefaultValue = 1f)]
+    public float PlaybackSpeed { get; set; } = 1f;
 
     public string Name => "Neo Code Vision";
     public float Intensity { get; set; } = 0.9f;
@@ -148,9 +153,11 @@ public class NeoCodeVisionFilter : ICanvasFilter
         // Transform on the blacked-out result bitmap (write-only)
         TransformToCodeVision(result);
 
-        // Update animation
-        _frameCount++;
-        if (_frameCount % FallSpeed == 0) UpdateCharacterMap();
+        var before = _frameCount;
+        _pace.Step(PlaybackSpeed);
+        _frameCount += _pace.ConsumeFrames();
+        var fall = Math.Max(1, FallSpeed);
+        if (_frameCount / fall != before / fall) UpdateCharacterMap();
 
         // CRITICAL: Always copy atomically, even if inPlace=true
         // This prevents the CanvasManager from seeing partial frames

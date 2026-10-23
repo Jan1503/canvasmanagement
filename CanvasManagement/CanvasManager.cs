@@ -623,11 +623,21 @@ public class CanvasManager : IDisposable
                         }
                     }
 
-                    // Apply enabled filters (plain loop - no LINQ allocation per frame)
+                    // Apply enabled filters (plain loop - no LINQ allocation per frame).
+                    // A filter must not be able to kill the render thread; disable it and keep drawing.
                     for (var i = 0; i < _filters.Count; i++)
                     {
                         var filter = _filters[i];
-                        if (filter.Enabled) filter.Apply(_mainCanvasBitmap);
+                        if (!filter.Enabled) continue;
+                        try
+                        {
+                            filter.Apply(_mainCanvasBitmap);
+                        }
+                        catch (Exception ex)
+                        {
+                            filter.Enabled = false;
+                            Console.WriteLine($"Filter '{filter.Name}' disabled after error: {ex.Message}");
+                        }
                     }
 
                     // Apply global brightness adjustment

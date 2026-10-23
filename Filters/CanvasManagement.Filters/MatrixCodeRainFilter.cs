@@ -15,6 +15,7 @@ public class MatrixCodeRainFilter : ICanvasFilter
     private readonly Random _random = new();
     private byte[,] _brightnessMap = new byte[0, 0];
     private int _frameCount;
+    private FilterPace _pace;
     private bool _initialized;
 
     /// <summary>
@@ -29,6 +30,10 @@ public class MatrixCodeRainFilter : ICanvasFilter
     /// </summary>
     [FilterParameter("Fall Speed", "Code characters fall speed", MinValue = 1, MaxValue = 10, DefaultValue = 2)]
     public int FallSpeed { get; set; } = 2;
+
+    [FilterParameter("Speed", "Animation speed. 1 is the calm default, 3 is the old full-speed look.",
+        MinValue = 0.2f, MaxValue = 4f, DefaultValue = 1f)]
+    public float PlaybackSpeed { get; set; } = 1f;
 
     public string Name => "Matrix Code Rain";
     public float Intensity { get; set; } = 0.8f;
@@ -52,7 +57,8 @@ public class MatrixCodeRainFilter : ICanvasFilter
         // Transform to Matrix code rain
         ApplyMatrixCodeRain(bitmap, source);
 
-        _frameCount++;
+        _pace.Step(PlaybackSpeed);
+        _frameCount += _pace.ConsumeFrames();
 
         return bitmap;
     }

@@ -24,6 +24,8 @@ public class MatrixTransformFilter : ICanvasFilter
     private readonly List<DigitalColumn> _columns = new();
     private readonly Random _random = new();
     private int _frameCount;
+    private FilterPace _pace;
+    private float _motion = 1f;
     private bool _initialized;
 
     /// <summary>
@@ -39,6 +41,10 @@ public class MatrixTransformFilter : ICanvasFilter
     [FilterParameter("Column Density", "Density of falling code columns", MinValue = 0.5f, MaxValue = 2.0f,
         DefaultValue = 1.0f)]
     public float ColumnDensity { get; set; } = 1.0f;
+
+    [FilterParameter("Speed", "Animation speed. 1 is the calm default, 3 is the old full-speed look.",
+        MinValue = 0.2f, MaxValue = 4f, DefaultValue = 1f)]
+    public float PlaybackSpeed { get; set; } = 1f;
 
     public string Name => "Matrix Transform";
     public float Intensity { get; set; } = 0.8f;
@@ -60,10 +66,8 @@ public class MatrixTransformFilter : ICanvasFilter
         // Convert image to Matrix digital rain
         TransformToMatrix(bitmap, source);
 
-        // Update animation
-        _frameCount++;
-        if (_frameCount % 2 == 0) // Update every 2 frames for performance
-            UpdateColumns(bitmap.Height);
+        Tick();
+        UpdateColumns(bitmap.Height);
 
         return bitmap;
     }
@@ -176,7 +180,7 @@ public class MatrixTransformFilter : ICanvasFilter
             foreach (var column in _columns)
                 for (var i = 0; i < column.Length; i++)
                 {
-                    var y = column.Y - i * column.CharHeight;
+                    var y = (int)column.Y - i * column.CharHeight;
 
                     if (y < -column.CharHeight || y >= height) continue;
                     if (column.X < 0 || column.X >= width) continue;
@@ -266,11 +270,17 @@ public class MatrixTransformFilter : ICanvasFilter
         };
     }
 
+    private void Tick()
+    {
+        _motion = _pace.Step(PlaybackSpeed);
+        _frameCount += _pace.ConsumeFrames();
+    }
+
     private void UpdateColumns(int height)
     {
         foreach (var column in _columns)
         {
-            column.Y += column.Speed;
+            column.Y += column.Speed * _motion;
 
             // Reset if off screen
             if (column.Y > height + column.Length * column.CharHeight)
@@ -294,7 +304,7 @@ public class MatrixTransformFilter : ICanvasFilter
     private class DigitalColumn
     {
         public int X { get; set; }
-        public int Y { get; set; }
+        public float Y { get; set; }
         public int Speed { get; set; }
         public int Length { get; set; }
         public int CharWidth { get; set; }

@@ -18,6 +18,9 @@ public class NewYearFilter : ICanvasFilter
     private readonly List<Particle> _particles = new();
     private readonly Random _random = new();
     private int _frameCount;
+    private FilterPace _pace;
+    private float _motion = 1f;
+    private int _frames = 1;
     private bool _initialized;
     private int _width = (int)DisplayScale.ReferenceWidth;
 
@@ -52,6 +55,10 @@ public class NewYearFilter : ICanvasFilter
     [FilterParameter("Champagne Bubbles", "Enable rising champagne bubbles")]
     public bool EnableBubbles { get; set; } = true;
 
+    [FilterParameter("Speed", "Animation speed. 1 is the calm default, 3 is the old full-speed look.",
+        MinValue = 0.2f, MaxValue = 4f, DefaultValue = 1f)]
+    public float PlaybackSpeed { get; set; } = 1f;
+
     public string Name => "New Year Celebration";
     public float Intensity { get; set; } = 0.8f;
     public bool Enabled { get; set; } = true;
@@ -69,6 +76,8 @@ public class NewYearFilter : ICanvasFilter
             _initialized = true;
         }
 
+        Tick();
+
         // Apply festive color enhancement
         ApplyNewYearColorGrade(bitmap);
 
@@ -76,7 +85,7 @@ public class NewYearFilter : ICanvasFilter
         if (EnableCountdownFlash && _frameCount % 120 < 10) AddCountdownFlash(bitmap);
 
         // Spawn new fireworks randomly
-        if (_random.Next(100) < FireworkIntensity * 30) SpawnFirework(bitmap.Width, bitmap.Height);
+        if (_random.NextDouble() < FireworkIntensity * 0.30 * _motion) SpawnFirework(bitmap.Width, bitmap.Height);
 
         // Draw fireworks and particles
         DrawFireworks(bitmap);
@@ -102,8 +111,6 @@ public class NewYearFilter : ICanvasFilter
         // Update animations
         UpdateFireworks(bitmap.Width, bitmap.Height);
         UpdateParticles();
-
-        _frameCount++;
 
         return bitmap;
     }
@@ -219,9 +226,9 @@ public class NewYearFilter : ICanvasFilter
     {
         foreach (var piece in _confetti)
         {
-            piece.X += piece.VX;
-            piece.Y += piece.VY;
-            piece.Rotation += piece.RotationSpeed;
+            piece.X += piece.VX * _motion;
+            piece.Y += piece.VY * _motion;
+            piece.Rotation += piece.RotationSpeed * _motion;
 
             // Reset if off screen
             if (piece.Y > height)
@@ -277,7 +284,7 @@ public class NewYearFilter : ICanvasFilter
     {
         foreach (var bubble in _bubbles)
         {
-            bubble.Y -= bubble.Speed;
+            bubble.Y -= bubble.Speed * _motion;
 
             // Pop and respawn at bottom
             if (bubble.Y < -bubble.Radius)
@@ -505,10 +512,17 @@ public class NewYearFilter : ICanvasFilter
         pixels[idx] = 0xFF000000u | ((uint)nr << 16) | ((uint)ng << 8) | nb;
     }
 
+    private void Tick()
+    {
+        _motion = _pace.Step(PlaybackSpeed);
+        _frames = _pace.ConsumeFrames();
+        _frameCount += _frames;
+    }
+
     private void UpdateFireworks(int width, int height)
     {
         _fireworks.RemoveAll(f => f.Life <= 0);
-        foreach (var firework in _fireworks) firework.Life--;
+        foreach (var firework in _fireworks) firework.Life -= _frames;
     }
 
     private void UpdateParticles()
@@ -520,12 +534,12 @@ public class NewYearFilter : ICanvasFilter
             particle.Trail.Add((particle.X, particle.Y));
             if (particle.Trail.Count > 10) particle.Trail.RemoveAt(0);
 
-            particle.X += particle.VX;
-            particle.Y += particle.VY;
-            particle.VY += 0.1f; // Gravity
-            particle.VX *= 0.98f; // Air resistance
-            particle.VY *= 0.98f;
-            particle.Life--;
+            particle.X += particle.VX * _motion;
+            particle.Y += particle.VY * _motion;
+            particle.VY += 0.1f * _motion;
+            particle.VX *= MathF.Pow(0.98f, _motion);
+            particle.VY *= MathF.Pow(0.98f, _motion);
+            particle.Life -= _frames;
         }
     }
 

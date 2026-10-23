@@ -35,11 +35,12 @@ public class BlurFilter : ICanvasFilter
 
         canvas.DrawBitmap(bitmap, 0, 0, paint);
 
-        // Copy blurred result back
+        // Draw back into the existing bitmap. CopyTo swaps the pixel buffer and detaches the
+        // compositor canvas, which leaves the wall stuck on this frame.
         using var snapshot = surface.Snapshot();
         using var blurred = SKBitmap.FromImage(snapshot);
-
-        blurred.CopyTo(bitmap);
+        using (var draw = new SKCanvas(bitmap))
+            draw.DrawBitmap(blurred, 0, 0);
 
         return bitmap;
     }

@@ -16,6 +16,8 @@ public class HalloweenFilter : ICanvasFilter
     private readonly List<Ghost> _ghosts = new();
     private readonly Random _random = new();
     private int _frameCount;
+    private FilterPace _pace;
+    private float _motion = 1f;
     private bool _initialized;
 
     /// <summary>
@@ -49,6 +51,10 @@ public class HalloweenFilter : ICanvasFilter
     [FilterParameter("Pumpkin Glow", "Enable jack-o-lantern glow effect")]
     public bool EnablePumpkinGlow { get; set; } = true;
 
+    [FilterParameter("Speed", "Animation speed. 1 is the calm default, 3 is the old full-speed look.",
+        MinValue = 0.2f, MaxValue = 4f, DefaultValue = 1f)]
+    public float PlaybackSpeed { get; set; } = 1f;
+
     public string Name => "Halloween Spooky";
     public float Intensity { get; set; } = 0.8f;
     public bool Enabled { get; set; } = true;
@@ -64,6 +70,8 @@ public class HalloweenFilter : ICanvasFilter
             InitializeCreatures(bitmap.Width, bitmap.Height);
             _initialized = true;
         }
+
+        Tick();
 
         // Apply dark, desaturated look
         ApplyHalloweenColorGrade(bitmap);
@@ -96,8 +104,6 @@ public class HalloweenFilter : ICanvasFilter
 
         // Occasional creepy vignette pulse
         if (_frameCount % 150 < 10) AddCreepyVignette(bitmap);
-
-        _frameCount++;
 
         return bitmap;
     }
@@ -250,7 +256,7 @@ public class HalloweenFilter : ICanvasFilter
     private void AddFlickers(SKBitmap bitmap)
     {
         // Random flicker effect (like lightning)
-        if (_random.Next(100) < 2) // 2% chance per frame
+        if (_random.NextDouble() < 0.02 * _motion)
         {
             var flickerStrength = (float)_random.NextDouble() * 0.4f * Intensity;
 
@@ -367,12 +373,18 @@ public class HalloweenFilter : ICanvasFilter
         }
     }
 
+    private void Tick()
+    {
+        _motion = _pace.Step(PlaybackSpeed);
+        _frameCount += _pace.ConsumeFrames();
+    }
+
     private void UpdateGhosts(int width, int height)
     {
         foreach (var ghost in _ghosts)
         {
-            ghost.FloatPhase += 2;
-            ghost.X += (float)Math.Sin(ghost.FloatPhase * 0.1) * 0.5f;
+            ghost.FloatPhase += 2 * _motion;
+            ghost.X += (float)Math.Sin(ghost.FloatPhase * 0.1) * 0.5f * _motion;
 
             if (ghost.X < -ghost.Size)
                 ghost.X = width + ghost.Size;
@@ -432,8 +444,8 @@ public class HalloweenFilter : ICanvasFilter
     {
         foreach (var bat in _bats)
         {
-            bat.X += bat.Speed;
-            bat.WingPhase += 15;
+            bat.X += bat.Speed * _motion;
+            bat.WingPhase += 15 * _motion;
 
             if (bat.X > width + bat.Size)
             {

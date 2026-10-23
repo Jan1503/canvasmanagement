@@ -15,6 +15,8 @@ public class ValentineFilter : ICanvasFilter
     private readonly List<Heart> _hearts = new();
     private readonly Random _random = new();
     private int _frameCount;
+    private FilterPace _pace;
+    private float _motion = 1f;
     private bool _initialized;
     private int _width = (int)DisplayScale.ReferenceWidth;
 
@@ -23,6 +25,10 @@ public class ValentineFilter : ICanvasFilter
     /// </summary>
     [FilterParameter("Hearts", "Density of floating hearts", MinValue = 0.0f, MaxValue = 1.0f, DefaultValue = 0.6f)]
     public float HeartDensity { get; set; } = 0.6f;
+
+    [FilterParameter("Speed", "Animation speed. 1 is the calm default, 3 is the old full-speed look.",
+        MinValue = 0.2f, MaxValue = 4f, DefaultValue = 1f)]
+    public float PlaybackSpeed { get; set; } = 1f;
 
     /// <summary>
     ///     Romantic soft glow intensity
@@ -48,6 +54,8 @@ public class ValentineFilter : ICanvasFilter
             _initialized = true;
         }
 
+        Tick();
+
         // Apply romantic color grade
         ApplyRomanticColorGrade(bitmap);
 
@@ -60,7 +68,6 @@ public class ValentineFilter : ICanvasFilter
         // Add sparkles
         AddSparkles(bitmap);
 
-        _frameCount++;
         UpdateHearts(bitmap.Height);
 
         return bitmap;
@@ -257,11 +264,17 @@ public class ValentineFilter : ICanvasFilter
         pixels[idx] = 0xFF000000u | ((uint)nr << 16) | ((uint)ng << 8) | nb;
     }
 
+    private void Tick()
+    {
+        _motion = _pace.Step(PlaybackSpeed);
+        _frameCount += _pace.ConsumeFrames();
+    }
+
     private void UpdateHearts(int height)
     {
         foreach (var heart in _hearts)
         {
-            heart.Y -= heart.Speed;
+            heart.Y -= heart.Speed * _motion;
 
             if (heart.Y < -heart.Size)
             {
