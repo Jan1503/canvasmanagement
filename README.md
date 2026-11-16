@@ -1,5 +1,9 @@
 # CanvasManagement
 
+![Turbo Kart GP running on a 256×128 LED wall: Palm Beach, Neon City, Canyon Run, Lava Keep](docs/images/turbokart-teaser.png)
+
+*Turbo Kart GP — one of the bundled game extensions: Mode-7 kart racing on a 256×128 LED wall, 8 tracks, Grand Prix, CPU rivals, items. Keyboard or gamepad from the Studio browser.*
+
 .NET 10 canvas engine for LED walls and other low-resolution displays. It composites **multiple canvases**, loads **content extensions** and **post-processing filters** as plugins, and renders with SkiaSharp.
 
 The host that talks to hardware, the web UI, media playback and voice lives in **[verpixeld](https://github.com/Jan1503/verpixeld)**. This repository is the shared framework those pieces sit on.
@@ -163,7 +167,7 @@ Details, templates and a checklist: [docs/EXTENSIONS.md](docs/EXTENSIONS.md) and
 Clocks: Analog, Digital, Binary, Flip, Word, Tetris Clock.  
 Content: Weather, News Ticker, Now Playing, Home Assistant (sensor, grid, graph, energy, weather, now-playing, climate, waste, **departures**), Advertising, Slideshow, Scroll text, GIF, YouTube, VLC, Audio, Network Stream (TPM2.NET), LAV1.  
 Visuals: Starfield, Aquarium, Lava Lamp, Falling Sand, Game of Life, Arena screensaver.  
-Games (original SkiaSharp, 1:1 pixel art, playable from Studio): Pac-Man, Snake, Pong, Space Invaders, Dino Runner, Flappy Bird, **Tetris**, **Pixel Plumber**, **Street Crosser**, **Rainbow Breakout**, **Bubble Pop**, **Bomber Maze**, **Fruit Fall**. AutoPilot until the first Studio key; `KeyboardShortcut` on **Controls** methods.
+Games (original SkiaSharp, 1:1 pixel art, playable from Studio): Pac-Man, Snake, Pong, Space Invaders, Dino Runner, Flappy Bird, **Tetris**, **Pixel Plumber**, **Street Crosser**, **Rainbow Breakout**, **Bubble Pop**, **Bomber Maze**, **Fruit Fall**, **Turbo Kart GP** (Mode-7 kart racer: 8 themed tracks in 2 cups, Grand Prix with points and podium, CPU rivals, items, drift boosts, configurable laps). AutoPilot until the first Studio key; gamepads work via the browser Gamepad API; `KeyboardShortcut` on **Controls** methods.
 
 ## Stock filters (overview)
 

@@ -174,6 +174,8 @@ public void StopLeft() { /* … */ }
 
 Games should AutoPilot until the first human input, then skip AI until `Start()` again. The wall has no keyboard — play happens in the Studio browser.
 
+Key names: single letters, `Space`, `Up`/`Down`/`Left`/`Right`, `Enter`, `Escape`, `Backspace`. Gamepads (browser Gamepad API, works with the Docker/NAS host too — the pad is plugged into the PC/phone running Studio) report `PadA`, `PadB`, `PadX`, `PadY`, `PadLB`, `PadRB`, `PadLT`, `PadRT`, `PadBack`, `PadStart`, `PadUp`/`PadDown`/`PadLeft`/`PadRight` (D-pad and left stick). A pad key the game does not bind falls back to the keyboard: D-pad/stick → arrows, A/X → `Space`, B/Back → `Escape`, Start → `Enter`, so existing games are playable with a controller unchanged.
+
 ## 6. Icon
 
 - 48×48 SVG in `Icons/my-thing.svg`.
