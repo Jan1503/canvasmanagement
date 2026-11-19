@@ -112,7 +112,7 @@ Expected siblings (same parent folder):
 |--------|------|
 | `verpixeld/` | [Jan1503/verpixeld](https://github.com/Jan1503/verpixeld) |
 | `pixplane/` | [Jan1503/pixplane](https://github.com/Jan1503/pixplane) |
-| `vap1/` | [Jan1503/vap1](https://github.com/Jan1503/vap1) |
+| `pixtone/` | [Jan1503/pixtone](https://github.com/Jan1503/pixtone) |
 
 Clone this tree as **`CanvasManagement`** (PascalCase). verpixeld’s project reference is `../CanvasManagement/...`. On Linux:
 
