@@ -205,6 +205,8 @@ public class Canvas : ICanvas, IDisposable
         }
     }
 
+    public IExtensionAudio? Audio { get; internal set; }
+
     /// <summary>
     ///     When true, the compositor blends this canvas over the layers beneath it honouring per-pixel alpha
     ///     (so a transparent background reveals what's underneath) instead of forcing it opaque. Opt-in per

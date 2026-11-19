@@ -58,6 +58,16 @@ public sealed class TurboKartExtension : ICanvasExtension, IDisposable
         DefaultValue = true, Order = 8)]
     public bool FinishReplay { get; set; } = true;
 
+    [ExtensionParameter("Sound", "Engine, countdown and race effects on the audio board",
+        DefaultValue = true, Order = 9)]
+    public bool Sound { get; set; } = true;
+
+    [ExtensionParameter("Volume", "How loud this game is on the audio board",
+        DefaultValue = 80, MinValue = 0, MaxValue = 100, Order = 10)]
+    public int Volume { get; set; } = 80;
+
+    private KartAudio? _audio;
+
     public string Name => "Turbo Kart GP";
     public bool IsRunning { get; private set; }
 
@@ -70,6 +80,7 @@ public sealed class TurboKartExtension : ICanvasExtension, IDisposable
             _up = _down = _left = _right = _gas = _brake = false;
             _presses.Clear();
             _game = new Game();
+            _audio = new KartAudio(_canvas);
             _watch.Restart();
             _lastTime = 0;
             _loop = new ExtensionLoop(FrameRate, Tick);
@@ -85,6 +96,8 @@ public sealed class TurboKartExtension : ICanvasExtension, IDisposable
             IsRunning = false;
             _loop?.Dispose();
             _loop = null;
+            _audio?.Silence();
+            _audio = null;
             _backBuffer?.Dispose();
             _backBuffer = null;
             _game = null;
@@ -185,6 +198,7 @@ public sealed class TurboKartExtension : ICanvasExtension, IDisposable
         };
 
         game.Update(dt, hold, presses);
+        _audio?.Update(game, Sound, Volume / 100f, presses.Count > 0);
         var px = game.RenderFrame();
 
         var bmp = Buffer(w, h);

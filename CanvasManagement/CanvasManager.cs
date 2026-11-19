@@ -38,6 +38,7 @@ public class CanvasManager : IDisposable
     private Task? _displayRefresh;
     private volatile bool _fullyDisposed;
     private volatile bool _stopped;
+    private IExtensionAudio? _extensionAudio;
 
     // Frame pacing: target frame interval in microseconds, consumed by the drift-free scheduler in
     // Run(). Read via Volatile each frame so it can be changed live (e.g. from the settings API).
@@ -269,6 +270,20 @@ public class CanvasManager : IDisposable
 
     #region Canvas Management
 
+    /// <summary>
+    ///     Shared extension mixer. Applied to every canvas, including ones created later.
+    ///     The host owns the device; extensions only see <see cref="ICanvas.Audio"/>.
+    /// </summary>
+    public void UseExtensionAudio(IExtensionAudio? audio)
+    {
+        _extensionAudio = audio;
+        lock (_swapLock)
+        {
+            foreach (var entry in GetCanvases)
+                entry.Value.Audio = audio;
+        }
+    }
+
     public Canvas GetCanvas(int zOrder, string? name = null)
     {
         return GetCanvas(0, 0, _mainCanvasBitmap.Width, _mainCanvasBitmap.Height, zOrder, name);
@@ -282,6 +297,7 @@ public class CanvasManager : IDisposable
     public Canvas GetCanvas(int xPos, int yPos, int width, int height, int zOrder, string? name = null)
     {
         var canvas = new Canvas(_mainCanvasBitmap, xPos, yPos, width, height, name, zOrder);
+        canvas.Audio = _extensionAudio;
 
         lock (_swapLock)
         {

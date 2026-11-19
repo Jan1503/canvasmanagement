@@ -1,0 +1,16 @@
+engine-low.wav, engine-mid.wav, engine-high.wav
+  CC0. "racing car engine sound loops" by domasx2, OpenGameArt.
+  https://opengameart.org/content/racing-car-engine-sound-loops
+
+skid.wav
+  CC-BY 3.0. "Car Tire Squeal Skid Loop" by Vertigon, OpenGameArt.
+  https://opengameart.org/content/car-tire-squeal-skid-loop
+  Changed here: resampled from 96 kHz 24-bit to 32 kHz 16-bit mono. The 3 s loop is otherwise the original.
+
+hit.wav, boost.wav
+  CC0. "18 random video game sound effects" by HaelDB, OpenGameArt.
+  https://opengameart.org/content/18-random-video-game-sound-effects
+
+click.wav, tick.wav, go.wav, lap.wav, item.wav, finish.wav
+  CC0. UI sound effects by Kenney (kenney.nl).
+  https://opengameart.org/content/51-ui-sound-effects-buttons-switches-and-clicks

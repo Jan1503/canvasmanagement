@@ -38,6 +38,10 @@ If you want a look (CRT scanlines, blur, seasonal overlay): start with [docs/FIL
 
 Dated from the public GitHub history. Newest first.
 
+### 2026-11-19 — Optional sound for extensions
+
+`ICanvas.Audio` is null when the host has no board. Otherwise an extension can play tones or its own clips (`Play`, `LoopSample`) without opening a device and without a new constructor. Turbo Kart GP uses that for a crossfaded engine, a skid, and short race cues. The samples and their licenses are in `Extensions/CanvasManagement.Extension.TurboKart/Audio/CREDITS.txt`. verpixeld mixes every extension into one stream and stays quiet while a movie owns the board.
+
 ### 2026-10-17 — Live display resize
 
 `CanvasManager.Resize` swaps the composite bitmap while the render loop is running. Existing canvases keep their size and position; pixels outside them stay black. The VLC extension leaves audio off inside a container, and on Linux when no ALSA card can be opened, so a missing sound device does not retry forever.
@@ -108,6 +112,7 @@ Expected siblings (same parent folder):
 |--------|------|
 | `verpixeld/` | [Jan1503/verpixeld](https://github.com/Jan1503/verpixeld) |
 | `pixplane/` | [Jan1503/pixplane](https://github.com/Jan1503/pixplane) |
+| `vap1/` | [Jan1503/vap1](https://github.com/Jan1503/vap1) |
 
 Clone this tree as **`CanvasManagement`** (PascalCase). verpixeld’s project reference is `../CanvasManagement/...`. On Linux:
 
@@ -167,7 +172,7 @@ Details, templates and a checklist: [docs/EXTENSIONS.md](docs/EXTENSIONS.md) and
 Clocks: Analog, Digital, Binary, Flip, Word, Tetris Clock.  
 Content: Weather, News Ticker, Now Playing, Home Assistant (sensor, grid, graph, energy, weather, now-playing, climate, waste, **departures**), Advertising, Slideshow, Scroll text, GIF, YouTube, VLC, Audio, Network Stream (TPM2.NET), LAV1.  
 Visuals: Starfield, Aquarium, Lava Lamp, Falling Sand, Game of Life, Arena screensaver.  
-Games (original SkiaSharp, 1:1 pixel art, playable from Studio): Pac-Man, Snake, Pong, Space Invaders, Dino Runner, Flappy Bird, **Tetris**, **Pixel Plumber**, **Street Crosser**, **Rainbow Breakout**, **Bubble Pop**, **Bomber Maze**, **Fruit Fall**, **Turbo Kart GP** (Mode-7 kart racer: 8 themed tracks in 2 cups, Grand Prix with points and podium, CPU rivals, items, drift boosts, configurable laps). AutoPilot until the first Studio key; gamepads work via the browser Gamepad API; `KeyboardShortcut` on **Controls** methods.
+Games (original SkiaSharp, 1:1 pixel art, playable from Studio): Pac-Man, Snake, Pong, Space Invaders, Dino Runner, Flappy Bird, **Tetris**, **Pixel Plumber**, **Street Crosser**, **Rainbow Breakout**, **Bubble Pop**, **Bomber Maze**, **Fruit Fall**, **Turbo Kart GP** (Mode-7 kart racer: 8 themed tracks in 2 cups, Grand Prix with points and podium, CPU rivals, items, drift boosts, configurable laps, optional race audio). AutoPilot until the first Studio key; gamepads work via the browser Gamepad API; `KeyboardShortcut` on **Controls** methods.
 
 ## Stock filters (overview)
 
@@ -184,6 +189,8 @@ Private / non-redistributable files (Quake III logo & font, Webcomic Whore, Disn
 ## License
 
 MIT for the C# framework. See [LICENSE](LICENSE).
+
+Turbo Kart’s clips are not MIT. Most are CC0. The tire skid is CC-BY 3.0 and stays under that license: keep [the credit](Extensions/CanvasManagement.Extension.TurboKart/Audio/CREDITS.txt) with any copy, including the author’s name, the title, the license, and the note that the file was resampled.
 
 - LibVLCSharp (VLC player) is LGPL; VLC native libs are a **runtime** dependency, not in this repo.
 - verpixeld as a combined application is **GPL-3.0-or-later** because of rpi-rgb-led-matrix and YouTubeMusicAPI.

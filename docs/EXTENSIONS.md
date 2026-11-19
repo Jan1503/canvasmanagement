@@ -249,3 +249,14 @@ Or run verpixeld with `"OutputMode": "simulation"` and the live preview.
 ## 12. Optional factory extension method
 
 Some plugins also expose `canvas.GetStarfield()` in a static `Extension` class. That is only for in-process demos. The host **never** calls it; it always uses discovery + the `ICanvas` constructor.
+
+## 13. Optional sound
+
+The constructor stays `(ICanvas canvas)`. Sound is optional and lives on the canvas:
+
+- `canvas.Audio` is null when the host has no board. Use `canvas.Audio?.Tone(...)`.
+- `IExtensionAudio` is the shared voice pool: `Tone`, `Noise`, `Loop`, `StopLoop`, plus `Play` and `LoopSample` for a clip the extension decoded itself. The host mixes every extension into one stream. A pitched loop is how an engine follows speed; the samples stay in the plugin.
+- `ICanvasAudioSource` is for an extension that fills its own block. `Mix` runs on the audio thread, never inside the compositor lock and never inside a filter.
+- A movie that is already streaming owns the board. Extension sound plays when nothing else is streaming.
+- Stop every loop in `Stop()`.
+

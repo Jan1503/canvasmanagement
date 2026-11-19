@@ -37,6 +37,9 @@ Media/
 deploy/
 PublishProfiles/*.user
 
+## Downloaded sound packs. The clips we ship sit next to Audio/CREDITS.txt.
+Extensions/CanvasManagement.Extension.TurboKart/Audio/_src/
+
 ## Local notes (not for GitHub)
 tasks/
 

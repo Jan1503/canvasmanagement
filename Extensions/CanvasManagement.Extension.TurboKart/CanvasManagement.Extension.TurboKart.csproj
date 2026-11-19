@@ -14,6 +14,7 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Icons\turbo-kart.svg" />
+    <EmbeddedResource Include="Audio\*.wav" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="TurboKartPreview" />

@@ -35,6 +35,12 @@ public interface ICanvas
     /// </summary>
     int ZOrder { get; set; }
 
+    /// <summary>
+    ///     Optional sound output for the extension on this canvas. Null when the host has no audio board.
+    ///     Calls are safe from the extension thread. The host mixes them; the extension does not open a device.
+    /// </summary>
+    IExtensionAudio? Audio { get; }
+
     // ===== BASIC DRAWING OPERATIONS =====
 
     void MakeTransparent();
