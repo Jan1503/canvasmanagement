@@ -1,102 +1,92 @@
-﻿using System.Timers;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.PacMan;
 
 /// <summary>
-///     Pac-Man game extension with intelligent AI-controlled Pac-Man.
+///     Maze chase on a generated, symmetric maze. Runs as a self-playing demo until someone presses a key or a
+///     gamepad button in Studio, then it is a real game: arrows / WASD / D-pad steer (inputs are buffered, so
+///     pressing early into a corner works), Start or Enter pauses, Back hands the wall back to the demo.
 /// </summary>
 [ExtensionInfo("Pac-Man",
-    "Classic Pac-Man — autopilot, or play with the arrow keys in Studio",
+    "Maze chase with smart ghosts and an expert autopilot — play with arrows, WASD or a gamepad in Studio",
     "Games",
     IconResourceName = "pacman.svg")]
-public class PacManExtension(ICanvas canvas) : ICanvasExtension
+public sealed class PacManExtension : ICanvasExtension, IDisposable
 {
-    private readonly ICanvas _canvas = canvas ?? throw new ArgumentNullException(nameof(canvas));
+    private readonly ICanvas _canvas;
     private readonly object _lock = new();
-    private SKColor _backgroundColor = SKColors.Black;
-    private int _caution = 5;
+    private readonly ConcurrentQueue<Direction> _steer = new();
+    private readonly Stopwatch _watch = new();
+    private readonly Autopilot _pilot = new();
+    private readonly GameRenderer _renderer = new();
+    private ExtensionLoop? _loop;
+    private SKBitmap? _bitmap;
+    private Frame? _frame;
+    private Game? _game;
+    private PacSound? _sound;
+    private double _last;
+    private volatile bool _human;
+    private volatile int _pause; // 0 none, 1 toggle requested
+    private volatile bool _start, _back;
+    private (int W, int H) _builtFor;
+    private float _overTime;
 
-    // AI keeps a committed direction so BFS ties don't cause oscillation.
-    private Direction _committedDirection = Direction.None;
-    private bool _human;
-    private int _gameOverTimer;
-    private Timer? _gameTimer;
-    private int _lastDifficulty;
+    public PacManExtension(ICanvas canvas) => _canvas = canvas ?? throw new ArgumentNullException(nameof(canvas));
 
-    // Track last applied values for dynamic updates
-    private int _lastGameSpeed;
-    private int _lastGhostCount;
-    private bool _lastShowDebugInfo;
-    // Animation timers
-    private int _levelCompleteTimer;
-    private GameRenderer? _renderer;
-    private GameState? _state;
-
-    public string Description => "Classic Pac-Man game";
-
-    // ── Gameplay ──
-    [ExtensionParameter("Game Speed", "Update interval in milliseconds — lower is faster",
+    [ExtensionParameter("Game Speed", "Lower is faster (35 is the normal pace)",
         DefaultValue = 35, MinValue = 16, MaxValue = 200, Unit = "ms", Order = 1)]
     public int GameSpeed { get; set; } = 35;
 
-    [ExtensionParameter("Difficulty", "Ghost speed — higher ghosts move quicker (still capped below Pac-Man)",
+    [ExtensionParameter("Difficulty", "Ghost speed, how long they stay blue and how fast they leave the pen",
         DefaultValue = 3, MinValue = 1, MaxValue = 10, Order = 2)]
     public int Difficulty { get; set; } = 3;
 
-    [ExtensionParameter("Ghosts", "How many ghosts hunt Pac-Man",
-        DefaultValue = 4, MinValue = 1, MaxValue = 8, Order = 3)]
+    [ExtensionParameter("Ghosts", "How many ghosts hunt Pac-Man", DefaultValue = 4, MinValue = 1, MaxValue = 8,
+        Order = 3)]
     public int GhostCount { get; set; } = 4;
 
-    [ExtensionParameter("Caution",
-        "How wide a berth Pac-Man gives ghosts when routing to pellets. Higher = bigger detours around " +
-        "ghosts, lower = braver shortcuts",
+    [ExtensionParameter("Caution", "Autopilot: how wide a berth it keeps from ghosts (1 brave … 12 careful)",
         DefaultValue = 5, MinValue = 1, MaxValue = 12, Order = 4)]
-    public int Caution
-    {
-        get => _caution;
-        set => _caution = Math.Clamp(value, 1, 12);
-    }
+    public int Caution { get; set; } = 5;
 
-    // ── Appearance ──
-    [ExtensionParameter("Background Color", "Background colour for the game area",
-        DefaultValue = "#000000", Order = 5)]
-    public SKColor BackgroundColor
-    {
-        get => _backgroundColor;
-        set
-        {
-            _backgroundColor = value;
-            if (_renderer != null) _renderer.BackgroundColor = value;
-        }
-    }
-
-    [ExtensionParameter("Show Debug Info", "Overlay AI/position debug text",
-        DefaultValue = false, Order = 6)]
-    public bool ShowDebugInfo { get; set; } = false;
-
-    [ExtensionParameter("Use BDF Font", "Render HUD text with the crisp bitmap (BDF) font", DefaultValue = false,
-        Order = 7)]
-    public bool UseBdfFont { get; set; }
-
-    [ExtensionParameter("Font Size", "HUD height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
-        MaxValue = 48, Unit = "px", Order = 8)]
-    public int FontSize { get; set; }
-
-    [ExtensionParameter("Auto Pilot", "AI plays until you press a key in Studio", DefaultValue = true, Order = 9)]
+    [ExtensionParameter("Auto Pilot", "Plays a demo until you press a key or a gamepad button in Studio",
+        DefaultValue = true, Order = 5)]
     public bool AutoPilot { get; set; } = true;
 
-    // ── Live status (read-only) ──
-    [ExtensionParameter("Score", "Current game score", ReadOnly = true, Order = 10)]
-    public int Score => _state?.Score ?? 0;
+    [ExtensionParameter("Sound", "Siren, chomps and jingles on the audio board", DefaultValue = true, Order = 6)]
+    public bool Sound { get; set; } = true;
 
-    [ExtensionParameter("Lives", "Remaining lives", ReadOnly = true, Order = 11)]
-    public int Lives => _state?.Lives ?? 0;
+    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
+        MaxValue = 100, Order = 7)]
+    public int Volume { get; set; } = 70;
+
+    [ExtensionParameter("Music", "Background music (the siren gets quieter under it)", DefaultValue = true,
+        Order = 7)]
+    public bool Music { get; set; } = true;
+
+    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 40, MinValue = 0,
+        MaxValue = 100, Order = 7)]
+    public int MusicVolume { get; set; } = 40;
+
+    [ExtensionParameter("Background Color", "Colour behind the maze", DefaultValue = "#000000", Order = 8)]
+    public SKColor BackgroundColor { get; set; } = SKColors.Black;
+
+    [ExtensionParameter("Show Debug Info", "Mark the autopilot's goal and what it is doing", DefaultValue = false,
+        Order = 9)]
+    public bool ShowDebugInfo { get; set; }
+
+    [ExtensionParameter("Score", "Current score", ReadOnly = true, Order = 10)]
+    public int Score => _game?.Score ?? 0;
+
+    [ExtensionParameter("Lives", "Lives left", ReadOnly = true, Order = 11)]
+    public int Lives => _game?.Lives ?? 0;
 
     [ExtensionParameter("Level", "Current level", ReadOnly = true, Order = 12)]
-    public int Level => _state?.Level ?? 0;
+    public int Level => _game?.Level ?? 0;
 
     public string Name => "Pac-Man";
     public bool IsRunning { get; private set; }
@@ -106,37 +96,15 @@ public class PacManExtension(ICanvas canvas) : ICanvasExtension
         lock (_lock)
         {
             if (IsRunning) return;
-
-            var width = _canvas.Width;
-            var height = _canvas.Height;
-
-            _state = new GameState(width, height, GhostCount, Difficulty);
-            _renderer = new GameRenderer(_canvas)
-            {
-                ShowDebugInfo = ShowDebugInfo,
-                BackgroundColor = _backgroundColor,
-                UseBdfFont = UseBdfFont,
-                FontSize = FontSize
-            };
-
-            // Reset AI state
-            _committedDirection = Direction.None;
-            _human = false;
-
-            _lastGameSpeed = GameSpeed;
-            _lastGhostCount = GhostCount;
-            _lastShowDebugInfo = ShowDebugInfo;
-            _lastDifficulty = Difficulty;
-
-            _gameTimer = new Timer(GameSpeed);
-            _gameTimer.Elapsed += OnGameTick;
-            _gameTimer.AutoReset = true;
-            _gameTimer.Start();
-
             IsRunning = true;
-
-            Console.WriteLine(
-                $"[PacMan] Started: {width}x{height}, Grid: {_state.Maze.GridWidth}x{_state.Maze.GridHeight}");
+            _human = false;
+            _steer.Clear();
+            _game = null;
+            _sound = new PacSound(_canvas);
+            _watch.Restart();
+            _last = 0;
+            _loop = new ExtensionLoop(60, Tick);
+            _loop.Start();
         }
     }
 
@@ -144,296 +112,203 @@ public class PacManExtension(ICanvas canvas) : ICanvasExtension
     {
         lock (_lock)
         {
+            if (!IsRunning) return;
             IsRunning = false;
-
-            _gameTimer?.Stop();
-            _gameTimer?.Dispose();
-            _gameTimer = null;
-
-            try
-            {
-                _canvas.Clear(SKColors.Black);
-            }
-            catch
-            {
-            }
-
-            _renderer?.Dispose();
-            _renderer = null;
-            _state = null;
-
-            Console.WriteLine("[PacMan] Stopped");
+            _loop?.Dispose();
+            _loop = null;
+            _sound?.Silence();
+            _sound = null;
+            _bitmap?.Dispose();
+            _bitmap = null;
+            _game = null;
+            try { _canvas.Clear(SKColors.Black); } catch { /* canvas gone */ }
         }
     }
 
-    private void OnGameTick(object? sender, ElapsedEventArgs e)
+    public void Dispose() => Stop();
+
+    // ------------------------------------------------------------------ controls
+
+    private void Steer(Direction d)
     {
-        lock (_lock)
-        {
-            if (!IsRunning || _state == null || _renderer == null) return;
-
-            try
-            {
-                ApplyDynamicParameters();
-
-                // Decide only at tile centres (real decision points). Re-deciding every tick made Pac-Man
-                // flip back and forth on the spot; committing to a lane between intersections fixes that.
-                if (!_state.IsDeathAnimation && !_state.IsLevelStartAnimation && !_state.GameOver &&
-                    !_state.LevelComplete && _state.PacMan.AtCellCenter && AutoPilot && !_human)
-                {
-                    var aiDirection = GetAIDirection();
-                    _state.PacMan.SetNextDirection(aiDirection);
-                }
-
-                _state.Update();
-
-                // Reset AI state on death or level change
-                if (_state.IsDeathAnimation || _state.IsLevelStartAnimation)
-                    _committedDirection = Direction.None;
-
-                if (_state.LevelComplete && !_state.IsLevelStartAnimation)
-                {
-                    _levelCompleteTimer++;
-                    if (_levelCompleteTimer > 120)
-                    {
-                        _levelCompleteTimer = 0;
-                        _state.NextLevel();
-                    }
-                }
-
-                if (_state.GameOver)
-                {
-                    _gameOverTimer++;
-                    if (_gameOverTimer > 180)
-                    {
-                        _gameOverTimer = 0;
-                        _state.Reset();
-                    }
-                }
-
-                _renderer.Render(_state);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[PacMan] Error: {ex.Message}");
-            }
-        }
+        _human = true;
+        _steer.Enqueue(d);
     }
 
-    private void ApplyDynamicParameters()
-    {
-        if (_gameTimer != null && GameSpeed != _lastGameSpeed)
-        {
-            _gameTimer.Interval = GameSpeed;
-            _lastGameSpeed = GameSpeed;
-        }
-
-        if (_state != null && GhostCount != _lastGhostCount)
-        {
-            _state.SetGhostCount(GhostCount);
-            _lastGhostCount = GhostCount;
-        }
-
-        if (_renderer != null)
-        {
-            _renderer.ShowDebugInfo = ShowDebugInfo;
-            _renderer.UseBdfFont = UseBdfFont;
-            _renderer.FontSize = FontSize;
-            _lastShowDebugInfo = ShowDebugInfo;
-        }
-
-        if (_state != null && Difficulty != _lastDifficulty)
-        {
-            _state.SetDifficulty(Difficulty);
-            _lastDifficulty = Difficulty;
-        }
-    }
-
-    /// <summary>
-    ///     Expert Pac-Man brain. Builds a <em>time-aware</em> danger field (a ghost is only dangerous on a
-    ///     cell if it can arrive there around the same step Pac-Man would, measured through the maze, not as
-    ///     the crow flies) and plans with Dijkstra over per-cell danger cost. It hunts frightened ghosts,
-    ///     baits with power pellets when pressured, clears normal pellets first (saving power pellets), and
-    ///     makes a smart escape when truly cornered.
-    /// </summary>
-    private Direction GetAIDirection()
-    {
-        if (_state == null) return Direction.None;
-
-        var maze = _state.Maze;
-        var ghosts = _state.Ghosts;
-        var w = maze.GridWidth;
-        var h = maze.GridHeight;
-        var pac = ((int)Math.Round(_state.PacMan.Position.X), (int)Math.Round(_state.PacMan.Position.Y));
-
-        var pacDist = maze.DistanceFrom(new[] { pac });
-
-        // Threat field from dangerous ghosts. Seed at the cell AHEAD of each ghost (they can't reverse, so
-        // the cell behind them is safe) plus their current cell to cover turns.
-        var threatSeeds = new List<(int x, int y)>();
-        foreach (var g in ghosts)
-        {
-            if (g.State != GhostState.Chase) continue; // frightened/dead aren't threats
-            var gc = ((int)Math.Round(g.Position.X), (int)Math.Round(g.Position.Y));
-            threatSeeds.Add(gc);
-            var v = g.Direction.ToVector();
-            var ahead = (gc.Item1 + (int)v.X, gc.Item2 + (int)v.Y);
-            if (maze.IsOpenCell(ahead.Item1, ahead.Item2)) threatSeeds.Add(ahead);
-        }
-
-        var ghostThreat = maze.DistanceFrom(threatSeeds);
-
-        // Per-cell entry cost: 1 + danger. Danger spikes where a ghost reaches the cell at (or before) the
-        // same step Pac-Man would. "slack" = how many steps Pac-Man is ahead of the nearest ghost there.
-        // The Caution slider widens the avoidance horizon (how far around ghosts gets penalised).
-        var horizon = Math.Max(2, _caution);
-        var cost = new float[w, h];
-        for (var x = 0; x < w; x++)
-        for (var y = 0; y < h; y++)
-        {
-            var c = 1f;
-            var gt = ghostThreat[x, y];
-            if (gt >= 0)
-            {
-                var pd = pacDist[x, y] >= 0 ? pacDist[x, y] : 999;
-                var slack = gt - pd;
-                if (slack <= 0) c += 120f; // ghost arrives first/together: lethal, route around it
-                else if (slack < horizon) c += (horizon - slack) * 8f;
-            }
-
-            cost[x, y] = c;
-        }
-
-        // 1) Frightened ghosts on the board: hunt the nearest one (path still dodges live ghosts via cost).
-        var frightened = ghosts.Where(g => g.State == GhostState.Frightened)
-            .Select(g => ((int)Math.Round(g.Position.X), (int)Math.Round(g.Position.Y)))
-            .ToHashSet();
-        if (frightened.Count > 0)
-        {
-            var dir = maze.LowestCostStepToTarget(pac, (x, y) => frightened.Contains((x, y)), cost,
-                _committedDirection);
-            if (dir != Direction.None) return Commit(dir);
-        }
-
-        // 2) Head for the nearest ACTUAL pellet along the safest path (normal pellets first to save power
-        //    pellets, then power pellets). This is the key to non-dumb routing: Pac-Man always targets a
-        //    real pellet, with ghost danger folded into the path cost rather than abandoning the goal.
-        var goal = maze.LowestCostStepToTarget(pac, maze.HasPellet, cost, _committedDirection);
-        if (goal == Direction.None)
-            goal = maze.LowestCostStepToTarget(pac, maze.HasPowerPellet, cost, _committedDirection);
-
-        // 3) Take the pellet step unless it would walk straight into a ghost; if so, dodge while still
-        //    biasing toward the pellet. Because step danger is baked into the cost above, this override is
-        //    rare - it's just the final "don't suicide" guard.
-        if (goal != Direction.None)
-        {
-            if (IsStepSafe(pac, goal, ghostThreat)) return Commit(goal);
-            return Commit(ChooseSafeDirection(pac, ghostThreat, maze, goal));
-        }
-
-        // 4) Nothing reachable to collect (rare): just stay alive.
-        return Commit(ChooseSafeDirection(pac, ghostThreat, maze, Direction.None));
-    }
-
-    private Direction Commit(Direction dir)
-    {
-        if (dir != Direction.None) _committedDirection = dir;
-        return _committedDirection;
-    }
-
-    private static bool IsStepSafe((int x, int y) pac, Direction dir, int[,] ghostThreat)
-    {
-        var v = dir.ToVector();
-        int nx = pac.x + (int)v.X, ny = pac.y + (int)v.Y;
-        if (nx < 0 || ny < 0 || nx >= ghostThreat.GetLength(0) || ny >= ghostThreat.GetLength(1)) return false;
-        var gt = ghostThreat[nx, ny];
-        return gt < 0 || gt > 1; // -1 = ghost can't reach it; otherwise needs >1 step
-    }
-
-    /// <summary>
-    ///     Picks the safest immediate move when the desired pellet step is dangerous. A neighbour a ghost can
-    ///     reach in 0-1 steps is suicidal and skipped (unless every option is). Among survivable moves it
-    ///     favours cells the ghosts reach latest, with more exits, biased toward <paramref name="goal" /> so
-    ///     it keeps making progress. Reversing is allowed - escaping beats greed.
-    /// </summary>
-    private Direction ChooseSafeDirection((int x, int y) pac, int[,] ghostThreat, Maze maze, Direction goal)
-    {
-        var opposite = Maze.Opposite(_committedDirection);
-        var best = Direction.None;
-        var bestScore = float.MinValue;
-
-        // Fallback if literally every move is lethal: take the one the ghost reaches latest.
-        var leastBad = Direction.None;
-        var leastBadSafety = int.MinValue;
-
-        foreach (var dir in new[] { Direction.Up, Direction.Down, Direction.Left, Direction.Right })
-        {
-            var v = dir.ToVector();
-            int nx = pac.x + (int)v.X, ny = pac.y + (int)v.Y;
-            if (!maze.IsOpenCell(nx, ny)) continue;
-
-            var gt = ghostThreat[nx, ny];
-            var safety = gt < 0 ? 999 : gt; // -1 = unreachable by a ghost = safest
-            if (safety > leastBadSafety)
-            {
-                leastBadSafety = safety;
-                leastBad = dir;
-            }
-
-            if (safety <= 1) continue; // ghost is on / one step from this cell: don't walk into it
-
-            var score = safety * 10f + CountExits(nx, ny, maze) * 3f;
-            if (dir == goal) score += 8f; // keep heading for the pellet when it's safe to
-            if (dir == _committedDirection) score += 1.5f; // anti-oscillation
-            if (dir == opposite) score -= 1f; // mild: reversing to survive is fine
-
-            if (score > bestScore)
-            {
-                bestScore = score;
-                best = dir;
-            }
-        }
-
-        return best != Direction.None ? best : leastBad;
-    }
-
-    private int CountExits(int x, int y, Maze maze)
-    {
-        var count = 0;
-        if (maze.IsOpenCell(x - 1, y)) count++;
-        if (maze.IsOpenCell(x + 1, y)) count++;
-        if (maze.IsOpenCell(x, y - 1)) count++;
-        if (maze.IsOpenCell(x, y + 1)) count++;
-        return count;
-    }
-
-    private void Steer(Direction dir)
-    {
-        lock (_lock)
-        {
-            _human = true;
-            _state?.PacMan.SetNextDirection(dir);
-        }
-    }
-
-    [ExtensionMethod("Go Up", "Steer up — takes over from autopilot",
-        Category = "Controls", KeyboardShortcut = "Up|W", Order = 1)]
+    [ExtensionMethod("Go Up", "Steer up (takes over from the demo)", Category = "Controls",
+        KeyboardShortcut = "Up|W|PadUp", Order = 1)]
     public void GoUp() => Steer(Direction.Up);
 
-    [ExtensionMethod("Go Down", "Steer down — takes over from autopilot",
-        Category = "Controls", KeyboardShortcut = "Down|S", Order = 2)]
+    [ExtensionMethod("Go Down", "Steer down (takes over from the demo)", Category = "Controls",
+        KeyboardShortcut = "Down|S|PadDown", Order = 2)]
     public void GoDown() => Steer(Direction.Down);
 
-    [ExtensionMethod("Go Left", "Steer left — takes over from autopilot",
-        Category = "Controls", KeyboardShortcut = "Left|A", Order = 3)]
+    [ExtensionMethod("Go Left", "Steer left (takes over from the demo)", Category = "Controls",
+        KeyboardShortcut = "Left|A|PadLeft", Order = 3)]
     public void GoLeft() => Steer(Direction.Left);
 
-    [ExtensionMethod("Go Right", "Steer right — takes over from autopilot",
-        Category = "Controls", KeyboardShortcut = "Right|D", Order = 4)]
+    [ExtensionMethod("Go Right", "Steer right (takes over from the demo)", Category = "Controls",
+        KeyboardShortcut = "Right|D|PadRight", Order = 4)]
     public void GoRight() => Steer(Direction.Right);
 
-    public void Dispose()
+    [ExtensionMethod("Start", "Start a new game / continue after game over", Category = "Controls",
+        KeyboardShortcut = "Space|PadA|PadX", Order = 5)]
+    public void StartGame()
     {
-        Stop();
+        _human = true;
+        _start = true;
+    }
+
+    [ExtensionMethod("Pause", "Pause or resume", Category = "Controls", KeyboardShortcut = "Enter|P|PadStart",
+        Order = 6)]
+    public void Pause() => _pause = 1;
+
+    [ExtensionMethod("Demo", "Hand the wall back to the autopilot", Category = "Controls",
+        KeyboardShortcut = "Escape|PadBack", Order = 7)]
+    public void Demo() => _back = true;
+
+    // ------------------------------------------------------------------ loop
+
+    private Task Tick(CancellationToken ct)
+    {
+        var w = _canvas.Width;
+        var h = _canvas.Height;
+        if (w < 48 || h < 40) return Task.CompletedTask;
+
+        var now = _watch.Elapsed.TotalSeconds;
+        var dt = (float)Math.Clamp(now - _last, 0.001, 0.05);
+        _last = now;
+
+        var (cols, rows, _, _) = GameRenderer.Fit(w, h);
+        if (_game == null || _builtFor != (w, h))
+        {
+            _builtFor = (w, h);
+            _game = NewGame(cols, rows);
+        }
+        var game = _game;
+        game.Difficulty = Difficulty;
+        game.SpeedFactor = Math.Clamp(35f / Math.Max(1, GameSpeed), 0.3f, 1.8f);
+        game.SetGhostCount(GhostCount);
+        _pilot.Caution = Math.Clamp(Caution, 1, 12);
+
+        var demo = AutoPilot && !_human;
+        Input(game, ref demo);
+        game = _game!;
+        game.Pilot = demo ? _pilot.Decide : null;
+        game.Panic = demo ? _pilot.Panic : null;
+
+        game.Update(dt);
+        var events = game.TakeEvents();
+
+        if (game.Phase == Phase.GameOver)
+        {
+            _overTime += dt;
+            // The demo starts over by itself; a player gets a few seconds to press Start, then the demo returns.
+            if (demo && _overTime > 4f || !demo && _overTime > 20f)
+            {
+                _human = false;
+                _game = NewGame(cols, rows);
+                _overTime = 0;
+                game = _game;
+                events |= game.TakeEvents();
+            }
+        }
+        else _overTime = 0;
+
+        try
+        {
+            _sound?.Update(game, events, Sound, Volume / 100f, dt, demo, Music, MusicVolume / 100f);
+        }
+        catch (Exception ex)
+        {
+            // Sound is a bonus; never let it stop the game.
+            Console.WriteLine("[PacMan] sound: " + ex.Message);
+            _sound = null;
+        }
+
+        _frame = _frame?.W == w && _frame.H == h ? _frame : new Frame(w, h);
+        _renderer.Demo = demo;
+        _renderer.Debug = ShowDebugInfo;
+        _renderer.Pilot = _pilot;
+        _renderer.Background = (uint)BackgroundColor | 0xFF000000u;
+        _renderer.Render(_frame, game, dt);
+
+        if (_bitmap == null || _bitmap.Width != w || _bitmap.Height != h)
+        {
+            _bitmap?.Dispose();
+            _bitmap = new SKBitmap(new SKImageInfo(w, h, SKColorType.Bgra8888, SKAlphaType.Premul));
+        }
+        var px = _frame.Px;
+        var handle = GCHandle.Alloc(px, GCHandleType.Pinned);
+        try
+        {
+            unsafe
+            {
+                Buffer.MemoryCopy((void*)handle.AddrOfPinnedObject(), (void*)_bitmap.GetPixels(), (long)w * h * 4,
+                    (long)w * h * 4);
+            }
+        }
+        finally
+        {
+            handle.Free();
+        }
+        _canvas.SubmitCompletedFrame(_bitmap);
+        return Task.CompletedTask;
+    }
+
+    private Game NewGame(int cols, int rows) => new(cols, rows, GhostCount, Difficulty);
+
+    private void Input(Game game, ref bool demo)
+    {
+        if (_back)
+        {
+            _back = false;
+            _human = false;
+            _steer.Clear();
+            demo = AutoPilot;
+            if (demo) _game = game = ReplaceGame(game);
+            return;
+        }
+
+        var steered = !_steer.IsEmpty;
+        var start = _start;
+        _start = false;
+
+        // First touch in the demo: a fresh game for the player.
+        if ((steered || start) && !demo && game.Phase != Phase.Paused && _wasDemo)
+        {
+            _wasDemo = false;
+            _game = game = ReplaceGame(game);
+            _steer.Clear();
+            return;
+        }
+        _wasDemo = demo;
+
+        if (start && game.Phase == Phase.GameOver)
+        {
+            _game = ReplaceGame(game);
+            return;
+        }
+
+        if (_pause == 1)
+        {
+            _pause = 0;
+            game.Pause(game.Phase != Phase.Paused);
+        }
+
+        while (_steer.TryDequeue(out var d))
+        {
+            if (game.Phase == Phase.Paused) game.Pause(false);
+            game.Pac.Want = d;
+        }
+    }
+
+    private bool _wasDemo = true;
+
+    private Game ReplaceGame(Game old)
+    {
+        var (cols, rows) = (old.Maze.W, old.Maze.H);
+        _overTime = 0;
+        return NewGame(cols, rows);
     }
 }

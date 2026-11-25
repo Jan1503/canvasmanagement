@@ -409,6 +409,14 @@ internal sealed partial class Game
         var p = race.Player;
         var small = 10f * s;
 
+        // Replay: cinema bars only, a blinking tag, no race HUD.
+        if (race.Replaying)
+        {
+            if (((int)(race.Clock * 2.5f) & 1) == 0)
+                text("REPLAY", new SKColor(255, 60, 60), 6 * s, H / 9f - 2 * s, small, SKTextAlign.Left);
+            return;
+        }
+
         text(p.Gems.ToString("00"), White, l.GemX + 10 * s, l.GemY + 7 * s, small, SKTextAlign.Left);
         var lap = Math.Clamp(p.Lap, 1, race.Laps);
         text($"{lap}/{race.Laps}", White, l.LapX + 10 * s, l.LapY + 7 * s, small, SKTextAlign.Left);

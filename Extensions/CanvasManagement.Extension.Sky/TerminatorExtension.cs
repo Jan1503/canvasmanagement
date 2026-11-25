@@ -40,7 +40,7 @@ public class TerminatorExtension : ICanvasExtension, IDisposable
     public bool ShowMarker { get; set; } = true;
 
     [ExtensionParameter("Use BDF Font", "Render the place name with the crisp bitmap (BDF) font",
-        DefaultValue = false, Order = 5)]
+        DefaultValue = true, Order = 5)]
     public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Place-name height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,

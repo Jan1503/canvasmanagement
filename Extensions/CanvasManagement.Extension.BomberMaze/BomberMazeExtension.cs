@@ -50,8 +50,8 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Show Score", "Show the HUD", DefaultValue = true, Order = 3)]
     public bool ShowScore { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render HUD with the crisp bitmap (BDF) font", DefaultValue = false, Order = 4)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render HUD with the crisp bitmap (BDF) font", DefaultValue = true, Order = 4)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "HUD height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0, MaxValue = 48,
         Unit = "px", Order = 5)]
@@ -59,6 +59,27 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
 
     [ExtensionParameter("Auto Pilot", "AI plays until you press a key in Studio", DefaultValue = true, Order = 6)]
     public bool AutoPilot { get; set; } = true;
+
+    private GameSound? _snd;
+    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Action);
+
+    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
+    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
+
+    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
+    public bool Music { get => _sound.Music; set => _sound.Music = value; }
+
+    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
+        MaxValue = 100, Order = 22)]
+    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
+
+    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
+        MaxValue = 100, Order = 23)]
+    public int MusicVolume
+    {
+        get => (int)MathF.Round(_sound.MusicVolume * 100);
+        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
+    }
 
     public string Name => "Bomber Maze";
     public bool IsRunning { get; private set; }
@@ -97,6 +118,7 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
             _timer?.Stop();
             _timer?.Dispose();
             _timer = null;
+            _sound.Stop();
             _backBuffer?.Dispose();
             _backBuffer = null;
             try { _canvas.Clear(SKColors.Black); } catch { }
@@ -177,6 +199,8 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
                     Update();
 
                 Render();
+                _sound.Duck(_crashTimer > 0 ? 0.35f : 1f);
+                _sound.Update();
                 _frame++;
             }
             catch (Exception ex)
@@ -234,6 +258,9 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
             {
                 _enemies.RemoveAt(i);
                 _score += 50;
+                _fx.Burst(_ox + e.X * _cell + _cell / 2f, _oy + e.Y * _cell + _cell / 2f, new SKColor(255, 70, 160), 18, 2.4f, 0.7f, 0.04f);
+                _fx.Pop("+50", _ox + e.X * _cell + _cell / 2f, _oy + e.Y * _cell, new SKColor(255, 160, 220));
+                _sound.Play(GameSfx.Pop);
                 continue;
             }
 
@@ -254,60 +281,186 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
         }
 
         var t = Tile(tx, ty);
+        if (t is Extra or RangeUp) _sound.Play(GameSfx.PowerUp, 0.6f);
         if (t == Extra) { _maxBombs = Math.Min(6, _maxBombs + 1); _map[tx, ty] = Empty; _hint = "+BOMB"; }
         if (t == RangeUp) { _range = Math.Min(8, _range + 1); _map[tx, ty] = Empty; _hint = "+RANGE"; }
 
         if (_enemies.Count == 0)
         {
             _score += 200;
+            _sound.Play(GameSfx.LevelUp, 0.7f);
             _hint = "STAGE CLEAR";
             NewLevel();
         }
     }
 
+    /// <summary>
+    ///     Demo player: flee any blast that will reach it, otherwise bomb a foe lined up in range, walk to a spot
+    ///     from which it can hit one, pick up power-ups, or dig: walk next to a soft block and bomb it. A bomb is
+    ///     only laid when there is a safe cell to run to.
+    /// </summary>
     private void RunAi()
     {
         var x = (int)Math.Round(_px);
         var y = (int)Math.Round(_py);
-        var danger = DangerMap(horizon: 18);
+        var danger = DangerMap(horizon: 60);
 
         if (danger[x, y] >= 0)
         {
             if (StepAwayFromDanger(x, y, danger)) return;
         }
 
-        Enemy? nearest = null;
-        var best = 99;
-        foreach (var e in _enemies)
-        {
-            var d = Math.Abs((int)Math.Round(e.X) - x) + Math.Abs((int)Math.Round(e.Y) - y);
-            if (d < best) { best = d; nearest = e; }
-        }
+        bool Safe(int nx, int ny) => Can(nx, ny) && danger[nx, ny] < 0 && !NearFoe(nx, ny);
 
-        if (nearest != null && best > 0 && best <= _range
-            && _bombs.Count < _maxBombs
-            && Aligned(x, y, (int)Math.Round(nearest.Value.X), (int)Math.Round(nearest.Value.Y))
-            && ClearLine(x, y, (int)Math.Round(nearest.Value.X), (int)Math.Round(nearest.Value.Y))
-            && HasEscape(x, y))
+        // A foe in line and in reach: bomb and run.
+        if (_bombs.Count < _maxBombs && FoeInReach(x, y) && HasEscape(x, y))
         {
             PlaceBomb();
-            StepAwayFromDanger(x, y, DangerMap(horizon: 22));
+            StepAwayFromDanger(x, y, DangerMap(horizon: 60));
             return;
         }
 
-        var (tx, ty) = nearest != null
-            ? ((int)Math.Round(nearest.Value.X), (int)Math.Round(nearest.Value.Y))
-            : FindSoft(x, y);
-        StepTowardSafe(x, y, tx, ty, danger);
+        // While a bomb ticks, keep out of its way and let it do the work.
+        if (_bombs.Count >= _maxBombs)
+        {
+            _holdX = _holdY = 0;
+            return;
+        }
 
-        if (_bombs.Count == 0 && Tile(x + 1, y) == Soft && HasEscape(x, y) && _random.Next(12) == 0)
-            PlaceBomb();
-        else if (_bombs.Count == 0 && Tile(x, y + 1) == Soft && HasEscape(x, y) && _random.Next(12) == 0)
-            PlaceBomb();
+        // Power-ups, then a spot to shoot a foe from, then a soft block to dig.
+        Func<int, int, bool>[] goals =
+        {
+            (nx, ny) => Tile(nx, ny) is Extra or RangeUp,
+            (nx, ny) => FoeInReach(nx, ny),
+            (nx, ny) => Tile(nx + 1, ny) == Soft || Tile(nx - 1, ny) == Soft || Tile(nx, ny + 1) == Soft || Tile(nx, ny - 1) == Soft
+        };
+        for (var g = 0; g < goals.Length; g++)
+        {
+            var goal = goals[g];
+            if (goal(x, y))
+            {
+                if (g == 0) continue;
+                if (HasEscape(x, y))
+                {
+                    PlaceBomb();
+                    StepAwayFromDanger(x, y, DangerMap(horizon: 60));
+                    return;
+                }
+                continue;
+            }
+            var step = Bfs(x, y, goal, Safe);
+            if (step != (0, 0))
+            {
+                _holdX = step.dx;
+                _holdY = step.dy;
+                return;
+            }
+        }
+
+        // Nothing to do (or boxed in): wander somewhere safe.
+        var wander = Bfs(x, y, (nx, ny) => Math.Abs(nx - x) + Math.Abs(ny - y) >= 3, Safe);
+        _holdX = wander.dx;
+        _holdY = wander.dy;
+    }
+
+    /// <summary>
+    ///     When each cell burns: from the tick its bomb goes off until the blast fades (-1 = never). A bomb we
+    ///     are about to lay can be included.
+    /// </summary>
+    private (int[,] From, int[,] To) BurnWindows((int X, int Y)? extra = null)
+    {
+        var from = new int[_gw, _gh];
+        var to = new int[_gw, _gh];
+        for (var y = 0; y < _gh; y++)
+        for (var x = 0; x < _gw; x++)
+            from[x, y] = to[x, y] = -1;
+
+        void Mark(int cx, int cy, int t0, int t1)
+        {
+            if (!In(cx, cy)) return;
+            if (from[cx, cy] < 0 || t0 < from[cx, cy]) from[cx, cy] = t0;
+            to[cx, cy] = Math.Max(to[cx, cy], t1);
+        }
+
+        void Cross(int bx, int by, int range, int t)
+        {
+            Mark(bx, by, t, t + 11);
+            foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+                for (var i = 1; i <= range; i++)
+                {
+                    var tile = Tile(bx + dx * i, by + dy * i);
+                    if (tile == Solid) break;
+                    Mark(bx + dx * i, by + dy * i, t, t + 11);
+                    if (tile == Soft) break;
+                }
+        }
+
+        foreach (var b in _bombs) Cross(b.X, b.Y, b.Range, b.T);
+        if (extra is { } e) Cross(e.X, e.Y, _range, 42);
+        foreach (var bl in _blasts) Mark(bl.x, bl.y, 0, bl.life + 1);
+        return (from, to);
+    }
+
+    /// <summary>
+    ///     First step to the nearest cell that never burns, walking only through cells that are not burning
+    ///     when the player passes (about four ticks per cell). (0,0) if already safe or no way out.
+    /// </summary>
+    private (int dx, int dy) FleeStep(int sx, int sy, (int[,] From, int[,] To) w)
+    {
+        const int perCell = 4;
+        bool Burning(int x, int y, int at) => w.From[x, y] >= 0 && w.From[x, y] <= at + 3 && at - 2 <= w.To[x, y];
+        if (w.From[sx, sy] < 0) return (0, 0);
+        var seen = new bool[_gw, _gh];
+        var q = new Queue<(int x, int y, int d, int fdx, int fdy)>();
+        seen[sx, sy] = true;
+        q.Enqueue((sx, sy, 0, 0, 0));
+        while (q.Count > 0)
+        {
+            var (x, y, d, fdx, fdy) = q.Dequeue();
+            foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+            {
+                int nx = x + dx, ny = y + dy;
+                if (!In(nx, ny) || seen[nx, ny] || !Can(nx, ny)) continue;
+                var at = (d + 1) * perCell;
+                if (Burning(nx, ny, at)) continue;
+                seen[nx, ny] = true;
+                var first = d == 0 ? (dx, dy) : (fdx, fdy);
+                if (w.From[nx, ny] < 0 && !NearFoe(nx, ny)) return first;
+                q.Enqueue((nx, ny, d + 1, first.Item1, first.Item2));
+            }
+        }
+        return (0, 0);
+    }
+
+    private bool NearFoe(int x, int y)
+    {
+        foreach (var e in _enemies)
+            if (Math.Abs(e.X - x) + Math.Abs(e.Y - y) < 1.6f) return true;
+        return false;
+    }
+
+    private bool FoeInReach(int x, int y)
+    {
+        if (!Can(x, y)) return false;
+        foreach (var e in _enemies)
+        {
+            int ex = (int)Math.Round(e.X), ey = (int)Math.Round(e.Y);
+            var d = Math.Abs(ex - x) + Math.Abs(ey - y);
+            if (d > 0 && d <= _range && Aligned(x, y, ex, ey) && ClearLine(x, y, ex, ey)) return true;
+        }
+        return false;
     }
 
     private bool StepAwayFromDanger(int x, int y, int[,] danger)
     {
+        var flee = FleeStep(x, y, BurnWindows());
+        if (flee != (0, 0))
+        {
+            _holdX = flee.dx;
+            _holdY = flee.dy;
+            return true;
+        }
+
         var step = Bfs(x, y, (nx, ny) => danger[nx, ny] < 0 && Can(nx, ny),
             (nx, ny) => Can(nx, ny) && (danger[nx, ny] < 0 || danger[nx, ny] > 6));
         if (step == (0, 0))
@@ -396,30 +549,8 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
         return d;
     }
 
-    private bool HasEscape(int x, int y)
-    {
-        // Pretend a bomb is here and see if any cell is outside its cross.
-        var fake = DangerMap(horizon: 40);
-        void PaintHere()
-        {
-            fake[x, y] = 0;
-            foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
-                for (var i = 1; i <= _range; i++)
-                {
-                    var cx = x + dx * i;
-                    var cy = y + dy * i;
-                    var t = Tile(cx, cy);
-                    if (t == Solid) break;
-                    fake[cx, cy] = 0;
-                    if (t == Soft) break;
-                }
-        }
-
-        PaintHere();
-        var step = Bfs(x, y, (nx, ny) => fake[nx, ny] < 0 && Can(nx, ny),
-            (nx, ny) => Can(nx, ny));
-        return step != (0, 0);
-    }
+    /// <summary>Would a bomb laid here leave a timed way out?</summary>
+    private bool HasEscape(int x, int y) => FleeStep(x, y, BurnWindows((x, y))) != (0, 0);
 
     private (int, int) FindSoft(int x, int y)
     {
@@ -523,6 +654,7 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
         foreach (var b in _bombs)
             if (b.X == x && b.Y == y) return;
         _bombs.Add(new BombEnt { X = x, Y = y, T = 42, Range = _range });
+        _sound.Play(GameSfx.Bomb, 0.6f);
     }
 
     private void Boom(int x, int y, int range)
@@ -533,11 +665,16 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
             var t = Tile(cx, cy);
             if (t == Soft)
             {
+                // Splinters.
+                _fx.Burst(_ox + cx * _cell + _cell / 2f, _oy + cy * _cell + _cell / 2f, new SKColor(200, 120, 50), 10, 2.2f, 0.8f, 0.12f, false);
                 _map[cx, cy] = _random.Next(100) < 22 ? (_random.Next(2) == 0 ? Extra : RangeUp) : Empty;
                 _score += 5;
             }
         }
 
+        _sound.Play(GameSfx.Explode, 0.7f, (x / (float)Math.Max(1, _gw)) * 2 - 1);
+        _fx.Shake(3 + range * 0.4f);
+        _fx.Burst(_ox + x * _cell + _cell / 2f, _oy + y * _cell + _cell / 2f, new SKColor(255, 200, 80), 20, 3f, 0.6f, 0.02f);
         Arm(x, y);
         foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
             for (var i = 1; i <= range; i++)
@@ -555,6 +692,9 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
     {
         if (_crashTimer > 0) return;
         _lives--;
+        _sound.Play(_lives <= 0 ? GameSfx.GameOver : GameSfx.Die, 0.8f);
+        _fx.Flash(new SKColor(255, 60, 40), 0.6f);
+        _fx.Shake(5);
         _crashTimer = 40;
         _death = why;
         _hint = why;
@@ -697,12 +837,25 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
         "........"
     };
 
+    private readonly GameFx _fx = new();
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    private double _lastRender;
+
+    /// <summary>
+    ///     Explosions are glowing flame crosses that flicker and fade, crates splinter into debris, bombs swell
+    ///     and spit sparks from the fuse, power-ups glow and bob, foes burst, and every blast shakes the maze.
+    /// </summary>
     private void Render()
     {
         var bb = _backBuffer;
         if (bb == null) return;
+        var now = _clock.Elapsed.TotalSeconds;
+        var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
+        _lastRender = now;
+        _fx.Update(dt);
         using var canvas = new SKCanvas(bb);
         canvas.Clear(new SKColor(12, 10, 22));
+        _fx.BeginShake(canvas);
         using var paint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
         var s = _art;
 
@@ -761,31 +914,57 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
             else
             {
                 PixelArt.Blit(canvas, Floor, rx, ry, ch => ch == 'x' ? new SKColor(36, 28, 58) : new SKColor(22, 18, 40), s);
-                if (t == Extra)
+                if (t is Extra or RangeUp)
                 {
-                    paint.Color = new SKColor(80, 255, 140);
-                    PixelArt.Disc(canvas, paint, rx + _cell / 2, ry + _cell / 2, Math.Max(2, _cell / 4));
-                }
-                else if (t == RangeUp)
-                {
-                    paint.Color = new SKColor(80, 180, 255);
-                    PixelArt.Disc(canvas, paint, rx + _cell / 2, ry + _cell / 2, Math.Max(2, _cell / 4));
+                    var col = t == Extra ? new SKColor(80, 255, 140) : new SKColor(80, 180, 255);
+                    var bob = (int)MathF.Round(MathF.Sin(_fx.Time * 4 + x + y) * Math.Max(1, _cell / 8f));
+                    GameFx.GlowDisc(canvas, rx + _cell / 2f, ry + _cell / 2f + bob, _cell * 0.8f, col, 0.4f);
+                    paint.Color = col;
+                    PixelArt.Disc(canvas, paint, rx + _cell / 2, ry + _cell / 2 + bob, Math.Max(2, _cell / 4));
+                    paint.Color = SKColors.White;
+                    canvas.DrawRect(rx + _cell / 2 - 1, ry + _cell / 2 + bob - 1, 1, 1, paint);
                 }
             }
         }
 
+        // Flames: each blast cell is a flickering block of fire that joins its neighbours, with a glow.
+        var fire = new HashSet<(int, int)>(_blasts.Select(b => (b.x, b.y)));
         foreach (var bl in _blasts)
         {
-            var cx = _ox + bl.x * _cell + _cell / 2;
-            var cy = _oy + bl.y * _cell + _cell / 2;
-            paint.Color = new SKColor(255, (byte)(70 + bl.life * 18), 20);
-            PixelArt.Disc(canvas, paint, cx, cy, Math.Max(3, _cell / 2 - 1));
-            paint.Color = new SKColor(255, 230, 80);
-            PixelArt.Disc(canvas, paint, cx, cy, Math.Max(2, _cell / 4));
+            var rx = _ox + bl.x * _cell;
+            var ry = _oy + bl.y * _cell;
+            var heat = bl.life / 10f;
+            GameFx.Glow(canvas, rx, ry, _cell, _cell, new SKColor(255, 120, 20), 3, 0.25f * heat);
+            var horiz = fire.Contains((bl.x - 1, bl.y)) || fire.Contains((bl.x + 1, bl.y));
+            var vert = fire.Contains((bl.x, bl.y - 1)) || fire.Contains((bl.x, bl.y + 1));
+            var inset = Math.Max(1, (int)(_cell * (0.35f - 0.25f * heat)));
+            for (var layer = 0; layer < 3; layer++)
+            {
+                var k = inset + layer * Math.Max(1, _cell / 8);
+                paint.Color = layer switch
+                {
+                    0 => new SKColor(220, 40, 10),
+                    1 => new SKColor(255, (byte)(120 + 60 * heat), 20),
+                    _ => new SKColor(255, 250, 200)
+                };
+                var jitter = (_frame + bl.x * 3 + bl.y) % 3 == 0 ? 1 : 0;
+                if (horiz || !vert) canvas.DrawRect(rx, ry + k + jitter, _cell, _cell - 2 * k, paint);
+                if (vert || !horiz) canvas.DrawRect(rx + k + jitter, ry, _cell - 2 * k, _cell, paint);
+            }
         }
 
+        // Bombs swell as the fuse burns down and spit sparks.
         foreach (var b in _bombs)
-            PixelArt.Blit(canvas, BombSpr, _ox + b.X * _cell, _oy + b.Y * _cell, PalBomb, s);
+        {
+            var bx = _ox + b.X * _cell;
+            var by = _oy + b.Y * _cell;
+            var urgency = 1 - b.T / 42f;
+            var pulse = MathF.Sin(_fx.Time * (8 + urgency * 20)) > 0;
+            if (pulse && urgency > 0.5f) GameFx.GlowDisc(canvas, bx + _cell / 2f, by + _cell / 2f, _cell * 0.9f, new SKColor(255, 60, 30), 0.35f * urgency);
+            PixelArt.Blit(canvas, BombSpr, bx, by, PalBomb, s);
+            if (_frame % 2 == 0)
+                _fx.Spark(bx + _cell * 0.7f, by + _cell * 0.15f, _fx.Rand(-0.5f, 0.5f), _fx.Rand(-1f, -0.3f), new SKColor(255, 220, 80), 0.25f, 1, true, 0.05f);
+        }
 
         var foeSpr = _frame / 6 % 2 == 0 ? FoeA : FoeB;
         foreach (var e in _enemies)
@@ -794,16 +973,22 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
         if (_crashTimer == 0 || _frame / 2 % 2 == 0)
             PixelArt.Blit(canvas, Hero, _ox + _px * _cell, _oy + _py * _cell, PalHero, s);
 
+        _fx.DrawParticles(canvas);
+        _fx.EndShake(canvas);
+
         if (ShowScore)
         {
             var size = CanvasText.ResolveSize(FontSize, Math.Max(7f, _canvas.Height * 0.07f));
             CanvasText.Draw(canvas, _canvas, $"{_score}  x{_lives}  B{_maxBombs} R{_range}", SKColors.White,
                 3, size + 1, size, SKTextAlign.Left, UseBdfFont);
             var msg = _crashTimer > 0 && _death.Length > 0 ? _death.ToUpperInvariant() : _hint;
+            paint.Color = new SKColor(0, 0, 0, 150);
+            canvas.DrawRect(0, _canvas.Height - size - 2, _canvas.Width, size + 2, paint);
             CanvasText.Draw(canvas, _canvas, msg, new SKColor(255, 230, 120),
                 _canvas.Width / 2f, _canvas.Height - 2, Math.Max(6f, size * 0.85f), SKTextAlign.Center, UseBdfFont);
         }
 
+        _fx.DrawOverlay(canvas, _canvas, _canvas.Width, _canvas.Height, Math.Max(7f, _canvas.Height * 0.07f));
         canvas.Flush();
         _canvas.SubmitCompletedFrame(bb);
     }

@@ -1,22 +1,26 @@
 # Turbo Kart GP — open tasks
 
-Stand 16.11.2026. Build ok, alle 8 Strecken simulieren fehlerfrei, NAS-Image gebaut.
+Stand 25.11.2026. Build ok, alle 8 Strecken simulieren fehlerfrei.
 
-## Fertig, aber noch nicht visuell geprüft
-- [ ] Rampen (`Track.PlaceRamps/BuildRamps`, `RaceFx.RampPhysics/Land`): Sprung, Lande-Boost, Kamera-Neigung (`CamPitch`) im Vorschau-Bild prüfen; Rampenhöhe/Absprung (`34 + speed*0.38`) feintunen.
-- [ ] Kamera-Shake (Bande, Treffer, Landung, Absturz): Stärke prüfen.
-- [ ] Zieleinlauf-Replay (`RaceFx.StartReplay/UpdateReplay`): Seitenkamera-Position, Zeitlupe 0.65x, Kinobalken. Fehlt noch: Text „REPLAY“ (blinkend) in `GameScreens.RaceText`, wenn `race.Replaying`; normale HUD-Texte währenddessen ausblenden.
-- [ ] Regen in Neon City / Stadion ansehen (Streifen, Spritzer, Blitz, nasse Fahrbahn, Gischt).
-- [ ] Nacht-Panorama + Dämmerungs-Tönung auf Stadium/Beach/Canyon/Autumn prüfen.
-- [ ] Feuerwerk im Ziel, Lava-Eruptionen, Driftrauch, Reifenspuren.
+## Erledigt (25.11.)
+- [x] Sound neu: Motor-Tonhöhe folgt jetzt dem Tempo relativ zur Höchstgeschwindigkeit (vorher bei Tempo 72 von ~205 am Anschlag),
+      drei Motor-Loops mit Equal-Power-Überblendung, nahtlose Loops (Skid hatte einen Knacks an der Naht), Lautheit per RMS statt Peak,
+      Rivalen-Motor mit Doppler, Schotter-Rumpeln, Boost-Flamme, synthetische Effekte (Countdown, Runde, letzte Runde, Fanfare,
+      Item-Roulette, Öl, Orb, Schild, Drift-Stufen, Bande, Sprung/Landung, Absturz, Gems, Falschrum).
+      Unbenutzte Kenney-Clips (tick/go/lap/item/finish) entfernt.
+- [x] Host-Mixer (`CanvasManagement/ExtensionVoiceMixer.cs`): Pegel/Pitch gleiten pro Sample, Loops blenden ein/aus, Clip-Wechsel
+      überblenden, Summe über Limiter statt harter Clamp pro Stimme, 8 Loop-Slots, Stream bleibt 3 s mit Stille offen
+      (vorher: Nachhol-Burst nach kurzen Pausen).
+- [x] „REPLAY“ blinkt im Zieleinlauf-Replay, Renn-HUD-Texte währenddessen aus.
+- [x] Animierte Deko: Ballons treiben, Möwen kreisen (2 Frames), Fahnen wehen (3 Frames je Farbe).
+- [x] Marker-Texel: Wasserfälle (FlowMarker) laufen, Neon-Schilder (NeonMarker) flackern; Alpha wird auf 255 gesetzt.
+- [x] Suchscheinwerfer (City immer, Stadion bei Nacht), Sternschnuppen (Space, City).
+- [x] Kart-Spiegelung auf nasser Fahrbahn.
+- [x] Rauchpartikel nicht mehr doppelt (als Quadrat) gezeichnet.
 
-## Begonnen, noch nicht fertig
-- [ ] Animierte Deko im Renderer verdrahten (Sprites + Platzierung existieren schon):
-  - `DrawScenery`: Ballons langsam treiben lassen (`Pos + sin(clock*0.05)*30`), Möwen kreisen (`Pos + (cos,sin)(clock*0.4+phase)*40`, Frame `(clock*6)&1`), Fahnen-Frames (`Kinds[FlagPole][variant*3 + frame]`, aktuell wird nur `variant % 15` genutzt).
-  - `DrawQuad`: `Art.FlowMarker` (Wasserfälle in Canyon-Klippen) animieren, `Art.NeonMarker` (City-Schilder) flackern lassen. Ohne Behandlung erscheinen die Marker-Texel aktuell mit falschem Alpha → prüfen!
-  - Suchscheinwerfer im Himmel (City immer, Stadium bei `Darkness > 0.5`), Sternschnuppen (Space, City).
-- [ ] Kart-Spiegelung auf nasser Fahrbahn (`DrawKart(.., rain)` — Parameter ist da, Spiegelung fehlt): gespiegelte Zeilen unter `groundY`, Alpha ~0.3, nur auf Bodenpixeln (`_depth == MaxValue`).
-- [ ] Gischt/Rauch: `Particle.Smoke` wird in `DrawSmoke` gezeichnet, aber `DrawParticles(false)` zeichnet Smoke-Partikel zusätzlich als Quadrate → dort `if (p.Smoke) continue;` ergänzen.
+## Noch visuell zu prüfen
+- [ ] Rampen-Sprung / Kamera-Neigung, Kamera-Shake-Stärke, Replay-Kameraposition.
+- [ ] Nacht-Panorama + Dämmerung auf Beach/Canyon/Autumn.
 
 ## Ideen danach
 - Lava Keep: Haarnadel (idx ~1086) etwas entschärfen, KI fällt dort nach Treffern noch gelegentlich.
@@ -24,5 +28,7 @@ Stand 16.11.2026. Build ok, alle 8 Strecken simulieren fehlerfrei, NAS-Image geb
 - Echter Controller-Test in Studio (Gamepad-API in `verpixeld/wwwroot/js/features/game-input.js`).
 
 ## Testen
-Vorschau-Harness liegt in `%TEMP%\TurboKartPreview` (nicht im Repo):
-`dotnet run -c Release -- tracks all 400,1200` · `-- screens` (GP-Ablauf bis Podest).
+- Allgemeines Vorschau-Harness (Frames, Kontaktbogen, Ton als WAV): `CanvasManagement/tools/ExtensionPreview`
+  `dotnet run -c Release --project tools/ExtensionPreview -- TurboKart --seconds 60 --every 5000 --wav`
+- Strecken-Harness liegt in `%TEMP%\TurboKartPreview` (nicht im Repo):
+  `dotnet run -c Release -- tracks all 400,1200` · `-- screens` (GP-Ablauf bis Podest).

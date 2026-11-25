@@ -251,9 +251,9 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Show Score", "Show the distance score", DefaultValue = true, Order = 4)]
     public bool ShowScore { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render the score with the crisp bitmap (BDF) font", DefaultValue = false,
+    [ExtensionParameter("Use BDF Font", "Render the score with the crisp bitmap (BDF) font", DefaultValue = true,
         Order = 5)]
-    public bool UseBdfFont { get; set; }
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Score height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 48, Unit = "px", Order = 6)]
@@ -262,8 +262,30 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Auto Pilot", "AI runs until you press a key in Studio", DefaultValue = true, Order = 7)]
     public bool AutoPilot { get; set; } = true;
 
-    [ExtensionParameter("Modern Look", "Colorful sunset style — classic Chrome look stays the default", DefaultValue = false, Order = 8)]
-    public bool ModernLook { get; set; }
+    [ExtensionParameter("Modern Look", "Colourful desert with parallax, dust and a day/night cycle; off = the plain monochrome look",
+        DefaultValue = true, Order = 8)]
+    public bool ModernLook { get; set; } = true;
+
+    private GameSound? _snd;
+    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Adventure);
+
+    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
+    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
+
+    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
+    public bool Music { get => _sound.Music; set => _sound.Music = value; }
+
+    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
+        MaxValue = 100, Order = 22)]
+    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
+
+    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
+        MaxValue = 100, Order = 23)]
+    public int MusicVolume
+    {
+        get => (int)MathF.Round(_sound.MusicVolume * 100);
+        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
+    }
 
     public string Name => "Dino Runner";
     public bool IsRunning { get; private set; }
@@ -306,6 +328,7 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
             _timer?.Stop();
             _timer?.Dispose();
             _timer = null;
+            _sound.Stop();
             _backBuffer?.Dispose();
             _backBuffer = null;
             try { _canvas.Clear(SKColors.Black); }
@@ -373,6 +396,8 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
                 }
 
                 Render();
+                _sound.Duck(_crashTimer > 0 ? 0.35f : 1f);
+                _sound.Update();
                 _frame++;
             }
             catch (Exception ex)
@@ -385,6 +410,7 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
     private void Update()
     {
         _score++;
+        if (_score % 100 == 0) _sound.Play(GameSfx.Score, 0.5f);
         _best = Math.Max(_best, _score);
         _speed = Math.Min(_canvas.Width * 0.055f,
             (2.2f + Difficulty * 0.35f) * _px + _score * 0.0012f * _px);
@@ -436,6 +462,8 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
             if (Hits(_dinoY, CurrentH(), o.X, o))
             {
                 _crashTimer = 40;
+                _sound.Play(GameSfx.Hit, 0.7f);
+                _sound.Play(GameSfx.GameOver, 0.6f);
                 break;
             }
         }
@@ -603,6 +631,7 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
             _ducking = false;
             _wantDuck = false;
             _dinoVy = _jumpV;
+            _sound.Play(GameSfx.Jump, 0.5f);
         }
     }
 
@@ -710,47 +739,103 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         _canvas.SubmitCompletedFrame(bb);
     }
 
+    private readonly GameFx _fx = new();
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    private double _lastRender;
+    private float _scroll;
+    private bool _wasGround = true;
+    private bool _wasCrash;
+
+    /// <summary>
+    ///     Desert run: the sky moves from morning to sunset to a starry night as the score grows, two layers of
+    ///     mesas and a row of cactus silhouettes scroll at their own speeds, the ground has pebbles, dust kicks up
+    ///     from the feet, a jump and a landing puff, every hundred points sparkle, and a crash shakes and flashes.
+    /// </summary>
     private void RenderModern()
     {
         var bb = _backBuffer;
         if (bb == null) return;
+        var now = _clock.Elapsed.TotalSeconds;
+        var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
+        _lastRender = now;
+        _fx.Update(dt);
+        if (_crashTimer == 0) _scroll += _speed;
+
         using var canvas = new SKCanvas(bb);
         var w = _canvas.Width;
         var h = _canvas.Height;
-        using (var sky = new SKPaint())
-        {
-            sky.Shader = SKShader.CreateLinearGradient(
-                new SKPoint(0, 0), new SKPoint(0, _groundY),
-                new[] { new SKColor(255, 90, 70), new SKColor(255, 160, 60), new SKColor(255, 210, 110) },
-                SKShaderTileMode.Clamp);
-            canvas.DrawRect(0, 0, w, _groundY, sky);
-        }
+        var gy = (int)_groundY;
 
+        // Sky by score: morning, sunset, night, again every 1500 points.
+        var phase = _score % 1500 / 1500f;
+        var night = phase < 0.45f ? 0f : phase < 0.6f ? (phase - 0.45f) / 0.15f : phase < 0.9f ? 1f : 1 - (phase - 0.9f) / 0.1f;
+        var dusk = 1 - MathF.Abs(phase - 0.52f) / 0.12f;
+        dusk = Math.Clamp(dusk, 0, 1);
+        var top = GameFx.Lerp(GameFx.Lerp(new SKColor(90, 170, 240), new SKColor(255, 90, 70), dusk), new SKColor(8, 10, 34), night);
+        var bot = GameFx.Lerp(GameFx.Lerp(new SKColor(200, 230, 250), new SKColor(255, 200, 110), dusk), new SKColor(40, 30, 80), night);
+        GameFx.VerticalGradient(canvas, w, h, top, bot, 0, gy);
         using var paint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
-        paint.Color = new SKColor(255, 230, 80);
-        PixelArt.Disc(canvas, paint, w - 18, 14, 8);
-        paint.Color = new SKColor(255, 252, 200);
-        PixelArt.Disc(canvas, paint, w - 18, 14, 5);
+
+        if (night > 0.5f) GameFx.Stars(canvas, w, gy / 2, _fx.Time, _scroll * 0.02f, 0, 180);
+        // Sun (left of the score) or moon.
+        var sx = (int)(w * 0.62f);
+        var sy = (int)(gy * (0.35f + 0.25f * dusk));
+        if (night < 0.6f)
+        {
+            GameFx.GlowDisc(canvas, sx, sy, h * 0.18f, new SKColor(255, 220, 120), 0.35f * (1 - night));
+            paint.Color = new SKColor(255, 230, 80);
+            PixelArt.Disc(canvas, paint, sx, sy, 8);
+            paint.Color = new SKColor(255, 252, 200);
+            PixelArt.Disc(canvas, paint, sx, sy, 5);
+        }
+        else
+        {
+            paint.Color = new SKColor(240, 240, 220);
+            PixelArt.Disc(canvas, paint, sx, (int)(gy * 0.3f), 6);
+            paint.Color = top;
+            PixelArt.Disc(canvas, paint, sx + 3, (int)(gy * 0.3f) - 2, 5);
+        }
 
         foreach (var c in _clouds)
         {
-            paint.Color = new SKColor(255, 255, 255, 200);
+            paint.Color = GameFx.Lerp(new SKColor(255, 255, 255, 210), new SKColor(80, 80, 120, 160), night);
             canvas.DrawRect(c.X, c.Y, c.W, Math.Max(3, 2 * _px), paint);
             canvas.DrawRect(c.X + c.W * 0.2f, c.Y - 3 * _px, c.W * 0.55f, Math.Max(3, 2 * _px), paint);
-            paint.Color = new SKColor(255, 180, 200, 90);
-            canvas.DrawRect(c.X + 2, c.Y + 1, Math.Max(2, c.W * 0.3f), 1, paint);
         }
 
-        paint.Color = new SKColor(46, 196, 78);
-        canvas.DrawRect(0, _groundY, w, Math.Max(2, 2 * _px), paint);
-        paint.Color = new SKColor(168, 96, 40);
-        canvas.DrawRect(0, _groundY + 2 * _px, w, h - _groundY, paint);
-        paint.Color = new SKColor(120, 64, 28);
-        var dash = 8 * _px;
-        var scroll = (int)(_frame * _speed) % (dash * 2);
-        for (var x = -scroll; x < w; x += dash * 2)
-            canvas.DrawRect(x, _groundY + 5 * _px, dash / 2, Math.Max(1, _px), paint);
+        // Far mesas, near mesas, cactus silhouettes.
+        Layer(canvas, paint, w, gy, 0.15f, 0.42f, 0.004f, GameFx.Lerp(new SKColor(200, 130, 110), new SKColor(40, 30, 70), night), 3);
+        Layer(canvas, paint, w, gy, 0.35f, 0.26f, 0.008f, GameFx.Lerp(new SKColor(170, 90, 60), new SKColor(28, 20, 50), night), 11);
+        var sil = GameFx.Lerp(new SKColor(110, 70, 40), new SKColor(16, 12, 30), night);
+        var spacing = 70;
+        for (var i = -1; i < w / spacing + 2; i++)
+        {
+            var idx = i + (int)(_scroll * 0.6f / spacing);
+            var cx = i * spacing - _scroll * 0.6f % spacing + (idx * 37 % 30);
+            var ch = 8 + idx * 13 % 7;
+            paint.Color = sil;
+            canvas.DrawRect(cx, gy - ch, 2, ch, paint);
+            canvas.DrawRect(cx - 3, gy - ch + 3, 3, 1, paint);
+            canvas.DrawRect(cx - 3, gy - ch + 1, 1, 2, paint);
+            canvas.DrawRect(cx + 2, gy - ch + 5, 3, 1, paint);
+            canvas.DrawRect(cx + 4, gy - ch + 3, 1, 2, paint);
+        }
 
+        // Ground: grass lip, sand with scrolling pebbles.
+        paint.Color = GameFx.Lerp(new SKColor(230, 180, 90), new SKColor(60, 50, 70), night);
+        canvas.DrawRect(0, gy, w, h - gy, paint);
+        paint.Color = GameFx.Lerp(new SKColor(255, 220, 140), new SKColor(90, 80, 110), night);
+        canvas.DrawRect(0, gy, w, Math.Max(1, _px), paint);
+        for (var i = 0; i < w / 6 + 2; i++)
+        {
+            var idx = i + (int)(_scroll / 6);
+            var px = i * 6 - _scroll % 6;
+            var py = gy + 3 + (idx * 7919 % (Math.Max(1, h - gy - 4)));
+            paint.Color = GameFx.Lerp(idx % 3 == 0 ? new SKColor(190, 130, 60) : new SKColor(250, 210, 130), new SKColor(40, 34, 50), night);
+            if (idx % 2 == 0) canvas.DrawRect(px, py, idx % 5 == 0 ? 2 : 1, 1, paint);
+        }
+
+        _fx.BeginShake(canvas);
         var dino = _ducking ? ModernDuck : (_frame / 4 % 2 == 0 ? ModernDinoA : ModernDinoB);
         PixelArt.Blit(canvas, dino, _dinoX, _dinoY, ChModernDino, _px);
 
@@ -763,9 +848,35 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
                 PixelArt.Blit(canvas, _frame / 5 % 2 == 0 ? ModernBirdA : ModernBirdB, o.X, o.Y, ChModernBird, _px);
         }
 
+        // Dust from the feet, puffs on take-off and landing.
+        var onGround = _dinoY >= _groundY - _standH - 1f;
+        var feetX = _dinoX + 3 * _px;
+        var feetY = _groundY - 1;
+        if (_crashTimer == 0)
+        {
+            if (onGround && _frame % 3 == 0)
+                _fx.Spark(feetX, feetY, -_speed * 0.4f - _fx.Rand(0, 0.6f), -_fx.Rand(0.1f, 0.6f), new SKColor(240, 210, 150), 0.4f, 1, false, 0.03f);
+            if (!onGround && _wasGround) _fx.Spray(feetX + 4, feetY, -MathF.PI * 0.85f, 0.4f, new SKColor(240, 210, 150), 6, 1.4f, 0.4f, 0.05f);
+            if (onGround && !_wasGround) _fx.Spray(feetX + 4, feetY, -MathF.PI / 2, 1.3f, new SKColor(240, 210, 150), 10, 1.6f, 0.45f, 0.06f);
+        }
+        _wasGround = onGround;
+        if (_crashTimer > 0 && !_wasCrash)
+        {
+            _fx.Burst(_dinoX + _dinoW / 2f, _dinoY + _standH / 2f, new SKColor(255, 220, 120), 24, 2.6f, 0.8f, 0.06f);
+            _fx.Flash(SKColors.White, 0.6f);
+            _fx.Shake(5);
+        }
+        _wasCrash = _crashTimer > 0;
+        if (_crashTimer == 0 && _score > 0 && _score % 100 == 0 && _frame % 2 == 0)
+            _fx.Burst(w - 40, 10, new SKColor(255, 240, 120), 3, 1.5f, 0.5f, 0, true);
+        _fx.DrawParticles(canvas);
+        _fx.EndShake(canvas);
+
         if (ShowScore)
         {
             var size = CanvasText.ResolveSize(FontSize, Math.Max(8f, 10f * _px));
+            CanvasText.Draw(canvas, _canvas, $"HI {_best:00000}  {_score:00000}", new SKColor(0, 0, 0, 140),
+                w - 3, Math.Max(10f, 11f * _px) + 1, size, SKTextAlign.Right, UseBdfFont);
             CanvasText.Draw(canvas, _canvas, $"HI {_best:00000}  {_score:00000}", SKColors.White,
                 w - 4, Math.Max(10f, 11f * _px), size, SKTextAlign.Right, UseBdfFont);
         }
@@ -773,12 +884,31 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         if (_crashTimer > 0)
         {
             var size = CanvasText.ResolveSize(FontSize, Math.Max(10f, h * 0.12f));
-            CanvasText.Draw(canvas, _canvas, "G A M E  O V E R", SKColors.White,
-                w / 2f, h / 2f, size, SKTextAlign.Center, UseBdfFont);
+            CanvasText.Draw(canvas, _canvas, "G A M E  O V E R", new SKColor(0, 0, 0, 160), w / 2f + 1, h / 2f + 1, size, SKTextAlign.Center, UseBdfFont);
+            CanvasText.Draw(canvas, _canvas, "G A M E  O V E R", SKColors.White, w / 2f, h / 2f, size, SKTextAlign.Center, UseBdfFont);
         }
 
+        _fx.DrawOverlay(canvas, _canvas, w, h);
         canvas.Flush();
         _canvas.SubmitCompletedFrame(bb);
+    }
+
+    /// <summary>A strip of flat-topped mesas, scrolling at <paramref name="speed"/> of the ground speed.</summary>
+    private void Layer(SKCanvas canvas, SKPaint paint, int w, int gy, float speed, float height, float jag, SKColor col, int seed)
+    {
+        paint.Color = col;
+        var off = _scroll * speed;
+        for (var x = 0; x < w; x++)
+        {
+            var u = (x + off) / 40f;
+            var cell = (int)MathF.Floor(u);
+            var hh = 0.4f + 0.6f * (MathF.Sin(cell * 12.9898f + seed) * 0.5f + 0.5f);
+            // Flat tops with sloped edges.
+            var f = u - cell;
+            var edge = Math.Min(1, Math.Min(f, 1 - f) * 6);
+            var top = (int)(gy - gy * height * hh * edge - jag * gy * MathF.Sin(x * 0.7f + seed));
+            canvas.DrawRect(x, top, 1, gy - top, paint);
+        }
     }
 
     private static SKColor ChModernDino(char ch) => ch switch

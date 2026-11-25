@@ -108,9 +108,9 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Show HUD", "Show score / lives / wave", DefaultValue = true, Order = 4)]
     public bool ShowHud { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render HUD text with the crisp bitmap (BDF) font", DefaultValue = false,
+    [ExtensionParameter("Use BDF Font", "Render HUD text with the crisp bitmap (BDF) font", DefaultValue = true,
         Order = 5)]
-    public bool UseBdfFont { get; set; }
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "HUD text height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 48, Unit = "px", Order = 6)]
@@ -127,6 +127,27 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
 
     [ExtensionParameter("Wave", "Current wave", ReadOnly = true, Order = 12)]
     public int Wave { get; private set; }
+
+    private GameSound? _snd;
+    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Space);
+
+    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
+    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
+
+    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
+    public bool Music { get => _sound.Music; set => _sound.Music = value; }
+
+    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
+        MaxValue = 100, Order = 22)]
+    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
+
+    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
+        MaxValue = 100, Order = 23)]
+    public int MusicVolume
+    {
+        get => (int)MathF.Round(_sound.MusicVolume * 100);
+        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
+    }
 
     public string Name => "Space Invaders";
     public bool IsRunning { get; private set; }
@@ -169,6 +190,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
             _timer?.Stop();
             _timer?.Dispose();
             _timer = null;
+            _sound.Stop();
             _backBuffer?.Dispose();
             _backBuffer = null;
             try { _canvas.Clear(SKColors.Black); }
@@ -279,6 +301,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
                 }
 
                 Render();
+                _sound.Update();
                 _frame++;
             }
             catch (Exception ex)
@@ -307,7 +330,15 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         }
 
         // Wave cleared?
-        if (AliveCount() == 0) { Wave++; StartWave(); }
+        if (AliveCount() == 0)
+        {
+            Wave++;
+            _sound.Play(GameSfx.LevelUp, 0.7f);
+            _fx.Flash(new SKColor(120, 200, 255), 0.4f);
+            _fx.Confetti(_canvas.Width / 2f, _canvas.Height * 0.4f, 50, 3f);
+            _fx.Pop($"WAVE {Wave}", _canvas.Width / 2f, _canvas.Height * 0.45f, new SKColor(120, 220, 255));
+            StartWave();
+        }
     }
 
     private void UpdateFormation()
@@ -352,6 +383,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
                 {
                     var (ix, iy) = InvaderPos(c, r);
                     _bombs.Add(new Bomb { X = ix + _invW / 2f, Y = iy + _invH });
+                    _sound.Play(GameSfx.Drop, 0.25f, 0, 1.6f, 120);
                     break;
                 }
         }
@@ -366,7 +398,11 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         // UFO hit
         if (_ufo != null && _bulletX >= _ufo.X && _bulletX <= _ufo.X + _invW && _bulletY <= _invH * 1.2f)
         {
-            Score += 100 + _random.Next(5) * 50;
+            var bonus = 100 + _random.Next(5) * 50;
+            Score += bonus;
+            _fx.Burst(_ufo.X + _invW / 2f, _invH * 0.6f, new SKColor(255, 80, 200), 30, 3f, 0.9f, 0.03f);
+            _fx.Pop(bonus.ToString(), _ufo.X + _invW / 2f, _invH * 1.6f, new SKColor(255, 160, 230));
+            _sound.Play(GameSfx.Score, 0.7f);
             _ufo = null;
             _bulletActive = false;
             return;
@@ -382,6 +418,8 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
             {
                 _alive[c, r] = false;
                 Score += (_rows - r) * 10;
+                FxAlien(ix, iy, r);
+                _sound.Play(GameSfx.Explode, 0.45f, (_bulletX / _canvas.Width) * 2 - 1, 1.6f);
                 _bulletActive = false;
                 return;
             }
@@ -518,6 +556,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
     private void Fire()
     {
         _bulletActive = true;
+        _sound.Play(GameSfx.Shoot, 0.4f, (_shipX / _canvas.Width) * 2 - 1);
         _bulletX = _shipX + _shipW / 2f;
         _bulletY = _shipY;
     }
@@ -563,7 +602,10 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
 
     private void LoseLife()
     {
+        FxShip();
         Lives--;
+        _sound.Play(GameSfx.Explode, 0.8f);
+        if (Lives <= 0) _sound.Play(GameSfx.GameOver, 0.6f);
         _bombs.Clear();
         _bulletActive = false;
         _respawnTimer = 40;
@@ -613,6 +655,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
             if (bx < 0 || bx >= 8 || by < 0 || by >= 6) continue;
             if (!s.Blocks[bx, by]) continue;
 
+            _fx.Spray(x, y, y > s.Y + s.Block * 3 ? MathF.PI / 2 : -MathF.PI / 2, 1.2f, new SKColor(80, 255, 140), 6, 1.4f, 0.4f, 0.08f);
             // Erode a small splash around the impact.
             for (var dx = -1; dx <= 1; dx++)
             for (var dy = 0; dy <= 1; dy++)
@@ -629,64 +672,195 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
 
     // ── Render ────────────────────────────────────────────────────────────────
 
+    // Two more alien kinds (original designs) so each band of rows looks different; same 11×8 box.
+    private static readonly string[] JellyA =
+    {
+        "00011111000",
+        "00111111100",
+        "01101110110",
+        "01111111110",
+        "00111111100",
+        "01010101010",
+        "10100100101",
+        "01000000010"
+    };
+
+    private static readonly string[] JellyB =
+    {
+        "00011111000",
+        "00111111100",
+        "01101110110",
+        "01111111110",
+        "00111111100",
+        "00101010100",
+        "01010101010",
+        "10001000100"
+    };
+
+    private static readonly string[] DroneA =
+    {
+        "00001110000",
+        "00111111100",
+        "01111111110",
+        "11011011011",
+        "11111111111",
+        "00110001100",
+        "01101110110",
+        "11000000011"
+    };
+
+    private static readonly string[] DroneB =
+    {
+        "00001110000",
+        "00111111100",
+        "01111111110",
+        "11011011011",
+        "11111111111",
+        "00110001100",
+        "00011011000",
+        "00110001100"
+    };
+
+    private readonly GameFx _fx = new();
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    private double _lastRender;
+    private readonly Queue<(float X, float Y)> _shotTrail = new();
+
+    private static SKColor RowColor(int r) => r == 0 ? new SKColor(120, 220, 255)
+        : r <= 2 ? new SKColor(120, 255, 140)
+        : new SKColor(255, 190, 110);
+
+    /// <summary>
+    ///     Deep-space look: a drifting starfield with a faint nebula, aliens of three kinds that glow in their row
+    ///     colour, a cannon with an engine glow, glowing shots with a trail, debris when shields are hit, alien
+    ///     explosions, a shaking, flashing screen when the cannon is hit.
+    /// </summary>
     private void Render()
     {
         var bb = _backBuffer;
         if (bb == null) return;
 
+        var now = _clock.Elapsed.TotalSeconds;
+        var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
+        _lastRender = now;
+        _fx.Update(dt);
+
+        var w = _canvas.Width;
+        var h = _canvas.Height;
         using var canvas = new SKCanvas(bb);
-        canvas.Clear(BackgroundColor);
         using var paint = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = false };
 
-        // Invaders (colour by row band).
-        var frame = _frameB ? InvaderB : InvaderA;
+        if (BackgroundColor == SKColors.Black)
+        {
+            GameFx.VerticalGradient(canvas, w, h, new SKColor(4, 2, 16), new SKColor(10, 4, 26));
+            GameFx.GlowDisc(canvas, w * 0.75f, h * 0.35f, h * 0.45f, new SKColor(90, 20, 120), 0.18f);
+            GameFx.GlowDisc(canvas, w * 0.2f, h * 0.6f, h * 0.35f, new SKColor(20, 40, 110), 0.15f);
+            GameFx.Stars(canvas, w, h, _fx.Time, 0, -_fx.Time * 6, 220);
+        }
+        else canvas.Clear(BackgroundColor);
+
+        _fx.BeginShake(canvas);
+
+        // Aliens: kind and colour by row band, a soft glow behind each.
+        var b = _frameB;
         for (var c = 0; c < _cols; c++)
         for (var r = 0; r < _rows; r++)
         {
             if (!_alive[c, r]) continue;
             var (ix, iy) = InvaderPos(c, r);
-            paint.Color = r == 0 ? new SKColor(120, 220, 255)
-                : r <= 2 ? new SKColor(120, 255, 140)
-                : new SKColor(255, 200, 120);
-            DrawSprite(canvas, frame, ix, iy, paint);
+            var col = RowColor(r);
+            var sprite = r == 0 ? b ? JellyB : JellyA : r <= 2 ? b ? InvaderB : InvaderA : b ? DroneB : DroneA;
+            paint.Color = col;
+            DrawSprite(canvas, sprite, ix, iy, paint);
+            // Eyes light up.
+            paint.Color = SKColors.White;
+            canvas.DrawRect(ix + 3 * _px, iy + 3 * _px, _px, _px, paint);
+            canvas.DrawRect(ix + 7 * _px, iy + 3 * _px, _px, _px, paint);
         }
 
         if (_ufo != null)
         {
+            var uy = _invH * 0.2f;
+            GameFx.Glow(canvas, _ufo.X, uy, _invW, _invH, new SKColor(255, 60, 200), 4, 0.4f);
             paint.Color = new SKColor(255, 80, 200);
-            DrawSprite(canvas, InvaderB, _ufo.X, _invH * 0.2f, paint);
+            DrawSprite(canvas, InvaderB, _ufo.X, uy, paint);
+            // Blinking running lights.
+            paint.Color = (int)(_fx.Time * 8) % 2 == 0 ? SKColors.Yellow : SKColors.Cyan;
+            canvas.DrawRect(_ufo.X + _px, uy + 4 * _px, _px, _px, paint);
+            canvas.DrawRect(_ufo.X + 9 * _px, uy + 4 * _px, _px, _px, paint);
         }
 
-        // Shields.
-        paint.Color = new SKColor(0, 230, 90);
+        // Shields: shaded blocks, brighter on top.
         foreach (var s in _shields)
             for (var bx = 0; bx < 8; bx++)
             for (var by = 0; by < 6; by++)
                 if (s.Blocks[bx, by])
+                {
+                    paint.Color = by == 0 || !s.Blocks[bx, by - 1] ? new SKColor(120, 255, 170) : new SKColor(0, (byte)(200 - by * 18), (byte)(90 - by * 8));
                     canvas.DrawRect(s.X + bx * s.Block, s.Y + by * s.Block, s.Block, s.Block, paint);
+                }
 
-        // Ship (blinks while respawning).
+        // Cannon with a flickering engine glow (blinks while respawning).
         if (_respawnTimer == 0 || _frame % 6 < 3)
         {
-            paint.Color = new SKColor(220, 255, 220);
+            var flick = 0.3f + 0.15f * MathF.Sin(_fx.Time * 30);
+            GameFx.GlowDisc(canvas, _shipX + _shipW / 2f, _shipY + 4 * _px, _shipW * 0.6f, new SKColor(80, 200, 255), flick);
+            paint.Color = new SKColor(220, 255, 230);
             DrawSprite(canvas, Cannon, _shipX, _shipY, paint);
+            paint.Color = new SKColor(80, 220, 255);
+            canvas.DrawRect(_shipX + 5 * _px, _shipY, _px, _px, paint);
         }
 
-        // Bullet + bombs.
+        // Player shot: glowing bolt with a short trail.
         if (_bulletActive)
         {
+            _shotTrail.Enqueue((_bulletX, _bulletY));
+            while (_shotTrail.Count > 5) _shotTrail.Dequeue();
+            var i = 0;
+            foreach (var (tx, ty) in _shotTrail)
+            {
+                paint.Color = new SKColor(120, 220, 255, (byte)(40 * ++i));
+                canvas.DrawRect(tx, ty, _px, _px * 3, paint);
+            }
+            GameFx.Glow(canvas, _bulletX, _bulletY, _px, _px * 3, new SKColor(120, 220, 255), 2, 0.5f);
             paint.Color = SKColors.White;
             canvas.DrawRect(_bulletX, _bulletY, _px, _px * 3, paint);
         }
+        else _shotTrail.Clear();
 
-        paint.Color = new SKColor(255, 120, 120);
-        foreach (var b in _bombs)
-            canvas.DrawRect(b.X, b.Y, _px, _px * 2, paint);
+        // Alien bombs: wiggling red sparks.
+        foreach (var bomb in _bombs)
+        {
+            var wig = ((int)(bomb.Y / (2 * _px)) % 2 == 0) ? 0 : _px;
+            GameFx.Glow(canvas, bomb.X, bomb.Y, _px, _px * 2, new SKColor(255, 60, 40), 2, 0.4f);
+            paint.Color = new SKColor(255, 140, 120);
+            canvas.DrawRect(bomb.X + wig - _px * 0.5f, bomb.Y, _px, _px, paint);
+            canvas.DrawRect(bomb.X - wig + _px * 0.5f, bomb.Y + _px, _px, _px, paint);
+        }
+
+        _fx.DrawParticles(canvas);
+        _fx.EndShake(canvas);
 
         if (ShowHud) DrawHud(canvas);
+        _fx.DrawOverlay(canvas, _canvas, w, h, Math.Max(7f, h * 0.07f));
 
         canvas.Flush();
         _canvas.SubmitCompletedFrame(bb);
+    }
+
+    private void FxAlien(float x, float y, int row)
+    {
+        var col = RowColor(row);
+        _fx.Burst(x + _invW / 2f, y + _invH / 2f, col, 16, 2.2f, 0.55f, 0.02f, true, 1, SKColors.White);
+        _fx.Burst(x + _invW / 2f, y + _invH / 2f, SKColors.White, 4, 1f, 0.25f, 0, true);
+    }
+
+    private void FxShip()
+    {
+        var cx = _shipX + _shipW / 2f;
+        _fx.Burst(cx, _shipY, new SKColor(255, 200, 80), 40, 3.2f, 1.1f, 0.05f, true, 1, new SKColor(255, 40, 0));
+        _fx.Flash(new SKColor(255, 60, 30), 0.7f);
+        _fx.Shake(6);
     }
 
     private void DrawSprite(SKCanvas canvas, string[] rows, float x, float y, SKPaint paint)

@@ -66,6 +66,13 @@ public sealed class TurboKartExtension : ICanvasExtension, IDisposable
         DefaultValue = 80, MinValue = 0, MaxValue = 100, Order = 10)]
     public int Volume { get; set; } = 80;
 
+    [ExtensionParameter("Music", "Background music (quieter while racing)", DefaultValue = true, Order = 11)]
+    public bool Music { get; set; } = true;
+
+    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 40, MinValue = 0,
+        MaxValue = 100, Order = 12)]
+    public int MusicVolume { get; set; } = 40;
+
     private KartAudio? _audio;
 
     public string Name => "Turbo Kart GP";
@@ -199,6 +206,7 @@ public sealed class TurboKartExtension : ICanvasExtension, IDisposable
 
         game.Update(dt, hold, presses);
         _audio?.Update(game, Sound, Volume / 100f, presses.Count > 0);
+        _audio?.Music(game, Music, Volume / 100f, MusicVolume / 100f);
         var px = game.RenderFrame();
 
         var bmp = Buffer(w, h);

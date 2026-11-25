@@ -103,9 +103,9 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Show Score", "Show the score", DefaultValue = true, Order = 4)]
     public bool ShowScore { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render the score with the crisp bitmap (BDF) font", DefaultValue = false,
+    [ExtensionParameter("Use BDF Font", "Render the score with the crisp bitmap (BDF) font", DefaultValue = true,
         Order = 5)]
-    public bool UseBdfFont { get; set; }
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Score height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 48, Unit = "px", Order = 6)]
@@ -113,6 +113,27 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
 
     [ExtensionParameter("Auto Pilot", "AI flies until you press a key in Studio", DefaultValue = true, Order = 7)]
     public bool AutoPilot { get; set; } = true;
+
+    private GameSound? _snd;
+    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Retro);
+
+    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
+    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
+
+    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
+    public bool Music { get => _sound.Music; set => _sound.Music = value; }
+
+    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
+        MaxValue = 100, Order = 22)]
+    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
+
+    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
+        MaxValue = 100, Order = 23)]
+    public int MusicVolume
+    {
+        get => (int)MathF.Round(_sound.MusicVolume * 100);
+        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
+    }
 
     public string Name => "Flappy Bird";
     public bool IsRunning { get; private set; }
@@ -153,6 +174,7 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
             _timer?.Stop();
             _timer?.Dispose();
             _timer = null;
+            _sound.Stop();
             _backBuffer?.Dispose();
             _backBuffer = null;
             try { _canvas.Clear(SKColors.Black); }
@@ -218,6 +240,8 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
                 }
 
                 Render();
+                _sound.Duck(_crashTimer > 0 ? 0.35f : 1f);
+                _sound.Update();
                 _frame++;
             }
             catch (Exception ex)
@@ -244,6 +268,9 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
             {
                 p.Scored = true;
                 _score++;
+                _fx.Burst(p.X + _pipeW, p.GapTop + _gap / 2f, new SKColor(255, 240, 120), 10, 1.8f, 0.5f, 0, true);
+                _fx.Pop("+1", _birdX, _birdY - _birdH, new SKColor(255, 250, 200));
+                _sound.Play(GameSfx.Coin, 0.5f);
                 _best = Math.Max(_best, _score);
             }
 
@@ -363,7 +390,12 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         return true;
     }
 
-    private void DoFlap() => _vy = _flapV;
+    private void DoFlap()
+    {
+        _vy = _flapV;
+        _sound.Play(GameSfx.Flap, 0.5f);
+        _fx.Spray(_birdX - _birdW * 0.3f, _birdY, MathF.PI * 0.75f, 0.5f, new SKColor(255, 240, 200), 4, 1.2f, 0.45f, 0.03f);
+    }
 
     [ExtensionMethod("Flap", "Flap the bird — takes over from autopilot",
         Category = "Controls", KeyboardShortcut = "Space|Up", Order = 1)]
@@ -382,7 +414,17 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         }
     }
 
-    private void Crash() => _crashTimer = 32;
+    private void Crash()
+    {
+        if (_crashTimer > 0) return;
+        _crashTimer = 32;
+        _fx.Burst(_birdX, _birdY, new SKColor(255, 220, 80), 18, 2.5f, 0.8f, 0.08f);
+        _fx.Spray(_birdX, _birdY, -MathF.PI / 2, 1.2f, new SKColor(255, 255, 240), 8, 2f, 0.9f, 0.05f);
+        _fx.Flash(SKColors.White, 0.7f);
+        _fx.Shake(5);
+        _sound.Play(GameSfx.Hit, 0.7f);
+        _sound.Play(GameSfx.Die, 0.5f);
+    }
 
     private void SpawnPipe(float x, float centerBias)
     {
@@ -397,31 +439,111 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         _pipes.Add(new Pipe { X = x, GapTop = gapTop, Scored = false });
     }
 
+    private readonly GameFx _fx = new();
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    private double _lastRender;
+    private float _scroll;
+
+    /// <summary>
+    ///     The sky runs from day through sunset to night as the score climbs (sun, then moon and stars),
+    ///     a city skyline and hedges scroll behind the pipes at their own speeds, feathers puff on every flap,
+    ///     a sparkle marks each pipe passed, and a crash shakes and flashes.
+    /// </summary>
     private void Render()
     {
         var bb = _backBuffer;
         if (bb == null) return;
+        var now = _clock.Elapsed.TotalSeconds;
+        var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
+        _lastRender = now;
+        _fx.Update(dt);
+        if (_crashTimer == 0) _scroll += _speed;
 
         using var canvas = new SKCanvas(bb);
         var h = _canvas.Height;
         var w = _canvas.Width;
 
-        // Sky gradient.
-        using (var sky = new SKPaint())
+        // Time of day from the score: day, sunset, night, dawn, round and round every 40 pipes.
+        var phase = _score % 40 / 40f;
+        var dayTop = new SKColor(92, 196, 220);
+        var dayBot = new SKColor(168, 224, 236);
+        SKColor top, bot;
+        float night;
+        if (phase < 0.4f) { top = dayTop; bot = dayBot; night = 0; }
+        else if (phase < 0.55f)
         {
-            sky.Shader = SKShader.CreateLinearGradient(
-                new SKPoint(0, 0), new SKPoint(0, PlayH),
-                new[] { new SKColor(92, 196, 220), new SKColor(168, 224, 236) },
-                SKShaderTileMode.Clamp);
-            canvas.DrawRect(0, 0, w, PlayH, sky);
+            var t = (phase - 0.4f) / 0.15f;
+            top = GameFx.Lerp(dayTop, new SKColor(70, 60, 140), t);
+            bot = GameFx.Lerp(dayBot, new SKColor(255, 150, 90), t);
+            night = t * 0.4f;
         }
+        else if (phase < 0.85f)
+        {
+            var t = Math.Min(1, (phase - 0.55f) / 0.1f);
+            top = GameFx.Lerp(new SKColor(70, 60, 140), new SKColor(10, 12, 40), t);
+            bot = GameFx.Lerp(new SKColor(255, 150, 90), new SKColor(30, 40, 90), t);
+            night = 0.4f + 0.6f * t;
+        }
+        else
+        {
+            var t = (phase - 0.85f) / 0.15f;
+            top = GameFx.Lerp(new SKColor(10, 12, 40), dayTop, t);
+            bot = GameFx.Lerp(new SKColor(30, 40, 90), dayBot, t);
+            night = 1 - t;
+        }
+        GameFx.VerticalGradient(canvas, w, h, top, bot, 0, (int)PlayH);
 
         using var paint = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = false };
 
-        paint.Color = new SKColor(236, 248, 255);
+        if (night > 0.6f)
+        {
+            canvas.Save();
+            canvas.ClipRect(new SKRect(0, 0, w, PlayH * 0.7f));
+            GameFx.Stars(canvas, w, (int)(PlayH * 0.7f), _fx.Time, _scroll * 0.05f, 0, 160);
+            canvas.Restore();
+            paint.Color = new SKColor(240, 240, 210, (byte)(255 * night));
+            PixelArt.Disc(canvas, paint, (int)(w * 0.8f), (int)(PlayH * 0.2f), Math.Max(3, h / 18));
+        }
+        else
+        {
+            GameFx.GlowDisc(canvas, w * 0.8f, PlayH * 0.22f, h * 0.22f, new SKColor(255, 230, 140), 0.35f);
+            paint.Color = new SKColor(255, 240, 160);
+            PixelArt.Disc(canvas, paint, (int)(w * 0.8f), (int)(PlayH * 0.22f), Math.Max(3, h / 16));
+        }
+
+        paint.Color = GameFx.Lerp(new SKColor(236, 248, 255), new SKColor(70, 80, 120), night);
         foreach (var c in _clouds)
             DrawMask(canvas, Cloud, c.X, c.Y, paint);
 
+        // Far skyline (slow) and near hedges (faster), with lit windows at night.
+        var city = GameFx.Lerp(new SKColor(140, 190, 200), new SKColor(20, 24, 60), night);
+        var bw = Math.Max(6, w / 24);
+        for (var i = -1; i < w / bw + 2; i++)
+        {
+            var idx = i + (int)(_scroll * 0.25f / bw);
+            var bx = i * bw - (_scroll * 0.25f % bw);
+            var bh = (int)(PlayH * (0.18f + 0.22f * (MathF.Sin(idx * 12.9898f) * 0.5f + 0.5f)));
+            paint.Color = city;
+            canvas.DrawRect(bx, PlayH - bh, bw - 1, bh, paint);
+            if (night > 0.5f)
+            {
+                paint.Color = new SKColor(255, 220, 120, (byte)(180 * night));
+                for (var wy = (int)(PlayH - bh + 3); wy < PlayH - 3; wy += 4)
+                for (var wx = 2; wx < bw - 2; wx += 3)
+                    if ((idx * 7 + wx * 3 + wy) % 5 == 0)
+                        canvas.DrawRect(bx + wx, wy, 1, 1, paint);
+            }
+        }
+        var hedge = GameFx.Lerp(new SKColor(90, 180, 80), new SKColor(20, 60, 40), night);
+        paint.Color = hedge;
+        for (var x = 0; x < w; x++)
+        {
+            var hx = x + _scroll * 0.6f;
+            var hh = 4 + (int)(3 * (MathF.Sin(hx * 0.15f) + MathF.Sin(hx * 0.37f)));
+            canvas.DrawRect(x, PlayH - hh, 1, hh, paint);
+        }
+
+        _fx.BeginShake(canvas);
         foreach (var p in _pipes)
             DrawPipe(canvas, paint, p);
 
@@ -429,6 +551,8 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
 
         var sprite = _vy < 0 ? BirdUp : BirdDown;
         DrawBird(canvas, sprite, _birdX - _birdW * 0.45f, _birdY - _birdH * 0.5f);
+        _fx.DrawParticles(canvas);
+        _fx.EndShake(canvas);
 
         if (ShowScore)
         {
@@ -439,6 +563,7 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
                 w / 2f, h * 0.16f, size, SKTextAlign.Center, UseBdfFont);
         }
 
+        _fx.DrawOverlay(canvas, _canvas, w, h, Math.Max(7f, h * 0.07f));
         canvas.Flush();
         _canvas.SubmitCompletedFrame(bb);
     }

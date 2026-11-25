@@ -19,4 +19,9 @@
     <EmbeddedResource Include="Icons\**\*" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Headless autopilot soak test (tools/PacSim) -->
+    <InternalsVisibleTo Include="PacSim" />
+  </ItemGroup>
+
 </Project>

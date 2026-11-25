@@ -1,6 +1,6 @@
 namespace CanvasManagement.Extension.TurboKart;
 
-/// <summary>Reads a 16-bit PCM WAV into a mono float buffer. Peak-normalized so mixed sources sit together.</summary>
+/// <summary>Reads a 16-bit PCM WAV into a mono float buffer and gets it ready to mix.</summary>
 internal static class WavClip
 {
     public static (float[] Mono, int Rate) Load(Stream stream)
@@ -46,7 +46,6 @@ internal static class WavClip
 
         var frames = data.Length / (2 * channels);
         var mono = new float[frames];
-        var peak = 0f;
         for (var i = 0; i < frames; i++)
         {
             var sum = 0f;
@@ -56,19 +55,63 @@ internal static class WavClip
                 short s = (short)(data[o] | (data[o + 1] << 8));
                 sum += s / 32768f;
             }
-            var v = sum / channels;
-            mono[i] = v;
-            var a = MathF.Abs(v);
-            if (a > peak) peak = a;
+            mono[i] = sum / channels;
         }
-
-        if (peak > 0.01f)
-        {
-            var scale = 0.9f / peak;
-            for (var i = 0; i < mono.Length; i++) mono[i] *= scale;
-        }
-
         return (mono, rate);
+    }
+
+    /// <summary>
+    ///     Removes DC, sets the loudness by RMS (peak-normalising made quiet, hissy clips as loud as the engine)
+    ///     and, for a loop, crossfades the tail into the head so the wrap does not click.
+    /// </summary>
+    public static float[] Prepare(float[] mono, int rate, float targetRms, bool loop)
+    {
+        var mean = 0.0;
+        foreach (var v in mono) mean += v;
+        mean /= Math.Max(1, mono.Length);
+        var buf = mono.Select(v => (float)(v - mean)).ToArray();
+
+        if (loop)
+        {
+            var fade = Math.Min(buf.Length / 4, (int)(0.04f * rate));
+            // New loop = original without its last `fade` samples; its head is blended with that tail.
+            var n = buf.Length - fade;
+            var looped = new float[n];
+            Array.Copy(buf, looped, n);
+            for (var i = 0; i < fade; i++)
+            {
+                var t = (i + 0.5f) / fade;
+                var a = MathF.Sqrt(1 - t);
+                var b = MathF.Sqrt(t);
+                looped[i] = buf[n + i] * a + buf[i] * b;
+            }
+            buf = looped;
+        }
+        else
+        {
+            // Short fade at both ends.
+            var f = Math.Min(buf.Length / 8, rate / 400);
+            for (var i = 0; i < f; i++)
+            {
+                buf[i] *= i / (float)f;
+                buf[^(i + 1)] *= i / (float)f;
+            }
+        }
+
+        double sum = 0;
+        var peak = 0f;
+        foreach (var v in buf)
+        {
+            sum += v * v;
+            peak = Math.Max(peak, MathF.Abs(v));
+        }
+        var rms = (float)Math.Sqrt(sum / Math.Max(1, buf.Length));
+        if (rms > 1e-5f)
+        {
+            var k = Math.Min(targetRms / rms, 0.95f / Math.Max(peak, 1e-5f));
+            for (var i = 0; i < buf.Length; i++) buf[i] *= k;
+        }
+        return buf;
     }
 
     public static (float[] Mono, int Rate)? FromResource(string fileName)

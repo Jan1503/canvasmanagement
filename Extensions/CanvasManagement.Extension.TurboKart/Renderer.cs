@@ -90,6 +90,7 @@ internal sealed class Renderer
         var rain = race.Weather == WeatherKind.Rain;
 
         DrawSky(yaw, race);
+        DrawSkyFx(yaw, race);
         DrawFloor(rain);
         DrawSkids(race);
 
@@ -305,6 +306,68 @@ internal sealed class Renderer
         }
     }
 
+    /// <summary>Searchlights over the city (and the stadium at night), shooting stars in space and over the city.</summary>
+    private void DrawSkyFx(float yaw, Race race)
+    {
+        var hz = Math.Min(_hzRow, H);
+        if (hz < 8) return;
+        var lights = _theme.Kind == ThemeKind.City || _theme.Kind == ThemeKind.Stadium && race.Darkness > 0.5f;
+        if (lights && race.Weather != WeatherKind.Rain)
+        {
+            var strength = _theme.Kind == ThemeKind.City ? 0.32f : 0.28f * Math.Clamp((race.Darkness - 0.5f) * 3, 0, 1);
+            for (var b = 0; b < 6; b++)
+            {
+                // Anchored to a world bearing so they stay put as the camera turns.
+                var rel = Gfx.WrapAngle(b * 1.05f + 0.4f - yaw);
+                if (MathF.Abs(rel) > 1.0f) continue;
+                var baseX = W / 2f + MathF.Tan(rel) * _focal;
+                var sweep = MathF.Sin(_clock * (0.35f + b * 0.11f) + b * 1.7f) * 0.55f;
+                var dx = MathF.Tan(sweep);
+                for (var y = hz - 1; y >= 0; y--)
+                {
+                    var up = hz - 1 - y;
+                    var cx = baseX + dx * up;
+                    var width = 1.2f + up * 0.07f;
+                    // Faint near the horizon haze and the tip, strongest in between (city towers hide the base).
+                    var fade = strength * (0.45f + 0.55f * MathF.Sin(MathF.PI * Math.Clamp(up / (float)hz, 0.05f, 0.95f)));
+                    var xa = Math.Max(0, (int)(cx - width));
+                    var xb = Math.Min(W - 1, (int)(cx + width));
+                    for (var x = xa; x <= xb; x++)
+                    {
+                        var edge = 1 - MathF.Abs(x + 0.5f - cx) / width;
+                        if (edge <= 0) continue;
+                        var i = y * W + x;
+                        Px[i] = Gfx.AddBlend(Px[i], Gfx.Rgb(210, 220, 255), fade * edge);
+                    }
+                }
+            }
+        }
+
+        if (_theme.Kind is ThemeKind.Space or ThemeKind.City && race.Weather != WeatherKind.Rain)
+        {
+            // One meteor every few seconds, 0.6 s long.
+            const float every = 3.7f;
+            var slot = (int)(_clock / every);
+            var age = _clock - slot * every;
+            if (age < 0.6f)
+            {
+                var sx0 = Gfx.Hash(slot, 3, 11) * W;
+                var sy0 = Gfx.Hash(slot, 5, 13) * hz * 0.5f;
+                var dir = Gfx.Hash(slot, 7, 17) < 0.5f ? -1 : 1;
+                var len = 14 * Scale;
+                var head = age / 0.6f * W * 0.35f;
+                for (var k = 0; k < len; k++)
+                {
+                    var x = (int)(sx0 + dir * (head - k));
+                    var y = (int)(sy0 + (head - k) * 0.35f);
+                    if (x < 0 || x >= W || y < 0 || y >= hz) continue;
+                    var a = (1 - k / (float)len) * (1 - age / 0.6f * 0.5f);
+                    Px[y * W + x] = Gfx.AddBlend(Px[y * W + x], Gfx.Rgb(255, 250, 220), a);
+                }
+            }
+        }
+    }
+
     private void DrawFloor(bool rain)
     {
         var mips = _t.Mip;
@@ -494,8 +557,24 @@ internal sealed class Renderer
                 var tv = Math.Clamp((int)((y + 0.5f - top) / span * tex.H), 0, tex.H - 1);
                 var c = tex.Px[tv * tex.W + tu];
                 if (c == 0) continue;
-                if (((c >> 24) & 255) == Art.CrowdMarker)
-                    c = Gfx.Hash(tu, tv, tick) < 0.12f ? Gfx.Add(c, 60) : c | unchecked((int)0xFF000000);
+                var mark = (c >> 24) & 255;
+                if (mark != 255)
+                {
+                    if (mark == Art.CrowdMarker)
+                        c = Gfx.Hash(tu, tv, tick) < 0.12f ? Gfx.Add(c, 60) : c;
+                    else if (mark == Art.FlowMarker)
+                        // Waterfall: bright bands running down the cliff.
+                        c = ((tv - (int)(_clock * 14) + (tu >> 1)) & 3) == 0 ? Gfx.Add(c, 70) : c;
+                    else if (mark == Art.NeonMarker)
+                    {
+                        // Each sign (a block of columns) flickers on its own now and then.
+                        var sign = tu >> 4;
+                        var beat = (int)(_clock * 9);
+                        if (Gfx.Hash(sign, beat, 7) < 0.07f) c = Gfx.Shade(c, 0.3f);
+                        else c = Gfx.Add(c, (int)(20 + 20 * MathF.Sin(_clock * 3 + sign)));
+                    }
+                    c |= unchecked((int)0xFF000000);
+                }
                 _depth[i] = z;
                 Px[i] = Fogged(c, fog);
             }
@@ -556,10 +635,29 @@ internal sealed class Renderer
     {
         foreach (var s in _t.Scenery)
         {
-            if (!InView(s.Pos, 1700, 40)) continue;
+            if (!InView(s.Pos, 1700, 80)) continue;
             var set = _scene.Kinds[s.Kind];
+            var phase = s.Pos.X * 0.013f + s.Pos.Y * 0.007f;
+            var pos = s.Pos;
             var z = s.Z > 0 ? s.Z + MathF.Sin(_clock * 0.6f + s.Pos.X * 0.01f) * 2f : 0f;
-            DrawSprite(set[s.Variant % set.Length], s.Pos.X, s.Pos.Y, z, lit: true);
+            var sprite = set[s.Variant % set.Length];
+            switch (s.Kind)
+            {
+                case SceneryKind.FlagPole:
+                    // Three wave frames per flag colour.
+                    var frame = (int)(_clock * 6 + phase * 10) % 3;
+                    sprite = set[(s.Variant % (set.Length / 3)) * 3 + frame];
+                    break;
+                case SceneryKind.Balloon:
+                    pos += new Vector2(MathF.Sin(_clock * 0.05f + phase), MathF.Cos(_clock * 0.04f + phase)) * 30f;
+                    break;
+                case SceneryKind.Gull:
+                    var a = _clock * 0.4f + phase;
+                    pos += new Vector2(MathF.Cos(a), MathF.Sin(a)) * 40f;
+                    sprite = set[((int)(_clock * 6 + phase * 5) & 1) % set.Length];
+                    break;
+            }
+            DrawSprite(sprite, pos.X, pos.Y, z, lit: true);
         }
     }
 
@@ -615,15 +713,53 @@ internal sealed class Renderer
         var idx = (int)MathF.Round(rho / (MathF.Tau / Art.KartAngles));
         idx = ((idx % Art.KartAngles) + Art.KartAngles) % Art.KartAngles;
         var bob = k.Offroad && k.Speed > 30 ? MathF.Abs(MathF.Sin(_clock * 38 + k.Id)) * 0.5f : 0f;
+        if (rain && k.Fall <= 0) Reflect(_karts[k.Look][idx], k.Pos.X, k.Pos.Y, k.Z + bob);
         DrawSprite(_karts[k.Look][idx], k.Pos.X, k.Pos.Y, k.Z + bob, 1f, k.Spin > 0 && ((int)(_clock * 16) & 1) == 0,
             lit: true, clipGround: k.Fall > 0);
+    }
+
+    /// <summary>Wet road: the kart mirrored under itself, faint, only on bare floor pixels.</summary>
+    private void Reflect(Sprite s, float wx, float wy, float wz)
+    {
+        if (!Project(wx, wy, wz, out var sx, out var sy, out var f) || f > 700) return;
+        var scale = _focal / f * s.WorldPerPixel;
+        var dw = s.W * scale;
+        var dh = s.H * scale;
+        if (dw < 2 || dh < 2) return;
+        var left = sx - s.AnchorX * scale;
+        var top = sy - s.AnchorY * scale;
+        var ground = _hz + _camH / f * _focal;
+        var x0 = Math.Max(0, (int)MathF.Ceiling(left - 0.5f));
+        var x1 = Math.Min(W - 1, (int)MathF.Ceiling(left + dw - 0.5f) - 1);
+        var y0 = Math.Max(0, (int)MathF.Ceiling(ground - 0.5f));
+        var y1 = Math.Min(H - 1, (int)(ground + dh * 0.7f));
+        var inv = 1f / scale;
+        for (var y = y0; y <= y1; y++)
+        {
+            // Mirror around the ground line.
+            var srcY = ground - (y + 0.5f - ground);
+            var sy2 = (int)((srcY - top) * inv);
+            if (sy2 < 0 || sy2 >= s.H) continue;
+            var fade = 0.32f * (1 - (y - y0) / MathF.Max(1, y1 - y0 + 1f));
+            var row = sy2 * s.W;
+            // Ripple: some rows shift a pixel.
+            var shift = ((y + (int)(_clock * 8)) & 3) == 0 ? 1f : 0f;
+            for (var x = x0; x <= x1; x++)
+            {
+                var i = y * W + x;
+                if (_depth[i] != float.MaxValue) continue;
+                var c = s.Px[row + Math.Clamp((int)((x + 0.5f + shift - left) * inv), 0, s.W - 1)];
+                if (c == 0) continue;
+                Px[i] = Gfx.Lerp(Px[i], c | unchecked((int)0xFF000000), fade);
+            }
+        }
     }
 
     private void DrawParticles(Race race, bool glow)
     {
         foreach (var p in race.Particles)
         {
-            if (p.Glow != glow) continue;
+            if (p.Glow != glow || p.Smoke) continue;
             if (!Project(p.Pos.X, p.Pos.Y, p.Pos.Z, out var sx, out var sy, out var f)) continue;
             if (f > 900) continue;
             var t = 1 - p.Life / p.MaxLife;

@@ -15,7 +15,8 @@ namespace CanvasManagement.Extension.Tetris;
     IconResourceName = "tetris.svg")]
 public class TetrisExtension : ICanvasExtension, IDisposable
 {
-    private const int Cols = 10;
+    private const int MaxCols = 24;
+    private int _cols = 10;
     private const int Rows = 20;
     private const int Hidden = 2;
 
@@ -96,11 +97,12 @@ public class TetrisExtension : ICanvasExtension, IDisposable
     private readonly Random _random = new();
     private readonly Queue<int> _bag = new();
     private readonly Queue<int> _next = new();
-    private readonly int[,] _grid = new int[Cols, Rows + Hidden];
+    private readonly int[,] _grid = new int[MaxCols, Rows + Hidden];
 
     private SKBitmap? _backBuffer;
     private Timer? _timer;
     private int _cell, _ox, _oy;
+    private bool _wide;
     private int _kind, _rot, _x, _y;
     private int? _hold;
     private bool _heldThisPiece;
@@ -131,8 +133,8 @@ public class TetrisExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Show Score", "Show score, level and next/hold", DefaultValue = true, Order = 3)]
     public bool ShowScore { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render HUD with the crisp bitmap (BDF) font", DefaultValue = false, Order = 4)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render HUD with the crisp bitmap (BDF) font", DefaultValue = true, Order = 4)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "HUD height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0, MaxValue = 48,
         Unit = "px", Order = 5)]
@@ -140,6 +142,31 @@ public class TetrisExtension : ICanvasExtension, IDisposable
 
     [ExtensionParameter("Auto Pilot", "AI plays until you press a key in Studio", DefaultValue = true, Order = 6)]
     public bool AutoPilot { get; set; } = true;
+
+    [ExtensionParameter("Board Width", "Columns in the well (10 is standard); a new width starts a new game",
+        DefaultValue = 10, MinValue = 6, MaxValue = MaxCols, Order = 7)]
+    public int BoardWidth { get; set; } = 10;
+
+    private GameSound? _snd;
+    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Puzzle);
+
+    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
+    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
+
+    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
+    public bool Music { get => _sound.Music; set => _sound.Music = value; }
+
+    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
+        MaxValue = 100, Order = 22)]
+    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
+
+    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
+        MaxValue = 100, Order = 23)]
+    public int MusicVolume
+    {
+        get => (int)MathF.Round(_sound.MusicVolume * 100);
+        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
+    }
 
     public string Name => "Tetris";
     public bool IsRunning { get; private set; }
@@ -176,6 +203,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
             _timer?.Stop();
             _timer?.Dispose();
             _timer = null;
+            _sound.Stop();
             _backBuffer?.Dispose();
             _backBuffer = null;
             try { _canvas.Clear(SKColors.Black); } catch { }
@@ -184,6 +212,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
 
     private void NewGame()
     {
+        _cols = Math.Clamp(BoardWidth, 6, MaxCols);
         Array.Clear(_grid);
         _bag.Clear();
         _next.Clear();
@@ -210,9 +239,13 @@ public class TetrisExtension : ICanvasExtension, IDisposable
     {
         var hud = Math.Max(2, _canvas.Height / 32);
         _cell = Math.Max(4, (_canvas.Height - hud) / Rows);
-        var boardW = Cols * _cell;
+        var boardW = _cols * _cell;
         var side = Math.Max(18, _canvas.Width - boardW - 8);
-        if (side > boardW * 0.9f)
+        // A wide wall puts the well in the middle: hold and score on the left, the next pieces on the right.
+        _wide = _canvas.Width - boardW >= 2 * Math.Max(46, _cell * 8);
+        if (_wide)
+            _ox = (_canvas.Width - boardW) / 2;
+        else if (side > boardW * 0.9f)
             _ox = 6;
         else
             _ox = Math.Max(2, (_canvas.Width - boardW - side) / 2);
@@ -241,7 +274,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         _kind = _next.Dequeue();
         _next.Enqueue(DrawBag());
         _rot = 0;
-        _x = 3;
+        _x = _cols / 2 - 2;
         _y = 0;
         _grav = 0;
         _lockTicks = 0;
@@ -250,7 +283,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         _aiRot = -1;
         if (Hits(_kind, _rot, _x, _y))
         {
-            _crashTimer = 80;
+            GameOver();
             _best = Math.Max(_best, _score);
         }
         else
@@ -265,6 +298,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
             try
             {
                 if (_timer != null && Math.Abs(_timer.Interval - GameSpeed) > 0.5) _timer.Interval = GameSpeed;
+                if (Math.Clamp(BoardWidth, 6, MaxCols) != _cols) NewGame();
                 if (_crashTimer > 0)
                 {
                     _crashTimer--;
@@ -279,6 +313,8 @@ public class TetrisExtension : ICanvasExtension, IDisposable
                     Update();
 
                 Render();
+                _sound.Duck(_crashTimer > 0 ? 0.3f : 1f);
+                _sound.Update();
                 _frame++;
             }
             catch (Exception ex)
@@ -364,6 +400,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
             _rot = nr;
             _x += kx;
             _y += ky;
+            if (_human) _sound.Play(GameSfx.Rotate, 0.5f);
             if (Resting() && _lockMoves < 12)
             {
                 _lockTicks = 0;
@@ -396,6 +433,13 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         }
 
         _score += n * 2;
+        _sound.Play(GameSfx.Drop, 0.7f);
+        // Streaks from where it started to where it lands.
+        if (n > 1)
+            foreach (var (px, py) in Cells(_kind, _rot, _x, _y))
+                for (var k = 1; k <= Math.Min(n, 8); k++)
+                    _fx.Spark(_ox + px * _cell + _cell / 2f, _oy + (py - Hidden - k) * _cell + _cell / 2f, 0, 0.3f,
+                        Palette[_kind], 0.12f + 0.03f * (8 - k), 1, true);
         LockPiece();
     }
 
@@ -403,6 +447,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
     {
         if (_heldThisPiece || _crashTimer > 0) return;
         _heldThisPiece = true;
+        _sound.Play(GameSfx.Select, 0.5f);
         if (_hold == null)
         {
             _hold = _kind;
@@ -418,19 +463,28 @@ public class TetrisExtension : ICanvasExtension, IDisposable
             _x = 3;
             _y = 0;
             _lockTicks = 0;
-            if (Hits(_kind, _rot, _x, _y)) _crashTimer = 80;
+            if (Hits(_kind, _rot, _x, _y)) GameOver();
             else PlanAi();
         }
     }
 
+    private void GameOver()
+    {
+        _crashTimer = 80;
+        _fx.Flash(new SKColor(255, 50, 50), 0.5f);
+        _fx.Shake(4);
+        _sound.Play(GameSfx.GameOver, 0.7f);
+    }
+
     private void LockPiece()
     {
+        _sound.Play(GameSfx.Thud, 0.35f);
         foreach (var (px, py) in Cells(_kind, _rot, _x, _y))
         {
             if (py < 0) continue;
-            if (py >= Rows + Hidden || px < 0 || px >= Cols)
+            if (py >= Rows + Hidden || px < 0 || px >= _cols)
             {
-                _crashTimer = 80;
+                GameOver();
                 return;
             }
 
@@ -441,7 +495,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         for (var r = 0; r < Rows + Hidden; r++)
         {
             var ok = true;
-            for (var c = 0; c < Cols; c++)
+            for (var c = 0; c < _cols; c++)
                 if (_grid[c, r] == 0) { ok = false; break; }
             if (ok) full.Add(r);
         }
@@ -454,7 +508,26 @@ public class TetrisExtension : ICanvasExtension, IDisposable
             var pts = n switch { 1 => 100, 2 => 300, 3 => 500, _ => 800 };
             _score += pts * _level;
             _lines += n;
+            var before = _level;
             _level = Math.Max(_level, 1 + _lines / 10);
+            _sound.Play(n >= 4 ? GameSfx.BigClear : GameSfx.Clear, 0.8f, 0, 1f + (n - 1) * 0.06f);
+            foreach (var row in full)
+                for (var c = 0; c < _cols; c++)
+                {
+                    var col = _grid[c, row] > 0 ? Palette[_grid[c, row] - 1] : SKColors.White;
+                    var cx = _ox + c * _cell + _cell / 2f;
+                    var cy = _oy + (row - Hidden) * _cell + _cell / 2f;
+                    _fx.Burst(cx, cy, col, 4, 1.8f, 0.6f, 0.05f, true, 1, SKColors.White);
+                }
+            if (n >= 4) _fx.Shake(5);
+            if (n >= 4)
+            {
+                _fx.Flash(new SKColor(255, 255, 200), 0.6f);
+                _fx.Pop("TETRIS!", _ox + _cols * _cell / 2f, _oy + (full[0] - Hidden) * _cell, new SKColor(255, 230, 120));
+            }
+            else
+                _fx.Pop($"+{pts * _level}", _ox + _cols * _cell / 2f, _oy + (full[0] - Hidden) * _cell, SKColors.White);
+            if (_level > before) _sound.Play(GameSfx.LevelUp, 0.6f);
             _best = Math.Max(_best, _score);
             return;
         }
@@ -470,14 +543,14 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         {
             if (skip.Contains(r)) continue;
             if (dest != r)
-                for (var c = 0; c < Cols; c++)
+                for (var c = 0; c < _cols; c++)
                     _grid[c, dest] = _grid[c, r];
             dest--;
         }
 
         while (dest >= 0)
         {
-            for (var c = 0; c < Cols; c++) _grid[c, dest] = 0;
+            for (var c = 0; c < _cols; c++) _grid[c, dest] = 0;
             dest--;
         }
 
@@ -489,7 +562,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
     {
         foreach (var (px, py) in Cells(kind, rot, x, y))
         {
-            if (px < 0 || px >= Cols || py >= Rows + Hidden) return true;
+            if (px < 0 || px >= _cols || py >= Rows + Hidden) return true;
             if (py < 0) continue;
             if (_grid[px, py] != 0) return true;
         }
@@ -516,7 +589,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         _aiRot = 0;
         _aiX = _x;
         for (var rot = 0; rot < 4; rot++)
-        for (var col = -2; col <= Cols; col++)
+        for (var col = -2; col <= _cols; col++)
         {
             if (Hits(_kind, rot, col, 0) && Hits(_kind, rot, col, 1)) continue;
             var y = 0;
@@ -536,15 +609,15 @@ public class TetrisExtension : ICanvasExtension, IDisposable
     {
         var bak = (int[,])_grid.Clone();
         foreach (var (px, py) in Cells(kind, rot, x, y))
-            if (py >= 0 && py < Rows + Hidden && px >= 0 && px < Cols)
+            if (py >= 0 && py < Rows + Hidden && px >= 0 && px < _cols)
                 _grid[px, py] = kind + 1;
 
         var lines = 0;
         var holes = 0;
-        var heights = new int[Cols];
+        var heights = new int[_cols];
         var bump = 0;
         var maxH = 0;
-        for (var c = 0; c < Cols; c++)
+        for (var c = 0; c < _cols; c++)
         {
             var blocked = false;
             var h = 0;
@@ -565,12 +638,12 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         for (var r = 0; r < Rows + Hidden; r++)
         {
             var full = true;
-            for (var c = 0; c < Cols; c++)
+            for (var c = 0; c < _cols; c++)
                 if (_grid[c, r] == 0) { full = false; break; }
             if (full) lines++;
         }
 
-        for (var c = 0; c < Cols - 1; c++)
+        for (var c = 0; c < _cols - 1; c++)
             bump += Math.Abs(heights[c] - heights[c + 1]);
 
         Array.Copy(bak, _grid, _grid.Length);
@@ -716,8 +789,16 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         using var canvas = new SKCanvas(bb);
         canvas.Clear(new SKColor(10, 8, 22));
         using var paint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
+        var now = _clock.Elapsed.TotalSeconds;
+        var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
+        _lastRender = now;
+        _fx.Update(dt);
+        DrawBackdrop(canvas, paint);
+        // The well glows in the colour of the level.
+        GameFx.Glow(canvas, _ox, _oy, _cols * _cell, Rows * _cell, PixelArt.Hsv(200 + _level * 40, 0.7f, 1f), 4, 0.25f);
+        _fx.BeginShake(canvas);
 
-        var wellW = Cols * _cell;
+        var wellW = _cols * _cell;
         var wellH = Rows * _cell;
         paint.Color = new SKColor(18, 14, 36);
         canvas.DrawRect(_ox - 2, _oy - 2, wellW + 4, wellH + 4, paint);
@@ -725,7 +806,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         canvas.DrawRect(_ox, _oy, wellW, wellH, paint);
 
         paint.Color = new SKColor(28, 22, 48);
-        for (var c = 1; c < Cols; c++)
+        for (var c = 1; c < _cols; c++)
             canvas.DrawRect(_ox + c * _cell, _oy, 1, wellH, paint);
         for (var r = 1; r < Rows; r++)
             canvas.DrawRect(_ox, _oy + r * _cell, wellW, 1, paint);
@@ -734,7 +815,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         for (var r = Hidden; r < Rows + Hidden; r++)
         {
             var flash = skip.Contains(r) && _clearFlash / 2 % 2 == 0;
-            for (var c = 0; c < Cols; c++)
+            for (var c = 0; c < _cols; c++)
             {
                 var v = _grid[c, r];
                 if (v == 0 && !flash) continue;
@@ -755,16 +836,20 @@ public class TetrisExtension : ICanvasExtension, IDisposable
                     DrawMino(canvas, paint, px, py - Hidden, Palette[_kind], solid: true);
         }
 
+        _fx.DrawParticles(canvas);
+        _fx.EndShake(canvas);
+
         var sideX = _ox + wellW + 6;
         var box = Math.Max(4, _cell);
+        var leftX = Math.Max(4, _ox - 6 - Math.Max(48, box * 8));
         DrawPreview(canvas, paint, sideX, _oy, "NEXT", _next.ToArray(), box);
-        DrawHoldBox(canvas, paint, sideX, _oy + box * 8, box);
+        DrawHoldBox(canvas, paint, _wide ? leftX : sideX, _wide ? _oy : _oy + box * 8, box);
 
         if (ShowScore)
         {
             var size = CanvasText.ResolveSize(FontSize, Math.Max(7f, _canvas.Height * 0.07f));
-            var tx = sideX;
-            var ty = _oy + box * 14;
+            var tx = _wide ? leftX : sideX;
+            var ty = _wide ? _oy + box * 8 : _oy + box * 14;
             if (ty > _canvas.Height - size * 4)
             {
                 tx = 4;
@@ -786,8 +871,29 @@ public class TetrisExtension : ICanvasExtension, IDisposable
                 _ox + wellW / 2f, _oy + wellH * 0.45f, size, SKTextAlign.Center, UseBdfFont);
         }
 
+        _fx.DrawOverlay(canvas, _canvas, _canvas.Width, _canvas.Height, Math.Max(7f, _canvas.Height * 0.07f));
         canvas.Flush();
         _canvas.SubmitCompletedFrame(bb);
+    }
+
+    private readonly GameFx _fx = new();
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    private double _lastRender;
+
+    /// <summary>Slow twinkling stars beside the well, so a wide wall does not look empty.</summary>
+    private void DrawBackdrop(SKCanvas canvas, SKPaint paint)
+    {
+        var t = Environment.TickCount64 / 1000.0;
+        var rnd = new Random(17);
+        for (var i = 0; i < _canvas.Width * _canvas.Height / 400; i++)
+        {
+            var x = rnd.Next(_canvas.Width);
+            var y = rnd.Next(_canvas.Height);
+            var tw = 0.5 + 0.5 * Math.Sin(t * (0.6 + rnd.NextDouble()) + i);
+            var v = (byte)(40 + 90 * tw);
+            paint.Color = new SKColor((byte)(v * 0.8), (byte)(v * 0.85), v);
+            canvas.DrawRect(x, y, 1, 1, paint);
+        }
     }
 
     private void DrawPreview(SKCanvas canvas, SKPaint paint, float x, float y, string label, int[] kinds, int box)

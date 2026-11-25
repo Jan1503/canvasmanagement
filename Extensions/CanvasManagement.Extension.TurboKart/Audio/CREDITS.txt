@@ -11,6 +11,9 @@ hit.wav, boost.wav
   CC0. "18 random video game sound effects" by HaelDB, OpenGameArt.
   https://opengameart.org/content/18-random-video-game-sound-effects
 
-click.wav, tick.wav, go.wav, lap.wav, item.wav, finish.wav
+click.wav
   CC0. UI sound effects by Kenney (kenney.nl).
   https://opengameart.org/content/51-ui-sound-effects-buttons-switches-and-clicks
+
+Countdown, lap chime, fanfare, item, drift, bump and jump sounds are generated in code
+(SoundSynth); no files.

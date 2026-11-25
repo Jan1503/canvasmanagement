@@ -91,6 +91,7 @@ public class PongExtension : IDisposable
         _gameTimer?.Stop();
         _gameTimer?.Dispose();
         _gameTimer = null;
+        _sound.Stop();
 
         _backBuffer?.Dispose();
         _backBuffer = null;
@@ -149,6 +150,8 @@ public class PongExtension : IDisposable
             if (_ballY <= BALL_SIZE / 2 || _ballY >= _canvas.Height - BALL_SIZE / 2)
             {
                 _ballVelocityY *= -1;
+                _sound.Play(GameSfx.Bounce, 0.35f, (_ballX / _canvas.Width) * 2 - 1, 0.8f);
+                FxWall();
                 _ballY = Math.Clamp(_ballY, BALL_SIZE / 2, _canvas.Height - BALL_SIZE / 2);
             }
 
@@ -157,7 +160,9 @@ public class PongExtension : IDisposable
             if (_ballX <= PADDLE_WIDTH + BALL_SIZE / 2 &&
                 _ballY >= _paddle1Y && _ballY <= _paddle1Y + PADDLE_HEIGHT)
             {
-                _ballVelocityX = Math.Abs(_ballVelocityX);
+                _ballVelocityX = Math.Min(Math.Abs(_ballVelocityX) * 1.05f, BallSpeed * 2.2f); // rallies speed up
+                _sound.Play(GameSfx.Bounce, 0.5f, -0.7f);
+                FxHit(true);
                 _ballVelocityY += (_ballY - (_paddle1Y + PADDLE_HEIGHT / 2)) * 0.1f; // Add spin
                 _ballX = PADDLE_WIDTH + BALL_SIZE / 2;
             }
@@ -166,7 +171,9 @@ public class PongExtension : IDisposable
             if (_ballX >= _canvas.Width - PADDLE_WIDTH - BALL_SIZE / 2 &&
                 _ballY >= _paddle2Y && _ballY <= _paddle2Y + PADDLE_HEIGHT)
             {
-                _ballVelocityX = -Math.Abs(_ballVelocityX);
+                _ballVelocityX = -Math.Min(Math.Abs(_ballVelocityX) * 1.05f, BallSpeed * 2.2f);
+                _sound.Play(GameSfx.Bounce, 0.5f, 0.7f, 1.2f);
+                FxHit(false);
                 _ballVelocityY += (_ballY - (_paddle2Y + PADDLE_HEIGHT / 2)) * 0.1f; // Add spin
                 _ballX = _canvas.Width - PADDLE_WIDTH - BALL_SIZE / 2;
             }
@@ -174,7 +181,9 @@ public class PongExtension : IDisposable
             // Scoring
             if (_ballX < 0)
             {
+                FxPoint(false, 0, _ballY);
                 Score2++;
+                _sound.Play(GameSfx.Score, 0.6f, 0.7f);
                 ResetBall();
                 if (MaxScore > 0 && Score2 >= MaxScore)
                     Task.Delay(2000).ContinueWith(_ =>
@@ -184,7 +193,9 @@ public class PongExtension : IDisposable
             }
             else if (_ballX > _canvas.Width)
             {
+                FxPoint(true, _canvas.Width, _ballY);
                 Score1++;
+                _sound.Play(GameSfx.Score, 0.6f, -0.7f);
                 ResetBall();
                 if (MaxScore > 0 && Score1 >= MaxScore)
                     Task.Delay(2000).ContinueWith(_ =>
@@ -202,7 +213,7 @@ public class PongExtension : IDisposable
             }
             else
             {
-                var target1 = _ballY - PADDLE_HEIGHT / 2;
+                var target1 = AiTarget(true);
                 var aiSpeed1 = PaddleSpeed * (AIDifficulty / 10f);
                 if (_paddle1Y < target1 - 5)
                     _paddle1Y = Math.Min(_paddle1Y + aiSpeed1, target1);
@@ -211,7 +222,7 @@ public class PongExtension : IDisposable
             }
 
             // AI for paddle 2 (right)
-            var target2 = _ballY - PADDLE_HEIGHT / 2;
+            var target2 = AiTarget(false);
             var aiSpeed2 = PaddleSpeed * (AIDifficulty / 10f);
             if (_paddle2Y < target2 - 5)
                 _paddle2Y = Math.Min(_paddle2Y + aiSpeed2, target2);
@@ -223,6 +234,7 @@ public class PongExtension : IDisposable
             _paddle2Y = Math.Clamp(_paddle2Y, 0, _canvas.Height - PADDLE_HEIGHT);
 
             Render();
+            _sound.Update();
 
             if (IsRunning && _gameTimer != null) _gameTimer.Start();
         }
@@ -240,6 +252,58 @@ public class PongExtension : IDisposable
         }
     }
 
+    private float _aim1, _aim2;
+    private int _lastDir;
+
+    /// <summary>
+    ///     Where an AI paddle heads: the predicted crossing point (with wall bounces) plus a per-rally aiming error,
+    ///     larger at low difficulty, so rallies end and the score moves. Idle paddles drift back to the middle.
+    /// </summary>
+    private float AiTarget(bool left)
+    {
+        var dir = Math.Sign(_ballVelocityX);
+        if (dir != _lastDir)
+        {
+            _lastDir = dir;
+            // Usually aim somewhere on the paddle (that is what puts spin on the ball); now and then misjudge
+            // it completely. The miss rate falls with difficulty: about 1 in 3 at 1, 1 in 8 at 10.
+            var miss = _random.NextDouble() < 0.36 - Math.Clamp(AIDifficulty, 1, 10) * 0.024;
+            var side = _random.Next(2) == 0 ? -1 : 1;
+            var roll = miss
+                ? side * PADDLE_HEIGHT * (0.75f + (float)_random.NextDouble() * 0.4f)
+                : (float)(_random.NextDouble() * 2 - 1) * PADDLE_HEIGHT * 0.38f;
+            if (dir < 0) _aim1 = roll;
+            else _aim2 = roll;
+        }
+
+        // React only once the ball crosses into this half, like a person would.
+        var coming = left ? _ballVelocityX < 0 && _ballX < _canvas.Width * 0.6f
+                          : _ballVelocityX > 0 && _ballX > _canvas.Width * 0.4f;
+        if (!coming) return _canvas.Height / 2f - PADDLE_HEIGHT / 2;
+
+        var px = left ? PADDLE_WIDTH : _canvas.Width - PADDLE_WIDTH;
+        var t = Math.Abs((px - _ballX) / Math.Max(0.01f, Math.Abs(_ballVelocityX)));
+        var y = _ballY + _ballVelocityY * t;
+        var top = BALL_SIZE / 2f;
+        var span = Math.Max(1, _canvas.Height - BALL_SIZE);
+        // Unfold the bounces.
+        var u = (y - top) % (2 * span);
+        if (u < 0) u += 2 * span;
+        y = top + (u > span ? 2 * span - u : u);
+        return y + (left ? _aim1 : _aim2) - PADDLE_HEIGHT / 2;
+    }
+
+    private readonly GameFx _fx = new();
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    private readonly Queue<(float X, float Y)> _trail = new();
+    private double _lastRender;
+    private float _pulse1, _pulse2;
+
+    private SKColor LeftColor => PaddleColor == SKColors.White ? new SKColor(0, 230, 255) : PaddleColor;
+    private SKColor RightColor => PaddleColor == SKColors.White ? new SKColor(255, 60, 200) : PaddleColor;
+
+    /// <summary>Neon arcade: glowing paddles in two colours, a ball with a comet tail, sparks on every hit,
+    /// a flash and shake when a point falls, and big scores that pulse when they change.</summary>
     private void Render()
     {
         if (_backBuffer == null) return;
@@ -248,81 +312,78 @@ public class PongExtension : IDisposable
         {
             try
             {
-                // Render to back buffer
+                var now = _clock.Elapsed.TotalSeconds;
+                var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
+                _lastRender = now;
+                _fx.Update(dt);
+                _pulse1 = Math.Max(0, _pulse1 - dt * 2);
+                _pulse2 = Math.Max(0, _pulse2 - dt * 2);
+
+                var w = _canvas.Width;
+                var h = _canvas.Height;
                 using var canvas = new SKCanvas(_backBuffer);
+                using var paint = new SKPaint { IsAntialias = false };
 
-                // Clear with trail effect or solid background
-                if (TrailEffect)
-                {
-                    using var overlayPaint = new SKPaint
-                    {
-                        Color = new SKColor(
-                            BackgroundColor.Red,
-                            BackgroundColor.Green,
-                            BackgroundColor.Blue,
-                            50), // Semi-transparent
-                        Style = SKPaintStyle.Fill
-                    };
-                    canvas.DrawRect(0, 0, _canvas.Width, _canvas.Height, overlayPaint);
-                }
-                else
-                {
-                    canvas.Clear(BackgroundColor);
-                }
+                if (BackgroundColor.Alpha == 0) canvas.Clear(SKColors.Transparent);
+                else if (BackgroundColor == SKColors.Black)
+                    GameFx.VerticalGradient(canvas, w, h, new SKColor(14, 6, 34), new SKColor(4, 2, 12));
+                else canvas.Clear(BackgroundColor);
 
-                // Draw center line
+                // Court: frame lines and a glowing dashed centre line.
+                paint.Color = new SKColor(60, 40, 120);
+                canvas.DrawRect(0, 0, w, 1, paint);
+                canvas.DrawRect(0, h - 1, w, 1, paint);
                 if (ShowCenterLine)
                 {
-                    using var linePaint = new SKPaint
-                    {
-                        Color = new SKColor(100, 100, 100),
-                        StrokeWidth = Math.Max(1, _canvas.ScaleSize(2)),
-                        IsAntialias = false
-                    };
-
-                    var dashStep = _canvas.ScaleSize(20);
-                    var dashLen = _canvas.ScaleSize(10);
-                    for (var y = 0; y < _canvas.Height; y += dashStep)
-                        canvas.DrawLine(_canvas.Width / 2, y, _canvas.Width / 2, y + dashLen, linePaint);
+                    var dash = Math.Max(2, h / 24);
+                    paint.Color = new SKColor(90, 70, 170);
+                    for (var y = 0; y < h; y += dash * 2)
+                        canvas.DrawRect(w / 2, y, 1, dash, paint);
+                    GameFx.Glow(canvas, w / 2, 0, 1, h, new SKColor(80, 60, 200), 2, 0.25f);
                 }
 
-                // Draw paddles
-                using var paddlePaint = new SKPaint
+                // Scores behind the play.
+                var scoreSize = CanvasText.ResolveSize(FontSize, Math.Max(10f, h * 0.2f));
+                ScoreText(canvas, Score1.ToString(), w / 4f, h * 0.3f, scoreSize, LeftColor, _pulse1);
+                ScoreText(canvas, Score2.ToString(), w * 3 / 4f, h * 0.3f, scoreSize, RightColor, _pulse2);
+
+                _fx.BeginShake(canvas);
+
+                Paddle(canvas, paint, _margin, _paddle1Y, LeftColor);
+                Paddle(canvas, paint, w - _margin - PADDLE_WIDTH, _paddle2Y, RightColor);
+
+                // Ball with a comet tail in the colour of the last paddle that hit it.
+                _trail.Enqueue((_ballX, _ballY));
+                while (_trail.Count > 10) _trail.Dequeue();
+                var k = 0;
+                var ballColor = BallColor == SKColors.White ? new SKColor(255, 250, 220) : BallColor;
+                var tail = _ballVelocityX > 0 ? LeftColor : RightColor;
+                foreach (var (tx, ty) in _trail)
                 {
-                    Color = PaddleColor,
-                    Style = SKPaintStyle.Fill,
-                    IsAntialias = false
-                };
+                    var a = ++k / (float)_trail.Count;
+                    paint.Color = GameFx.Lerp(tail, ballColor, a).WithAlpha((byte)(200 * a * a));
+                    var r = Math.Max(1, BALL_SIZE / 2 * a);
+                    canvas.DrawRect(MathF.Round(tx - r), MathF.Round(ty - r), r * 2, r * 2, paint);
+                }
+                GameFx.GlowDisc(canvas, _ballX, _ballY, BALL_SIZE * 1.4f, ballColor, 0.45f);
+                paint.Color = ballColor;
+                PixelArt.Disc(canvas, paint, (int)MathF.Round(_ballX), (int)MathF.Round(_ballY), Math.Max(1, (int)(BALL_SIZE / 2)));
 
-                canvas.DrawRect(_margin, _paddle1Y, PADDLE_WIDTH, PADDLE_HEIGHT, paddlePaint);
-                canvas.DrawRect(_canvas.Width - _margin - PADDLE_WIDTH, _paddle2Y, PADDLE_WIDTH, PADDLE_HEIGHT,
-                    paddlePaint);
-
-                // Draw ball
-                using var ballPaint = new SKPaint
-                {
-                    Color = BallColor,
-                    Style = SKPaintStyle.Fill,
-                    IsAntialias = true
-                };
-                canvas.DrawCircle(_ballX, _ballY, BALL_SIZE / 2, ballPaint);
-
-                // Draw scores
-                var scoreSize = CanvasText.ResolveSize(FontSize, _canvas.ScaleSizeF(32));
-                var scoreY = _canvas.ScaleSize(40);
-                CanvasText.Draw(canvas, _canvas, Score1.ToString(), SKColors.White, _canvas.Width / 4, scoreY,
-                    scoreSize, SKTextAlign.Left, UseBdfFont);
-                CanvasText.Draw(canvas, _canvas, Score2.ToString(), SKColors.White, _canvas.Width * 3 / 4, scoreY,
-                    scoreSize, SKTextAlign.Left, UseBdfFont);
+                _fx.DrawParticles(canvas);
+                _fx.EndShake(canvas);
 
                 if (MaxScore > 0 && (Score1 >= MaxScore || Score2 >= MaxScore))
                 {
-                    var winner = Score1 >= MaxScore ? "Player 1 Wins!" : "Player 2 Wins!";
-                    CanvasText.Draw(canvas, _canvas, winner, SKColors.Yellow, _canvas.Width / 2, _canvas.Height / 2,
-                        CanvasText.ResolveSize(FontSize, _canvas.ScaleSizeF(24)), SKTextAlign.Center, UseBdfFont);
+                    var winner = Score1 >= MaxScore ? "PLAYER 1 WINS" : "PLAYER 2 WINS";
+                    var col = Score1 >= MaxScore ? LeftColor : RightColor;
+                    var size = CanvasText.ResolveSize(FontSize, Math.Max(9f, h * 0.12f));
+                    CanvasText.Draw(canvas, _canvas, winner, new SKColor(0, 0, 0, 200), w / 2f + 1, h / 2f + 1, size, SKTextAlign.Center, UseBdfFont);
+                    CanvasText.Draw(canvas, _canvas, winner, col, w / 2f, h / 2f, size, SKTextAlign.Center, UseBdfFont);
+                    if ((int)(_fx.Time * 6) % 3 == 0) _fx.Confetti(_fx.Rand(0, w), 0, 3, 1.2f);
                 }
 
-                canvas.Flush();// Blit to canvas in one operation
+                _fx.DrawOverlay(canvas, _canvas, w, h);
+                canvas.Flush();
                 _canvas.SubmitCompletedFrame(_backBuffer);
             }
             catch (Exception ex)
@@ -332,7 +393,66 @@ public class PongExtension : IDisposable
         }
     }
 
+    private void ScoreText(SKCanvas c, string text, float x, float y, float size, SKColor col, float pulse)
+    {
+        var color = GameFx.Lerp(GameFx.Shade(col, 0.55f), SKColors.White, pulse);
+        CanvasText.Draw(c, _canvas, text, color, x, y, size, SKTextAlign.Center, UseBdfFont);
+    }
+
+    private void Paddle(SKCanvas c, SKPaint paint, float x, float y, SKColor col)
+    {
+        GameFx.Glow(c, x, y, PADDLE_WIDTH, PADDLE_HEIGHT, col, 4, 0.5f);
+        paint.Color = col;
+        c.DrawRect(MathF.Round(x), MathF.Round(y), PADDLE_WIDTH, PADDLE_HEIGHT, paint);
+        paint.Color = GameFx.Lerp(col, SKColors.White, 0.6f);
+        c.DrawRect(MathF.Round(x), MathF.Round(y), 1, PADDLE_HEIGHT, paint);
+        paint.Color = GameFx.Shade(col, 0.6f);
+        c.DrawRect(MathF.Round(x + PADDLE_WIDTH - 1), MathF.Round(y), 1, PADDLE_HEIGHT, paint);
+    }
+
+    private void FxHit(bool left)
+    {
+        var col = left ? LeftColor : RightColor;
+        _fx.Spray(_ballX, _ballY, left ? 0 : MathF.PI, 0.9f, col, 12, 2.4f, 0.4f, 0, true);
+    }
+
+    private void FxWall() =>
+        _fx.Spray(_ballX, _ballY, _ballY < _canvas.Height / 2f ? MathF.PI / 2 : -MathF.PI / 2, 1f,
+            new SKColor(160, 140, 255), 6, 1.5f, 0.3f, 0, true);
+
+    private void FxPoint(bool leftScored, float x, float y)
+    {
+        var col = leftScored ? LeftColor : RightColor;
+        _fx.Burst(x, y, col, 30, 3.5f, 0.9f, 0.02f);
+        _fx.Flash(col, 0.45f);
+        _fx.Shake(4);
+        if (leftScored) _pulse1 = 1;
+        else _pulse2 = 1;
+        _trail.Clear();
+    }
+
     #region Parameters
+
+    private GameSound? _snd;
+    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Retro);
+
+    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
+    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
+
+    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
+    public bool Music { get => _sound.Music; set => _sound.Music = value; }
+
+    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
+        MaxValue = 100, Order = 22)]
+    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
+
+    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
+        MaxValue = 100, Order = 23)]
+    public int MusicVolume
+    {
+        get => (int)MathF.Round(_sound.MusicVolume * 100);
+        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
+    }
 
     [ExtensionParameter("Game Speed", "Game speed multiplier",
         DefaultValue = 1.0, MinValue = 0.5, MaxValue = 3.0)]
@@ -365,8 +485,8 @@ public class PongExtension : IDisposable
         DefaultValue = true)]
     public bool ShowCenterLine { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render scores with the crisp bitmap (BDF) font", DefaultValue = false)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render scores with the crisp bitmap (BDF) font", DefaultValue = true)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Score height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 64, Unit = "px")]

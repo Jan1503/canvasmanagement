@@ -345,8 +345,8 @@ public class BinaryClockExtension : IDisposable
     public bool ShowSeconds { get; set; } = true;
 
     [ExtensionParameter("Use BDF Font", "Render labels and time text with the crisp bitmap (BDF) font",
-        DefaultValue = false)]
-    public bool UseBdfFont { get; set; }
+        DefaultValue = true)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Time-text height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 48, Unit = "px")]

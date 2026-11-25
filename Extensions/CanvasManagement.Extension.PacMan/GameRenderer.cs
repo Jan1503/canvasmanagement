@@ -1,588 +1,490 @@
-using CanvasManagement.Interfaces;
-using SkiaSharp;
-
 namespace CanvasManagement.Extension.PacMan;
 
 /// <summary>
-///     Renders the Pac-Man game with high-quality graphics and animations.
+///     Draws a <see cref="Game"/> 1:1 into a <see cref="Frame"/>: neon-outlined walls (cached per maze),
+///     dots, sprites built for the cell size, a score bar on top and centred messages.
 /// </summary>
-public class GameRenderer : IDisposable
+internal sealed class GameRenderer
 {
-    private readonly ICanvas _canvas;
-    private readonly object _renderLock = new();
-    private SKBitmap? _backBuffer;
-    private int _frameCount;
+    private Maze? _wallsFor;
+    private uint _wallsColor;
+    private uint[] _walls = [];
 
-    public GameRenderer(ICanvas canvas)
+    public int Cell { get; private set; } = 8;
+    public int Hud { get; private set; } = 8;
+    public int OffX { get; private set; }
+    public int OffY { get; private set; }
+    public bool Demo { get; set; }
+    public bool Debug { get; set; }
+    public uint Background { get; set; } = Art.Black;
+    public Autopilot? Pilot { get; set; }
+    private float _time;
+
+    /// <summary>Grid size that fits a canvas: about 31×15 cells on a 256×128 wall.</summary>
+    public static (int Cols, int Rows, int Cell, int Hud) Fit(int w, int h)
     {
-        _canvas = canvas;
+        var cell = Math.Clamp(Math.Min(w / 29, h / 16), 4, 32);
+        var hud = Math.Max(8, cell);
+        var cols = Math.Min(w / cell, 61);
+        var rows = Math.Min((h - hud) / cell, 41);
+        if (cols % 2 == 0) cols--;
+        if (rows % 2 == 0) rows--;
+        return (Math.Max(15, cols), Math.Max(11, rows), cell, hud);
     }
 
-    public bool ShowDebugInfo { get; set; }
-    public SKColor BackgroundColor { get; set; } = SKColors.Black;
-    public bool UseBdfFont { get; set; }
-    public int FontSize { get; set; }
-
-    private float TextH(float auto) => CanvasText.ResolveSize(FontSize, auto);
-
-    public void Dispose()
+    public void Render(Frame f, Game g, float dt)
     {
-        lock (_renderLock)
+        _time += dt;
+        var m = g.Maze;
+        (_, _, Cell, Hud) = Fit(f.W, f.H);
+        OffX = (f.W - m.W * Cell) / 2;
+        OffY = Hud + Math.Max(0, (f.H - Hud - m.H * Cell) / 2);
+
+        f.Clear(Background);
+        var wall = Art.Walls[(g.Level - 1) % Art.Walls.Length];
+        if (g.Phase == Phase.LevelClear && g.PhaseTime > 0.6f && (int)((g.PhaseTime - 0.6f) * 4) % 2 == 0)
+            wall = Art.White;
+        DrawWalls(f, m, wall);
+        DrawDots(f, g);
+
+        if (g.Fruit is { } fruit) DrawFruit(f, OffX + fruit.X * Cell, OffY + fruit.Y * Cell, fruit.Kind);
+
+        var showActors = g.Phase != Phase.LevelClear || g.PhaseTime < 0.6f;
+        var dying = g.Phase == Phase.Dying;
+        if (showActors && g.Phase != Phase.GameOver)
         {
-            _backBuffer?.Dispose();
-            _backBuffer = null;
+            if (!dying || g.PhaseTime < 0.8f)
+                foreach (var ghost in g.Ghosts)
+                {
+                    // The ghost just eaten is replaced by its points for a moment.
+                    if (g.Phase == Phase.GhostEaten && ghost.State == GhostState.Eyes && g.Popup is { } p &&
+                        MathF.Abs(ghost.Fx(m) - p.X) < 0.01f && MathF.Abs(ghost.Fy - p.Y) < 0.01f)
+                        continue;
+                    DrawGhost(f, g, ghost);
+                }
+            if (g.Phase == Phase.GhostEaten && g.Popup is { } pop) DrawPopup(f, pop.X, pop.Y, pop.Points, Art.Rgb(0, 230, 255));
+            else DrawPac(f, g);
+        }
+        if (g.Phase != Phase.GhostEaten && g.Popup is { } fp) DrawPopup(f, fp.X, fp.Y, fp.Points, Art.Rgb(255, 160, 215));
+
+        DrawHud(f, g);
+        DrawMessages(f, g);
+        if (Debug) DrawDebug(f, g);
+    }
+
+    private int Px(float tx) => OffX + (int)MathF.Round(tx * Cell);
+    private int Py(float ty) => OffY + (int)MathF.Round(ty * Cell);
+
+    // ------------------------------------------------------------------ walls
+
+    private void DrawWalls(Frame f, Maze m, uint color)
+    {
+        var mw = m.W * Cell;
+        var mh = m.H * Cell;
+        if (_wallsFor != m || _wallsColor != color || _walls.Length != mw * mh)
+        {
+            _wallsFor = m;
+            _wallsColor = color;
+            _walls = BuildWalls(m, color, mw, mh);
+        }
+
+        for (var y = 0; y < mh; y++)
+        {
+            var fy = OffY + y;
+            if ((uint)fy >= f.H) continue;
+            for (var x = 0; x < mw; x++)
+            {
+                var c = _walls[y * mw + x];
+                if (c != 0) f.Set(OffX + x, fy, c);
+            }
         }
     }
 
-    public void Render(GameState state)
+    /// <summary>
+    ///     Corridors are the non-wall cells grown by a pixel or two (diamond-shaped, so outer corners come out
+    ///     bevelled). Wall pixels touching a corridor are the bright outline; the rest is a faint fill.
+    /// </summary>
+    private uint[] BuildWalls(Maze m, uint color, int mw, int mh)
     {
-        if (state?.Maze == null || state.PacMan == null) return;
+        var grow = Math.Max(1, Cell / 6);
+        var open = new bool[mw * mh];
+        for (var y = 0; y < mh; y++)
+        for (var x = 0; x < mw; x++)
+            open[y * mw + x] = m[x / Cell, y / Cell] != global::CanvasManagement.Extension.PacMan.Cell.Wall;
 
-        var maze = state.Maze;
-        var width = _canvas.Width;
-        var height = _canvas.Height;
-
-        lock (_renderLock)
+        var corridor = new bool[mw * mh];
+        for (var y = 0; y < mh; y++)
+        for (var x = 0; x < mw; x++)
         {
-            if (_backBuffer == null || _backBuffer.Width != width || _backBuffer.Height != height)
+            if (open[y * mw + x]) { corridor[y * mw + x] = true; continue; }
+            for (var dy = -grow; dy <= grow && !corridor[y * mw + x]; dy++)
+            for (var dx = -grow; dx <= grow; dx++)
             {
-                _backBuffer?.Dispose();
-                _backBuffer = new SKBitmap(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
+                if (Math.Abs(dx) + Math.Abs(dy) > grow) continue;
+                int nx = x + dx, ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= mw || ny >= mh) continue;
+                if (open[ny * mw + nx]) { corridor[y * mw + x] = true; break; }
             }
+        }
 
-            using var canvas = new SKCanvas(_backBuffer);
+        var px = new uint[mw * mh];
+        var fill = Art.Scale(color, 0.10f);
+        for (var y = 0; y < mh; y++)
+        for (var x = 0; x < mw; x++)
+        {
+            if (corridor[y * mw + x]) continue;
+            var edge = false;
+            for (var dy = -1; dy <= 1 && !edge; dy++)
+            for (var dx = -1; dx <= 1; dx++)
+            {
+                int nx = x + dx, ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= mw || ny >= mh) continue;
+                if (corridor[ny * mw + nx]) { edge = true; break; }
+            }
+            px[y * mw + x] = edge ? color : fill;
+        }
 
-            // Clear with background color
-            canvas.Clear(BackgroundColor);
+        // Door: a pink bar across the middle of the door cell.
+        var (dxc, dyc) = m.Door;
+        var barY = dyc * Cell + Cell / 2 - Math.Max(1, Cell / 8);
+        for (var y = barY; y < barY + Math.Max(1, Cell / 4); y++)
+        for (var x = dxc * Cell - grow; x < (dxc + 1) * Cell + grow; x++)
+            if (x >= 0 && x < mw && y >= 0 && y < mh)
+                px[y * mw + x] = Art.DoorPink;
+        return px;
+    }
 
-            // Render maze
-            RenderMaze(canvas, maze);
+    // ------------------------------------------------------------------ items
 
-            // Handle special animations
-            if (state.IsDeathAnimation)
-            {
-                RenderDeathAnimation(canvas, state, width, height);
-            }
-            else if (state.IsLevelStartAnimation)
-            {
-                RenderLevelStartAnimation(canvas, state, width, height);
-            }
-            else if (state.GameOver)
-            {
-                RenderGameOver(canvas, state, width, height);
-            }
-            else if (state.LevelComplete)
-            {
-                RenderLevelComplete(canvas, state, width, height);
-            }
+    private void DrawDots(Frame f, Game g)
+    {
+        var m = g.Maze;
+        var size = Cell >= 6 ? Math.Max(2, Cell / 4) : 1;
+        var o = (Cell - size) / 2;
+        var blink = g.Phase is Phase.Playing or Phase.GhostEaten && (int)(_time * 4) % 2 == 1;
+        var r = Cell / 2f - 0.6f;
+        var cc = (Cell - 1) / 2f;
+        for (var x = 0; x < m.W; x++)
+        for (var y = 0; y < m.H; y++)
+        {
+            int bx = OffX + x * Cell, by = OffY + y * Cell;
+            if (m.HasDot(x, y)) f.Rect(bx + o, by + o, size, size, Art.Dot);
+            else if (m.HasPower(x, y) && !blink)
+                for (var yy = 0; yy < Cell; yy++)
+                for (var xx = 0; xx < Cell; xx++)
+                    if ((xx - cc) * (xx - cc) + (yy - cc) * (yy - cc) <= r * r)
+                        f.Set(bx + xx, by + yy, Art.Dot);
+        }
+    }
+
+    private void DrawFruit(Frame f, int x, int y, int kind)
+    {
+        var art = Art.Fruits[kind % Art.Fruits.Length];
+        for (var yy = 0; yy < Cell; yy++)
+        for (var xx = 0; xx < Cell; xx++)
+        {
+            var c = Art.FruitColor(art[yy * 8 / Cell][xx * 8 / Cell]);
+            if (c != 0) f.Set(x + xx, y + yy, c);
+        }
+    }
+
+    private void DrawPopup(Frame f, float tx, float ty, int points, uint color)
+    {
+        var text = points.ToString();
+        var w = Art.MeasureSmall(text);
+        var x = Px(tx) + Cell / 2 - w / 2;
+        var y = Py(ty) + Cell / 2 - 2;
+        Art.DrawSmall(f, text, x, y, color);
+    }
+
+    // ------------------------------------------------------------------ actors
+
+    private void DrawPac(Frame f, Game g)
+    {
+        var pac = g.Pac;
+        var m = g.Maze;
+        float mouth;
+        var facing = pac.Dir;
+        if (g.Phase == Phase.Dying)
+        {
+            var t = g.PhaseTime;
+            if (t < 0.8f) mouth = 20;
+            else if (t < 2.3f) { facing = Direction.Up; mouth = 20 + (t - 0.8f) / 1.5f * 165; }
             else
             {
-                // Normal gameplay rendering
-                foreach (var ghost in state.Ghosts.Where(g => g.State == GhostState.Dead))
-                    RenderGhost(canvas, ghost, maze);
-                foreach (var ghost in state.Ghosts.Where(g => g.State != GhostState.Dead))
-                    RenderGhost(canvas, ghost, maze);
-
-                RenderPacMan(canvas, state.PacMan, maze);
+                DrawPop(f, pac.Fx(m), pac.Fy, (t - 2.3f) / 0.5f);
+                return;
             }
-
-            // Always render HUD
-            RenderHUD(canvas, state, width, height);
-
-            if (ShowDebugInfo)
-                RenderDebugInfo(canvas, state);
-
-            _frameCount++;
-
-            canvas.Flush();
         }
+        else if (g.Phase == Phase.Ready) mouth = 0;
+        else mouth = 4 + 44 * MathF.Abs(MathF.Sin(pac.Chomp * MathF.PI * 1.6f));
 
-        // Submit completed frame - canvas opacity is applied during compositing
-        if (_backBuffer != null)
+        DrawWrapped(f, m, pac.Fx(m), pac.Fy, (x, y) => PacSprite(f, x, y, facing, mouth, Art.Yellow));
+    }
+
+    private void PacSprite(Frame f, int x, int y, Direction facing, float mouthDeg, uint color)
+    {
+        var cc = (Cell - 1) / 2f;
+        var r = Cell / 2f + 0.25f;
+        var face = facing switch
         {
-            _canvas.SubmitCompletedFrame(_backBuffer);
+            Direction.Right => 0f,
+            Direction.Down => MathF.PI / 2,
+            Direction.Left => MathF.PI,
+            Direction.Up => -MathF.PI / 2,
+            _ => 0f
+        };
+        var half = mouthDeg * MathF.PI / 180f;
+        for (var yy = 0; yy < Cell; yy++)
+        for (var xx = 0; xx < Cell; xx++)
+        {
+            float dx = xx - cc, dy = yy - cc;
+            if (dx * dx + dy * dy > r * r) continue;
+            if (half > 0.01f && dx * dx + dy * dy > 0.3f)
+            {
+                var a = MathF.Atan2(dy, dx) - face;
+                while (a > MathF.PI) a -= MathF.Tau;
+                while (a < -MathF.PI) a += MathF.Tau;
+                if (MathF.Abs(a) < half) continue;
+            }
+            f.Set(x + xx, y + yy, color);
         }
     }
 
-    private void RenderDeathAnimation(SKCanvas canvas, GameState state, int width, int height)
+    private void DrawPop(Frame f, float tx, float ty, float t)
     {
-        var progress = (float)state.AnimationFrame / GameState.DeathAnimationFrames;
-        var maze = state.Maze;
-        var cellSize = maze.CellSize;
-        var offsetX = maze.OffsetX;
-        var offsetY = maze.OffsetY;
-
-        // Render ghosts fading out
-        foreach (var ghost in state.Ghosts)
-            if (progress < 0.3f)
-                RenderGhost(canvas, ghost, maze);
-
-        // Pac-Man death animation (shrinking spiral)
-        var x = offsetX + state.PacMan.Position.X * cellSize + cellSize / 2f;
-        var y = offsetY + state.PacMan.Position.Y * cellSize + cellSize / 2f;
-        var baseRadius = cellSize * 0.42f;
-
-        if (progress < 0.7f)
+        if (t >= 1) return;
+        var cx = Px(tx) + Cell / 2;
+        var cy = Py(ty) + Cell / 2;
+        var len = 1 + t * Cell * 0.9f;
+        for (var i = 0; i < 8; i++)
         {
-            // Phase 1: Pac-Man spins and shrinks
-            var phase1Progress = progress / 0.7f;
-            var radius = baseRadius * (1f - phase1Progress * 0.5f);
-            var rotation = phase1Progress * 720; // Two full rotations
+            var a = i * MathF.PI / 4;
+            for (var k = (int)(len * 0.5f); k <= len; k++)
+                f.Set(cx + (int)MathF.Round(MathF.Cos(a) * k), cy + (int)MathF.Round(MathF.Sin(a) * k),
+                    Art.Scale(Art.Yellow, 1 - t * 0.7f));
+        }
+    }
 
-            using var paint = new SKPaint
-            {
-                Color = SKColors.Yellow,
-                IsAntialias = true
-            };
+    private void DrawGhost(Frame f, Game g, Ghost ghost)
+    {
+        var m = g.Maze;
+        var tx = ghost.DrawX(m);
+        var ty = ghost.DrawY;
+        if (ghost.State == GhostState.Home) ty += MathF.Sin(ghost.Bob) * 0.25f;
+        var eyesOnly = ghost.State is GhostState.Eyes or GhostState.Entering;
+        var look = ghost.State switch
+        {
+            GhostState.Home => MathF.Sin(ghost.Bob) > 0 ? Direction.Down : Direction.Up,
+            GhostState.Leaving => Direction.Up,
+            GhostState.Entering => Direction.Down,
+            _ => ghost.Dir
+        };
+        var frightened = ghost.Frightened && !eyesOnly;
+        var blink = frightened && g.Fright < 2f && (int)(g.Fright * 5) % 2 == 0;
+        var body = frightened ? blink ? Art.BlinkWhite : Art.FrightBlue : Art.GhostColors[ghost.Index % Art.GhostColors.Length];
+        var face = blink ? Art.BlinkFace : Art.FrightFace;
+        var skirt = (int)(_time * 8) % 2;
+        DrawWrapped(f, m, tx, ty, (x, y) => GhostSprite(f, x, y, body, face, look, frightened, eyesOnly, skirt));
+    }
 
-            // Opening mouth wider
-            var mouthAngle = 5f + phase1Progress * 170f; // Opens to almost full circle
+    private void GhostSprite(Frame f, int x, int y, uint body, uint face, Direction look, bool frightened,
+        bool eyesOnly, int skirt)
+    {
+        var n = Cell;
+        // Author on 8×8, sample to the cell size.
+        var mask = new char[8, 8];
+        for (var yy = 0; yy < 8; yy++)
+        for (var xx = 0; xx < 8; xx++)
+        {
+            var row = yy < 7 ? Art.GhostBody[yy] : Art.Skirts[skirt];
+            mask[xx, yy] = eyesOnly ? '.' : row[xx] == '#' ? 'b' : '.';
+        }
 
-            using var path = new SKPath();
-            path.MoveTo(x, y);
-            path.ArcTo(new SKRect(x - radius, y - radius, x + radius, y + radius),
-                rotation + mouthAngle, 360 - mouthAngle * 2, false);
-            path.Close();
-            canvas.DrawPath(path, paint);
+        if (frightened)
+        {
+            mask[2, 3] = mask[5, 3] = 'f';
+            foreach (var (xx, yy) in new[] { (1, 5), (2, 4), (3, 5), (4, 4), (5, 5), (6, 4) }) mask[xx, yy] = 'f';
         }
         else
         {
-            // Phase 2: Explosion particles
-            var phase2Progress = (progress - 0.7f) / 0.3f;
-
-            var particleCount = 12;
-            for (var i = 0; i < particleCount; i++)
+            int ex = look switch { Direction.Left => -1, Direction.Right => 1, _ => 0 };
+            int ey = look switch { Direction.Up => -1, Direction.Down => 1, _ => 0 };
+            foreach (var bx in new[] { 1, 5 })
             {
-                var angle = (float)(i * Math.PI * 2 / particleCount);
-                var distance = baseRadius * 2f * phase2Progress;
-                var px = x + (float)Math.Cos(angle) * distance;
-                var py = y + (float)Math.Sin(angle) * distance;
-                var size = baseRadius * 0.3f * (1f - phase2Progress);
-
-                var alpha = (byte)(255 * (1f - phase2Progress));
-                using var paint = new SKPaint
+                var wx = bx + ex;
+                var wy = 2 + ey;
+                for (var yy = 0; yy < 3; yy++)
+                for (var xx = 0; xx < 2; xx++)
+                    if (wx + xx is >= 0 and < 8 && wy + yy is >= 0 and < 8)
+                        mask[wx + xx, wy + yy] = 'w';
+                // Pupil on the side it looks to.
+                var (px, py) = look switch
                 {
-                    Color = new SKColor(255, 255, 0, alpha),
-                    IsAntialias = true
+                    Direction.Left => (wx, wy + 1),
+                    Direction.Right => (wx + 1, wy + 1),
+                    Direction.Up => (wx, wy),
+                    Direction.Down => (wx, wy + 2),
+                    _ => (wx, wy + 1)
                 };
-                canvas.DrawCircle(px, py, size, paint);
+                var (qx, qy) = look is Direction.Up or Direction.Down ? (px + 1, py) : (px, py + 1);
+                foreach (var (ux, uy) in new[] { (px, py), (qx, qy) })
+                    if (ux is >= 0 and < 8 && uy is >= 0 and < 8)
+                        mask[ux, uy] = 'p';
             }
         }
 
-        // Screen flash effect at the moment of death
-        if (progress < 0.1f)
+        for (var yy = 0; yy < n; yy++)
+        for (var xx = 0; xx < n; xx++)
         {
-            var alpha = (byte)(200 * (1f - progress / 0.1f));
-            using var flashPaint = new SKPaint
+            var c = mask[xx * 8 / n, yy * 8 / n] switch
             {
-                Color = new SKColor(255, 0, 0, alpha)
+                'b' => body,
+                'f' => face,
+                'w' => Art.White,
+                'p' => Art.Pupil,
+                _ => 0u
             };
-            canvas.DrawRect(0, 0, width, height, flashPaint);
-        }
-
-        // "OUCH!" text
-        if (progress > 0.2f && progress < 0.8f)
-        {
-            var textAlpha = progress < 0.5f ? (progress - 0.2f) / 0.3f : (0.8f - progress) / 0.3f;
-            CanvasText.Draw(canvas, _canvas, "OUCH!", new SKColor(255, 50, 50, (byte)(255 * textAlpha)),
-                width / 2f, height / 2f - cellSize, TextH(Math.Max(16, cellSize * 2)), SKTextAlign.Center, UseBdfFont);
+            if (c != 0) f.Set(x + xx, y + yy, c);
         }
     }
 
-    private void RenderLevelStartAnimation(SKCanvas canvas, GameState state, int width, int height)
+    /// <summary>Draws at a tile position, and again on the far side while it is in the tunnel.</summary>
+    private void DrawWrapped(Frame f, Maze m, float tx, float ty, Action<int, int> draw)
     {
-        var progress = (float)state.AnimationFrame / GameState.LevelStartAnimationFrames;
-        var maze = state.Maze;
-        var cellSize = maze.CellSize;
-
-        // Fade in ghosts
-        var ghostAlpha = Math.Min(1f, progress * 2f);
-        foreach (var ghost in state.Ghosts) RenderGhostWithAlpha(canvas, ghost, maze, ghostAlpha);
-
-        // Pac-Man appears with a growing animation
-        var pacmanScale = Math.Min(1f, progress * 2f);
-        RenderPacManWithScale(canvas, state.PacMan, maze, pacmanScale);
-
-        // "READY!" text
-        if (progress < 0.8f)
+        var x = Px(tx);
+        var y = Py(ty);
+        var mw = m.W * Cell;
+        var left = OffX;
+        var right = OffX + mw;
+        // Clip to the maze so nothing pokes out of the tunnel mouth.
+        void Clip(int sx)
         {
-            var textScale = 1f + 0.1f * (float)Math.Sin(progress * Math.PI * 4);
-            CanvasText.Draw(canvas, _canvas, "READY!", SKColors.Yellow, width / 2f, height / 2f,
-                TextH(Math.Max(14, cellSize * 1.5f) * (UseBdfFont ? 1f : textScale)), SKTextAlign.Center, UseBdfFont);
-        }
-
-        CanvasText.Draw(canvas, _canvas, $"LEVEL {state.Level}", SKColors.Cyan, width / 2f,
-            height / 2f + cellSize * 2, TextH(Math.Max(12, cellSize * 1.2f)), SKTextAlign.Center, UseBdfFont);
-    }
-
-    private void RenderGameOver(SKCanvas canvas, GameState state, int width, int height)
-    {
-        var cellSize = state.Maze.CellSize;
-
-        // Dark overlay
-        using var overlayPaint = new SKPaint
-        {
-            Color = new SKColor(0, 0, 0, 200)
-        };
-        canvas.DrawRect(0, 0, width, height, overlayPaint);
-
-        // Pulsing "GAME OVER" text
-        var pulse = 1f + 0.1f * (float)Math.Sin(_frameCount * 0.1);
-        CanvasText.Draw(canvas, _canvas, "GAME OVER", SKColors.Red, width / 2f, height / 2f - cellSize,
-            TextH(Math.Max(20, cellSize * 2.5f) * (UseBdfFont ? 1f : pulse)), SKTextAlign.Center, UseBdfFont);
-
-        CanvasText.Draw(canvas, _canvas, $"FINAL SCORE: {state.Score}", SKColors.White, width / 2f,
-            height / 2f + cellSize, TextH(Math.Max(12, cellSize * 1.2f)), SKTextAlign.Center, UseBdfFont);
-
-        var hintAlpha = 0.5f + 0.5f * (float)Math.Sin(_frameCount * 0.05);
-        CanvasText.Draw(canvas, _canvas, "Restarting...", new SKColor(200, 200, 200, (byte)(255 * hintAlpha)),
-            width / 2f, height / 2f + cellSize * 3, TextH(Math.Max(10, cellSize)), SKTextAlign.Center, UseBdfFont);
-    }
-
-    private void RenderLevelComplete(SKCanvas canvas, GameState state, int width, int height)
-    {
-        var cellSize = state.Maze.CellSize;
-
-        // Flashing background
-        var flashValue = (byte)(100 + 50 * Math.Sin(_frameCount * 0.3));
-        using var bgPaint = new SKPaint
-        {
-            Color = new SKColor(0, flashValue, 0, 150)
-        };
-        canvas.DrawRect(0, 0, width, height, bgPaint);
-
-        // Still show Pac-Man celebrating
-        RenderPacMan(canvas, state.PacMan, state.Maze);
-
-        // "LEVEL COMPLETE!" text with rainbow effect
-        float hue = _frameCount * 5 % 360;
-        var textColor = SKColor.FromHsl(hue, 100, 50);
-
-        CanvasText.Draw(canvas, _canvas, "LEVEL COMPLETE!", textColor, width / 2f, height / 2f - cellSize,
-            TextH(Math.Max(16, cellSize * 2)), SKTextAlign.Center, UseBdfFont);
-
-        var bonus = state.Level * 1000;
-        CanvasText.Draw(canvas, _canvas, $"BONUS: {bonus} pts", SKColors.Yellow, width / 2f,
-            height / 2f + cellSize, TextH(Math.Max(12, cellSize * 1.2f)), SKTextAlign.Center, UseBdfFont);
-
-        // Firework particles
-        RenderCelebrationParticles(canvas, width, height);
-    }
-
-    private void RenderCelebrationParticles(SKCanvas canvas, int width, int height)
-    {
-        var random = new Random(_frameCount / 5);
-        var particleCount = 20;
-
-        for (var i = 0; i < particleCount; i++)
-        {
-            float x = random.Next(width);
-            float baseY = random.Next(height);
-            var y = (baseY + _frameCount * 2) % (height + 50) - 25;
-            float size = 2 + random.Next(4);
-
-            float hue = (i * 30 + _frameCount * 3) % 360;
-            var color = SKColor.FromHsl(hue, 100, 60);
-
-            using var paint = new SKPaint
+            if (sx + Cell <= left || sx >= right) return;
+            if (sx >= left && sx + Cell <= right) { draw(sx, y); return; }
+            var saved = new uint[f.H * Cell];
+            for (var yy = 0; yy < Cell; yy++)
+            for (var xx = 0; xx < Cell; xx++)
             {
-                Color = color,
-                IsAntialias = true
-            };
-            canvas.DrawCircle(x, y, size, paint);
-        }
-    }
-
-    private void RenderMaze(SKCanvas canvas, Maze maze)
-    {
-        var cellSize = maze.CellSize;
-        var offsetX = maze.OffsetX;
-        var offsetY = maze.OffsetY;
-
-        using var wallPaint = new SKPaint
-        {
-            Color = new SKColor(0, 0, 139),
-            IsAntialias = false
-        };
-        using var wallBorderPaint = new SKPaint
-        {
-            Color = new SKColor(50, 50, 255),
-            IsAntialias = false,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 1
-        };
-        using var pelletPaint = new SKPaint
-        {
-            Color = new SKColor(255, 255, 200),
-            IsAntialias = true
-        };
-
-        var pulseScale = 1f + 0.2f * (float)Math.Sin(_frameCount * 0.15);
-        using var powerPelletPaint = new SKPaint
-        {
-            Color = SKColors.Yellow,
-            IsAntialias = true
-        };
-        using var powerGlowPaint = new SKPaint
-        {
-            Color = new SKColor(255, 255, 0, 100),
-            IsAntialias = true
-        };
-
-        var pelletRadius = cellSize * 0.12f;
-        var powerRadius = cellSize * 0.3f * pulseScale;
-
-        for (var x = 0; x < maze.GridWidth; x++)
-        for (var y = 0; y < maze.GridHeight; y++)
-        {
-            float px = offsetX + x * cellSize;
-            float py = offsetY + y * cellSize;
-            var centerX = px + cellSize / 2f;
-            var centerY = py + cellSize / 2f;
-
-            if (maze.IsWall(x, y))
-            {
-                canvas.DrawRect(px + 1, py + 1, cellSize - 2, cellSize - 2, wallPaint);
-                canvas.DrawRect(px + 1, py + 1, cellSize - 2, cellSize - 2, wallBorderPaint);
+                int fx = sx + xx, fy = y + yy;
+                if ((uint)fx < f.W && (uint)fy < f.H) saved[yy * Cell + xx] = f.Px[fy * f.W + fx];
             }
-            else
+            draw(sx, y);
+            for (var yy = 0; yy < Cell; yy++)
+            for (var xx = 0; xx < Cell; xx++)
             {
-                if (maze.HasPowerPellet(x, y))
-                {
-                    canvas.DrawCircle(centerX, centerY, powerRadius * 1.3f, powerGlowPaint);
-                    canvas.DrawCircle(centerX, centerY, powerRadius, powerPelletPaint);
-                }
-                else if (maze.HasPellet(x, y))
-                {
-                    canvas.DrawCircle(centerX, centerY, pelletRadius, pelletPaint);
-                }
+                int fx = sx + xx, fy = y + yy;
+                if ((fx < left || fx >= right) && (uint)fx < f.W && (uint)fy < f.H)
+                    f.Px[fy * f.W + fx] = saved[yy * Cell + xx];
             }
         }
+        Clip(x);
+        if (x < left) Clip(x + mw);
+        if (x + Cell > right) Clip(x - mw);
     }
 
-    private void RenderPacMan(SKCanvas canvas, PacManCharacter pacman, Maze maze)
+    // ------------------------------------------------------------------ text
+
+    private void DrawHud(Frame f, Game g)
     {
-        RenderPacManWithScale(canvas, pacman, maze, 1f);
-    }
+        var y = (Hud - Art.BigH) / 2;
+        Art.DrawBig(f, g.Score.ToString(), 2, y, Art.White);
 
-    private void RenderPacManWithScale(SKCanvas canvas, PacManCharacter pacman, Maze maze, float scale)
-    {
-        var cellSize = maze.CellSize;
-        var x = maze.OffsetX + pacman.Position.X * cellSize + cellSize / 2f;
-        var y = maze.OffsetY + pacman.Position.Y * cellSize + cellSize / 2f;
-        var radius = cellSize * 0.42f * scale;
-
-        var mouthAngle = 5f + 40f * (float)Math.Abs(Math.Sin(_frameCount * 0.3));
-
-        var startAngle = pacman.Direction switch
+        string mid;
+        uint midColor;
+        if (g.Phase == Phase.Ready)
         {
-            Direction.Right => mouthAngle,
-            Direction.Left => 180 + mouthAngle,
-            Direction.Up => 270 + mouthAngle,
-            Direction.Down => 90 + mouthAngle,
-            _ => mouthAngle
-        };
-        var sweepAngle = 360 - mouthAngle * 2;
-
-        using var bodyPaint = new SKPaint
-        {
-            Color = SKColors.Yellow,
-            IsAntialias = true
-        };
-
-        using var path = new SKPath();
-        path.MoveTo(x, y);
-        path.ArcTo(new SKRect(x - radius, y - radius, x + radius, y + radius), startAngle, sweepAngle, false);
-        path.Close();
-        canvas.DrawPath(path, bodyPaint);
-
-        // Highlight
-        using var highlightPaint = new SKPaint
-        {
-            Color = new SKColor(255, 255, 150, 150),
-            IsAntialias = true
-        };
-        var highlightRadius = radius * 0.3f;
-        canvas.DrawCircle(x - radius * 0.2f, y - radius * 0.3f, highlightRadius, highlightPaint);
-
-        // Eye
-        var eyeRadius = radius * 0.15f;
-        var eyeOffsetY = -radius * 0.25f;
-        using var eyePaint = new SKPaint { Color = SKColors.Black, IsAntialias = true };
-        canvas.DrawCircle(x, y + eyeOffsetY, eyeRadius, eyePaint);
-    }
-
-    private void RenderGhost(SKCanvas canvas, Ghost ghost, Maze maze)
-    {
-        RenderGhostWithAlpha(canvas, ghost, maze, 1f);
-    }
-
-    private void RenderGhostWithAlpha(SKCanvas canvas, Ghost ghost, Maze maze, float alpha)
-    {
-        var cellSize = maze.CellSize;
-        var x = maze.OffsetX + ghost.Position.X * cellSize + cellSize / 2f;
-        var y = maze.OffsetY + ghost.Position.Y * cellSize + cellSize / 2f;
-        var radius = cellSize * 0.4f;
-        var bodyHeight = radius * 1.2f;
-
-        var baseColor = ghost.Color;
-        var color = new SKColor(baseColor.Red, baseColor.Green, baseColor.Blue, (byte)(baseColor.Alpha * alpha));
-
-        using var bodyPaint = new SKPaint
-        {
-            Color = color,
-            IsAntialias = true
-        };
-
-        using var path = new SKPath();
-        path.AddArc(new SKRect(x - radius, y - radius, x + radius, y + radius * 0.2f), 180, 180);
-        path.LineTo(x + radius, y + bodyHeight * 0.4f);
-
-        var waves = 4;
-        var waveWidth = radius * 2 / waves;
-        var waveHeight = radius * 0.2f;
-
-        for (var i = 0; i < waves; i++)
-        {
-            var wx1 = x + radius - i * waveWidth - waveWidth * 0.5f;
-            var wx2 = x + radius - (i + 1) * waveWidth;
-            var wy = y + bodyHeight * 0.4f + (i % 2 == 0 ? waveHeight : 0);
-            var wyNext = y + bodyHeight * 0.4f + (i % 2 == 1 ? waveHeight : 0);
-            path.QuadTo(wx1, wy, wx2, wyNext);
+            mid = "LEVEL " + g.Level;
+            midColor = Art.Rgb(0, 225, 255);
         }
-
-        path.LineTo(x - radius, y + radius * 0.1f);
-        path.Close();
-        canvas.DrawPath(path, bodyPaint);
-
-        // Highlight
-        using var highlightPaint = new SKPaint
+        else if (Demo && (int)(_time / 2.5f) % 2 == 0)
         {
-            Color = new SKColor(255, 255, 255, (byte)(60 * alpha)),
-            IsAntialias = true
-        };
-        canvas.DrawCircle(x - radius * 0.3f, y - radius * 0.3f, radius * 0.25f, highlightPaint);
-
-        // Eyes
-        if (ghost.State != GhostState.Dead || alpha < 1f)
-            RenderGhostEyes(canvas, x, y, radius, ghost.Direction, ghost.State, alpha);
-    }
-
-    private void RenderGhostEyes(SKCanvas canvas, float x, float y, float radius, Direction direction, GhostState state,
-        float alpha)
-    {
-        if (state == GhostState.Frightened)
-        {
-            using var scaredEyePaint = new SKPaint
-            {
-                Color = new SKColor(255, 255, 255, (byte)(255 * alpha)),
-                IsAntialias = true
-            };
-            var eyeY = y - radius * 0.1f;
-            canvas.DrawCircle(x - radius * 0.3f, eyeY, radius * 0.15f, scaredEyePaint);
-            canvas.DrawCircle(x + radius * 0.3f, eyeY, radius * 0.15f, scaredEyePaint);
-
-            using var mouthPaint = new SKPaint
-            {
-                Color = new SKColor(255, 255, 255, (byte)(255 * alpha)),
-                IsAntialias = true,
-                Style = SKPaintStyle.Stroke,
-                StrokeWidth = Math.Max(1, radius * 0.08f)
-            };
-            using var mouthPath = new SKPath();
-            mouthPath.MoveTo(x - radius * 0.4f, y + radius * 0.3f);
-            for (var i = 0; i < 4; i++)
-            {
-                var mx = x - radius * 0.4f + i * radius * 0.2f + radius * 0.1f;
-                var my = y + radius * 0.3f + (i % 2 == 0 ? radius * 0.1f : -radius * 0.1f);
-                mouthPath.LineTo(mx, my);
-            }
-
-            canvas.DrawPath(mouthPath, mouthPaint);
+            mid = "DEMO";
+            midColor = Art.Rgb(0, 225, 255);
         }
         else
         {
-            using var eyeWhitePaint = new SKPaint
-            {
-                Color = new SKColor(255, 255, 255, (byte)(255 * alpha)),
-                IsAntialias = true
-            };
-            using var pupilPaint = new SKPaint
-            {
-                Color = new SKColor(30, 30, 180, (byte)(255 * alpha)),
-                IsAntialias = true
-            };
+            mid = "HI " + Game.HiScore;
+            midColor = Art.Rgb(255, 200, 60);
+        }
+        Art.DrawBig(f, mid, f.W / 2 - Art.MeasureBig(mid) / 2, y, midColor);
 
-            var eyeRadius = radius * 0.22f;
-            var pupilRadius = radius * 0.12f;
-            var eyeY = y - radius * 0.1f;
-            var eyeSpacing = radius * 0.35f;
+        // Lives (the one in play is not shown) and the level's fruit on the right.
+        var x = f.W - 2 - 8;
+        DrawFruitIcon(f, x, (Hud - 8) / 2, g.FruitKind);
+        x -= 10;
+        var lives = Math.Min(5, g.Lives - (g.Phase is Phase.Playing or Phase.GhostEaten or Phase.Paused ? 1 : 0));
+        if (g.Phase == Phase.Ready) lives = Math.Min(5, g.Lives - 1);
+        for (var i = 0; i < lives; i++, x -= 9)
+            IconPac(f, x, (Hud - 7) / 2);
+    }
 
-            var pupilOffsetX = direction switch
-            {
-                Direction.Left => -eyeRadius * 0.4f,
-                Direction.Right => eyeRadius * 0.4f,
-                _ => 0
-            };
-            var pupilOffsetY = direction switch
-            {
-                Direction.Up => -eyeRadius * 0.4f,
-                Direction.Down => eyeRadius * 0.4f,
-                _ => 0
-            };
-
-            canvas.DrawCircle(x - eyeSpacing, eyeY, eyeRadius, eyeWhitePaint);
-            canvas.DrawCircle(x - eyeSpacing + pupilOffsetX, eyeY + pupilOffsetY, pupilRadius, pupilPaint);
-
-            canvas.DrawCircle(x + eyeSpacing, eyeY, eyeRadius, eyeWhitePaint);
-            canvas.DrawCircle(x + eyeSpacing + pupilOffsetX, eyeY + pupilOffsetY, pupilRadius, pupilPaint);
+    private void DrawFruitIcon(Frame f, int x, int y, int kind)
+    {
+        var art = Art.Fruits[kind % Art.Fruits.Length];
+        for (var yy = 0; yy < 8; yy++)
+        for (var xx = 0; xx < 8; xx++)
+        {
+            var c = Art.FruitColor(art[yy][xx]);
+            if (c != 0) f.Set(x + xx, y + yy, c);
         }
     }
 
-    private void RenderHUD(SKCanvas canvas, GameState state, int width, int height)
+    private static void IconPac(Frame f, int x, int y)
     {
-        var fontSize = TextH(Math.Max(8, Math.Min(14, state.Maze.CellSize * 0.9f)));
-        var scoreText = $"SCORE: {state.Score}";
-        CanvasText.Draw(canvas, _canvas, scoreText, new SKColor(0, 0, 0, 150), 4, fontSize + 1, fontSize,
-            SKTextAlign.Left, UseBdfFont);
-        CanvasText.Draw(canvas, _canvas, scoreText, SKColors.White, 3, fontSize, fontSize,
-            SKTextAlign.Left, UseBdfFont);
-
-        var livesText = $"LIVES: {state.Lives}";
-        var livesWidth = CanvasText.Measure(_canvas, livesText, fontSize, UseBdfFont);
-        CanvasText.Draw(canvas, _canvas, livesText, new SKColor(0, 0, 0, 150), width - livesWidth - 2, fontSize + 1,
-            fontSize, SKTextAlign.Left, UseBdfFont);
-        CanvasText.Draw(canvas, _canvas, livesText, SKColors.White, width - livesWidth - 3, fontSize, fontSize,
-            SKTextAlign.Left, UseBdfFont);
-
-        var levelText = $"LEVEL {state.Level}";
-        CanvasText.Draw(canvas, _canvas, levelText, new SKColor(0, 0, 0, 150), 4, height - 3, fontSize,
-            SKTextAlign.Left, UseBdfFont);
-        CanvasText.Draw(canvas, _canvas, levelText, SKColors.White, 3, height - 4, fontSize,
-            SKTextAlign.Left, UseBdfFont);
+        string[] art = { "..###..", ".#####.", "####...", "###....", "####...", ".#####.", "..###.." };
+        for (var yy = 0; yy < 7; yy++)
+        for (var xx = 0; xx < 7; xx++)
+            if (art[yy][6 - xx] == '#')
+                f.Set(x + xx, y + yy, Art.Yellow);
     }
 
-    private void RenderDebugInfo(SKCanvas canvas, GameState state)
+    private void DrawMessages(Frame f, Game g)
     {
-        using var bgPaint = new SKPaint
+        var m = g.Maze;
+        var below = OffY + (m.HouseY + 2) * Cell + Cell / 2 - Art.BigH / 2;
+        var above = OffY + (m.HouseY - 2) * Cell + Cell / 2 - Art.BigH / 2;
+        switch (g.Phase)
         {
-            Color = new SKColor(0, 0, 0, 200)
-        };
-        canvas.DrawRect(0, 25, 200, 50, bgPaint);
+            case Phase.Ready:
+                Banner(f, "READY!", below, Art.Yellow);
+                break;
+            case Phase.Paused:
+                Banner(f, "PAUSED", below, Art.White);
+                break;
+            case Phase.GameOver:
+                Banner(f, "GAME  OVER", below, Art.Rgb(255, 40, 40));
+                if (!Demo && g.PhaseTime > 1.5f && (int)(_time * 2) % 2 == 0)
+                    Banner(f, "PRESS START", above, Art.White);
+                break;
+            case Phase.LevelClear when g.PhaseTime > 0.6f:
+                Banner(f, "LEVEL CLEAR", below, Art.White);
+                break;
+        }
+    }
 
-        var pacman = state.PacMan;
-        var y = 36;
-        CanvasText.Draw(canvas, _canvas,
-            $"Pos: ({pacman.Position.X:F1}, {pacman.Position.Y:F1}) Dir: {pacman.Direction}",
-            SKColors.Lime, 5, y, 10, SKTextAlign.Left, UseBdfFont);
+    private static void Banner(Frame f, string text, int y, uint color)
+    {
+        var w = Art.MeasureBig(text);
+        var x = f.W / 2 - w / 2;
+        f.Rect(x - 2, y - 1, w + 4, Art.BigH + 2, Art.Black);
+        Art.DrawBig(f, text, x, y, color);
+    }
 
-        y += 12;
-        var activeGhosts = state.Ghosts.Count(g => g.State != GhostState.Dead);
-        CanvasText.Draw(canvas, _canvas, $"Ghosts: {activeGhosts}/{state.Ghosts.Count} | Frame: {_frameCount}",
-            SKColors.Lime, 5, y, 10, SKTextAlign.Left, UseBdfFont);
-
-        y += 12;
-        CanvasText.Draw(canvas, _canvas, $"Pellets: {state.Maze.CountPellets()}", SKColors.Lime, 5, y, 10,
-            SKTextAlign.Left, UseBdfFont);
+    private void DrawDebug(Frame f, Game g)
+    {
+        if (Pilot?.Goal is { } goal)
+        {
+            var x = OffX + goal.X * Cell;
+            var y = OffY + goal.Y * Cell;
+            for (var i = 0; i < Cell; i++)
+            {
+                f.Set(x + i, y, Art.Rgb(0, 255, 0));
+                f.Set(x + i, y + Cell - 1, Art.Rgb(0, 255, 0));
+                f.Set(x, y + i, Art.Rgb(0, 255, 0));
+                f.Set(x + Cell - 1, y + i, Art.Rgb(0, 255, 0));
+            }
+        }
+        if (Pilot != null) Art.DrawBig(f, Pilot.Reason, 2, f.H - Art.BigH - 1, Art.Rgb(0, 255, 0));
     }
 }

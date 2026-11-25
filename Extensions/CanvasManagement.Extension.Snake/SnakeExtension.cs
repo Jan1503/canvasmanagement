@@ -85,6 +85,7 @@ public class SnakeExtension : IDisposable
         _gameTimer?.Stop();
         _gameTimer?.Dispose();
         _gameTimer = null;
+        _sound.Stop();
 
         _backBuffer?.Dispose();
         _backBuffer = null;
@@ -117,7 +118,9 @@ public class SnakeExtension : IDisposable
         _direction = Direction.Right;
         _nextDirection = Direction.Right;
         Score = 0;
+        _shownScore = 0;
         _gameOver = false;
+        _wasOver = false;
 
         PlaceFood();
     }
@@ -168,6 +171,9 @@ public class SnakeExtension : IDisposable
                 if (CheckCollision(newHead))
                 {
                     _gameOver = true;
+                    FxCrash();
+                    _sound.Play(GameSfx.Hit, 0.7f);
+                    _sound.Play(GameSfx.GameOver, 0.6f);
                     if (AutoRestart)
                         Task.Delay(2000).ContinueWith(_ =>
                         {
@@ -186,6 +192,8 @@ public class SnakeExtension : IDisposable
                     if (newHead == _food)
                     {
                         Score += 10;
+                        FxEat(_food);
+                        _sound.Play(GameSfx.Eat, 0.6f, 0, 1f + Math.Min(_snake.Count, 40) * 0.01f);
                         PlaceFood();
                     }
                     else
@@ -196,6 +204,8 @@ public class SnakeExtension : IDisposable
             }
 
             Render();
+            _sound.Duck(_gameOver ? 0.35f : 1f);
+            _sound.Update();
 
             if (IsRunning && _gameTimer != null) _gameTimer.Start();
         }
@@ -301,6 +311,18 @@ public class SnakeExtension : IDisposable
                (a == Direction.Right && b == Direction.Left);
     }
 
+    private readonly GameFx _fx = new();
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    private double _lastRender;
+    private bool _wasOver;
+    private int _best;
+    private int _shownScore;
+
+    /// <summary>
+    ///     Neon look: a dark glassy board with a faint dot grid, a continuous body whose colour runs from the
+    ///     head down the tail, a head with eyes that look where it goes, a glowing, pulsing fruit, sparks and
+    ///     a pop-up when it eats, and a shaking burst of the whole body when it crashes.
+    /// </summary>
     private void Render()
     {
         if (_backBuffer == null) return;
@@ -309,79 +331,74 @@ public class SnakeExtension : IDisposable
         {
             try
             {
-                // Render to back buffer
-                using var canvas = new SKCanvas(_backBuffer);
+                var now = _clock.Elapsed.TotalSeconds;
+                var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
+                _lastRender = now;
+                _fx.Update(dt);
 
-                // Clear with background color (supports transparency)
-                if (_backgroundColor.Alpha == 0)
-                {
-                    canvas.Clear(SKColors.Transparent);
-                }
-                else if (_backgroundColor.Alpha == 255)
-                {
-                    canvas.Clear(_backgroundColor);
-                }
+                var w = _canvas.Width;
+                var h = _canvas.Height;
+                var g = _gridSize;
+                var cols = w / g;
+                var rows = h / g;
+                var ox = (w - cols * g) / 2;
+                var oy = (h - rows * g) / 2;
+                using var canvas = new SKCanvas(_backBuffer);
+                using var paint = new SKPaint { IsAntialias = false };
+
+                if (_backgroundColor.Alpha == 0) canvas.Clear(SKColors.Transparent);
                 else
                 {
-                    canvas.Clear(SKColors.Transparent);
-                    using var bgPaint = new SKPaint { Color = _backgroundColor, Style = SKPaintStyle.Fill };
-                    canvas.DrawRect(0, 0, _canvas.Width, _canvas.Height, bgPaint);
+                    var bg = _backgroundColor == SKColors.Black ? new SKColor(8, 12, 22) : _backgroundColor;
+                    GameFx.VerticalGradient(canvas, w, h, GameFx.Shade(bg, 1.6f), GameFx.Shade(bg, 0.7f));
                 }
 
-                // Draw grid
+                // Board: faint dots at cell corners and a soft frame.
                 if (ShowGrid)
                 {
-                    using var gridPaint = new SKPaint
-                    {
-                        Color = new SKColor(50, 50, 50),
-                        StrokeWidth = 1,
-                        IsAntialias = false
-                    };
-
-                    for (var x = 0; x <= _canvas.Width; x += _gridSize)
-                        canvas.DrawLine(x, 0, x, _canvas.Height, gridPaint);
-                    for (var y = 0; y <= _canvas.Height; y += _gridSize)
-                        canvas.DrawLine(0, y, _canvas.Width, y, gridPaint);
+                    paint.Color = new SKColor(40, 60, 90);
+                    for (var x = 0; x <= cols; x++)
+                    for (var y = 0; y <= rows; y++)
+                        canvas.DrawRect(ox + x * g, oy + y * g, 1, 1, paint);
                 }
 
-                // Draw caterpillar body with beautiful segments
-                for (var i = _snake.Count - 1; i >= 0; i--)
-                {
-                    var segment = _snake[i];
-                    var isHead = i == 0;
+                _fx.BeginShake(canvas);
 
-                    var centerX = segment.X * _gridSize + _gridSize / 2f;
-                    var centerY = segment.Y * _gridSize + _gridSize / 2f;
+                // Fruit: pulsing glow, a round body with a shine and a leaf.
+                var fx = ox + _food.X * g + g / 2f;
+                var fy = oy + _food.Y * g + g / 2f;
+                var pulse = 0.5f + 0.5f * MathF.Sin(_fx.Time * 5);
+                GameFx.GlowDisc(canvas, fx, fy, g * (1.1f + 0.3f * pulse), FoodColor, 0.35f + 0.25f * pulse);
+                paint.Color = FoodColor;
+                PixelArt.Disc(canvas, paint, (int)fx, (int)fy, Math.Max(1, g / 2 - 2));
+                paint.Color = GameFx.Lerp(FoodColor, SKColors.White, 0.6f);
+                canvas.DrawRect((int)fx - g / 5, (int)fy - g / 5, Math.Max(1, g / 6), Math.Max(1, g / 6), paint);
+                paint.Color = new SKColor(80, 200, 70);
+                canvas.DrawRect((int)fx, (int)fy - g / 2 + 1, Math.Max(1, g / 5), Math.Max(1, g / 5), paint);
 
-                    // Calculate segment size with smooth tapering
-                    var sizeMultiplier = 1.0f - i * 0.05f / Math.Max(_snake.Count, 1);
-                    sizeMultiplier = Math.Max(0.6f, sizeMultiplier);
-                    var segmentRadius = (_gridSize / 2f - 2) * sizeMultiplier;
+                if (!(_gameOver && _wasOver && _fx.Time - _overAt > 0.15f))
+                    DrawSnake(canvas, paint, ox, oy, g);
 
-                    if (isHead)
-                        // Draw head with eyes
-                        DrawCaterpillarHead(canvas, centerX, centerY, segmentRadius);
-                    else
-                        // Draw body segment with gradient and stripes
-                        DrawCaterpillarSegment(canvas, centerX, centerY, segmentRadius, i);
-                }
+                _fx.DrawParticles(canvas);
+                _fx.EndShake(canvas);
 
-                // Draw food as a leaf
-                DrawLeaf(canvas, _food.X * _gridSize + _gridSize / 2f, _food.Y * _gridSize + _gridSize / 2f);
-
-                // Draw score
-                var scoreSize = CanvasText.ResolveSize(FontSize, Math.Max(6f, _canvas.ScaleSizeF(16)));
-                CanvasText.Draw(canvas, _canvas, $"Score: {Score}", SKColors.White, _canvas.ScaleSize(10),
-                    _canvas.ScaleSize(20), scoreSize, SKTextAlign.Left, UseBdfFont);
+                // HUD
+                _best = Math.Max(_best, Score);
+                if (_shownScore < Score) _shownScore = Math.Min(Score, _shownScore + 2);
+                if (_shownScore > Score) _shownScore = Score;
+                var size = CanvasText.ResolveSize(FontSize, Math.Max(7f, h * 0.075f));
+                Text(canvas, $"{_shownScore}", 3, size + 1, size, SKColors.White, SKTextAlign.Left);
+                Text(canvas, $"HI {_best}", w - 3, size + 1, size, new SKColor(255, 200, 80), SKTextAlign.Right);
 
                 if (_gameOver)
                 {
-                    var overSize = CanvasText.ResolveSize(FontSize, Math.Max(7f, _canvas.ScaleSizeF(24)));
-                    CanvasText.Draw(canvas, _canvas, "GAME OVER", SKColors.Red, _canvas.Width / 2f,
-                        _canvas.Height / 2f, overSize, SKTextAlign.Center, UseBdfFont);
+                    var overSize = CanvasText.ResolveSize(FontSize, Math.Max(10f, h * 0.12f));
+                    var blink = (int)(_fx.Time * 3) % 2 == 0;
+                    Text(canvas, "GAME OVER", w / 2f, h / 2f, overSize, blink ? new SKColor(255, 70, 70) : new SKColor(255, 160, 60),
+                        SKTextAlign.Center);
                 }
 
-                // Blit to canvas in one operation
+                _fx.DrawOverlay(canvas, _canvas, w, h, Math.Max(7f, h * 0.07f));
                 _canvas.SubmitCompletedFrame(_backBuffer);
             }
             catch (Exception ex)
@@ -391,255 +408,132 @@ public class SnakeExtension : IDisposable
         }
     }
 
-    private void DrawCaterpillarHead(SKCanvas canvas, float x, float y, float radius)
+    private float _overAt;
+
+    private void Text(SKCanvas c, string s, float x, float y, float size, SKColor color, SKTextAlign align)
     {
-        // Use SnakeColor for head base with gradient (brighter version)
-        var brightColor = new SKColor(
-            (byte)Math.Min(255, SnakeColor.Red + 50),
-            (byte)Math.Min(255, SnakeColor.Green + 50),
-            (byte)Math.Min(255, SnakeColor.Blue + 50));
-
-        var mediumColor = SnakeColor;
-
-        using var headGradient = SKShader.CreateRadialGradient(
-            new SKPoint(x - radius * 0.3f, y - radius * 0.3f),
-            radius,
-            new[] { brightColor, mediumColor },
-            null,
-            SKShaderTileMode.Clamp);
-
-        using var headPaint = new SKPaint
-        {
-            Shader = headGradient,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-        canvas.DrawCircle(x, y, radius, headPaint);
-
-        // Draw eyes
-        var eyeOffset = radius * 0.4f;
-        var eyeSize = radius * 0.35f;
-
-        // Left eye
-        using var eyeWhitePaint = new SKPaint
-        {
-            Color = SKColors.White,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-        canvas.DrawCircle(x - eyeOffset, y - eyeOffset * 0.5f, eyeSize, eyeWhitePaint);
-
-        using var pupilPaint = new SKPaint
-        {
-            Color = SKColors.Black,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-        canvas.DrawCircle(x - eyeOffset + eyeSize * 0.2f, y - eyeOffset * 0.5f, eyeSize * 0.5f, pupilPaint);
-
-        // Right eye
-        canvas.DrawCircle(x + eyeOffset, y - eyeOffset * 0.5f, eyeSize, eyeWhitePaint);
-        canvas.DrawCircle(x + eyeOffset + eyeSize * 0.2f, y - eyeOffset * 0.5f, eyeSize * 0.5f, pupilPaint);
-
-        // Draw antennae using darker version of snake color
-        var antennaColor = new SKColor(
-            (byte)(SnakeColor.Red * 0.8),
-            (byte)(SnakeColor.Green * 0.8),
-            (byte)(SnakeColor.Blue * 0.8));
-
-        using var antennaPaint = new SKPaint
-        {
-            Color = antennaColor,
-            StrokeWidth = 2,
-            Style = SKPaintStyle.Stroke,
-            IsAntialias = true,
-            StrokeCap = SKStrokeCap.Round
-        };
-
-        using var antennaPath1 = new SKPath();
-        antennaPath1.MoveTo(x - eyeOffset, y - radius * 0.8f);
-        antennaPath1.CubicTo(
-            x - eyeOffset - radius * 0.2f, y - radius * 1.2f,
-            x - eyeOffset - radius * 0.3f, y - radius * 1.4f,
-            x - eyeOffset - radius * 0.4f, y - radius * 1.5f);
-        canvas.DrawPath(antennaPath1, antennaPaint);
-
-        using var antennaPath2 = new SKPath();
-        antennaPath2.MoveTo(x + eyeOffset, y - radius * 0.8f);
-        antennaPath2.CubicTo(
-            x + eyeOffset + radius * 0.2f, y - radius * 1.2f,
-            x + eyeOffset + radius * 0.3f, y - radius * 1.4f,
-            x + eyeOffset + radius * 0.4f, y - radius * 1.5f);
-        canvas.DrawPath(antennaPath2, antennaPaint);
-
-        // Antenna tips - use complementary color
-        using var tipPaint = new SKPaint
-        {
-            Color = new SKColor(
-                (byte)Math.Min(255, SnakeColor.Red + 100),
-                (byte)Math.Min(255, SnakeColor.Green + 80),
-                (byte)Math.Min(255, SnakeColor.Blue + 60)),
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-        canvas.DrawCircle(x - eyeOffset - radius * 0.4f, y - radius * 1.5f, radius * 0.15f, tipPaint);
-        canvas.DrawCircle(x + eyeOffset + radius * 0.4f, y - radius * 1.5f, radius * 0.15f, tipPaint);
-
-        // Smile
-        using var smilePaint = new SKPaint
-        {
-            Color = new SKColor(0, 0, 0, 150),
-            StrokeWidth = 2,
-            Style = SKPaintStyle.Stroke,
-            IsAntialias = true,
-            StrokeCap = SKStrokeCap.Round
-        };
-        using var smilePath = new SKPath();
-        smilePath.MoveTo(x - radius * 0.3f, y + radius * 0.2f);
-        smilePath.QuadTo(x, y + radius * 0.5f, x + radius * 0.3f, y + radius * 0.2f);
-        canvas.DrawPath(smilePath, smilePaint);
+        CanvasText.Draw(c, _canvas, s, new SKColor(0, 0, 0, 180), x + 1, y + 1, size, align, UseBdfFont);
+        CanvasText.Draw(c, _canvas, s, color, x, y, size, align, UseBdfFont);
     }
 
-    private void DrawCaterpillarSegment(SKCanvas canvas, float x, float y, float radius, int segmentIndex)
+    private void DrawSnake(SKCanvas canvas, SKPaint paint, int ox, int oy, int g)
     {
-        // Use SnakeColor for body segments with alternating shades
-        var isDark = segmentIndex % 2 == 0;
-
-        SKColor color1, color2;
-        if (isDark)
+        var n = _snake.Count;
+        var inset = Math.Max(1, g / 6);
+        for (var i = n - 1; i >= 0; i--)
         {
-            // Darker shade
-            color1 = new SKColor(
-                (byte)(SnakeColor.Red * 0.8),
-                (byte)(SnakeColor.Green * 0.8),
-                (byte)(SnakeColor.Blue * 0.8));
-            color2 = new SKColor(
-                (byte)(SnakeColor.Red * 0.6),
-                (byte)(SnakeColor.Green * 0.6),
-                (byte)(SnakeColor.Blue * 0.6));
+            var s = _snake[i];
+            var t = n <= 1 ? 0 : i / (float)(n - 1);
+            // Colour runs from the head colour to a deeper, hue-shifted tail; a slow shimmer travels down.
+            var shimmer = 0.85f + 0.15f * MathF.Sin(_fx.Time * 6 - i * 0.6f);
+            var body = GameFx.Shade(GameFx.Lerp(SnakeColor, Hue(SnakeColor, 60), t), shimmer * (1 - 0.35f * t));
+            var x = ox + s.X * g;
+            var y = oy + s.Y * g;
+            // Same thickness all along; only the last three segments taper to a tail.
+            var thin = inset + Math.Max(0, i - (n - 4)) * Math.Max(1, g / 10);
+            paint.Color = body;
+            canvas.DrawRect(x + thin, y + thin, g - 2 * thin, g - 2 * thin, paint);
+
+            // Bridge to the next segment so the body is one piece (not across a wrap).
+            if (i > 0)
+            {
+                var p = _snake[i - 1];
+                var dx = p.X - s.X;
+                var dy = p.Y - s.Y;
+                var pthin = inset + Math.Max(0, i - 1 - (n - 4)) * Math.Max(1, g / 10);
+                if (Math.Abs(dx) + Math.Abs(dy) == 1)
+                {
+                    thin = Math.Max(thin, pthin);
+                    if (dx != 0)
+                        canvas.DrawRect(dx > 0 ? x + g - thin : x - thin, y + thin, 2 * thin, g - 2 * thin, paint);
+                    else
+                        canvas.DrawRect(x + thin, dy > 0 ? y + g - thin : y - thin, g - 2 * thin, 2 * thin, paint);
+                }
+            }
+
+            // Scales: a lighter dot on every other segment.
+            if (i % 2 == 1 && g >= 6)
+            {
+                paint.Color = GameFx.Shade(body, 1.35f);
+                canvas.DrawRect(x + g / 2 - 1, y + g / 2 - 1, Math.Max(1, g / 5), Math.Max(1, g / 5), paint);
+            }
         }
-        else
+
+        if (n == 0) return;
+        var head = _snake[0];
+        var hx = ox + head.X * g;
+        var hy = oy + head.Y * g;
+        GameFx.Glow(canvas, hx + inset, hy + inset, g - 2 * inset, g - 2 * inset, SnakeColor, 3, 0.35f);
+        paint.Color = GameFx.Lerp(SnakeColor, SKColors.White, 0.25f);
+        canvas.DrawRect(hx + inset - 1, hy + inset - 1, g - 2 * inset + 2, g - 2 * inset + 2, paint);
+
+        // Eyes look where it is going; a forked tongue flicks now and then.
+        var (ex, ey) = _direction switch
         {
-            // Lighter shade
-            color1 = new SKColor(
-                (byte)Math.Min(255, SnakeColor.Red * 1.1),
-                (byte)Math.Min(255, SnakeColor.Green * 1.1),
-                (byte)Math.Min(255, SnakeColor.Blue * 1.1));
-            color2 = SnakeColor;
+            Direction.Left => (-1, 0),
+            Direction.Right => (1, 0),
+            Direction.Up => (0, -1),
+            _ => (0, 1)
+        };
+        var c = g / 2f;
+        var side = g * 0.22f;
+        var eye = Math.Max(1, g / 5);
+        foreach (var sgn in new[] { -1, 1 })
+        {
+            var px = hx + c + ex * g * 0.15f + (ey != 0 ? sgn * side : 0) - eye / 2f;
+            var py = hy + c + ey * g * 0.15f + (ex != 0 ? sgn * side : 0) - eye / 2f;
+            paint.Color = SKColors.White;
+            canvas.DrawRect(MathF.Round(px), MathF.Round(py), eye, eye, paint);
+            paint.Color = new SKColor(10, 10, 20);
+            canvas.DrawRect(MathF.Round(px + ex * Math.Max(0, eye - 1) * 0.5f), MathF.Round(py + ey * Math.Max(0, eye - 1) * 0.5f),
+                Math.Max(1, eye - 1), Math.Max(1, eye - 1), paint);
         }
-
-        // Body segment with radial gradient
-        using var segmentGradient = SKShader.CreateRadialGradient(
-            new SKPoint(x - radius * 0.3f, y - radius * 0.3f),
-            radius,
-            new[] { color1, color2 },
-            null,
-            SKShaderTileMode.Clamp);
-
-        using var segmentPaint = new SKPaint
+        if ((int)(_fx.Time * 4) % 5 == 0)
         {
-            Shader = segmentGradient,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-        canvas.DrawCircle(x, y, radius, segmentPaint);
-
-        // Add shine/highlight
-        using var shinePaint = new SKPaint
-        {
-            Color = new SKColor(255, 255, 255, 60),
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-        canvas.DrawCircle(x - radius * 0.3f, y - radius * 0.3f, radius * 0.4f, shinePaint);
-
-        // Subtle outline for definition using darker snake color
-        var outlineColor = new SKColor(
-            (byte)(SnakeColor.Red * 0.4),
-            (byte)(SnakeColor.Green * 0.4),
-            (byte)(SnakeColor.Blue * 0.4),
-            100);
-
-        using var outlinePaint = new SKPaint
-        {
-            Color = outlineColor,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 1.5f,
-            IsAntialias = true
-        };
-        canvas.DrawCircle(x, y, radius, outlinePaint);
+            paint.Color = new SKColor(255, 60, 90);
+            var tx = hx + c + ex * (g * 0.5f + 1);
+            var ty = hy + c + ey * (g * 0.5f + 1);
+            canvas.DrawRect(MathF.Round(tx), MathF.Round(ty), 1, 1, paint);
+            canvas.DrawRect(MathF.Round(tx + ex + ey), MathF.Round(ty + ey + ex), 1, 1, paint);
+            canvas.DrawRect(MathF.Round(tx + ex - ey), MathF.Round(ty + ey - ex), 1, 1, paint);
+        }
     }
 
-    private void DrawLeaf(SKCanvas canvas, float x, float y)
+    private static SKColor Hue(SKColor c, float degrees)
     {
-        var size = _gridSize * 0.8f;
+        c.ToHsv(out var h, out var s, out var v);
+        return SKColor.FromHsv((h + degrees) % 360, s, v);
+    }
 
-        // Leaf shape
-        using var leafPath = new SKPath();
-        leafPath.MoveTo(x, y - size / 2);
-        leafPath.QuadTo(x + size / 2, y - size / 4, x + size / 3, y);
-        leafPath.QuadTo(x + size / 2, y + size / 4, x, y + size / 2);
-        leafPath.QuadTo(x - size / 2, y + size / 4, x - size / 3, y);
-        leafPath.QuadTo(x - size / 2, y - size / 4, x, y - size / 2);
-        leafPath.Close();
+    /// <summary>Food eaten: sparks in the fruit colour and a "+10" rising from where it was.</summary>
+    private void FxEat(Point food)
+    {
+        var g = _gridSize;
+        var ox = (_canvas.Width - _canvas.Width / g * g) / 2;
+        var oy = (_canvas.Height - _canvas.Height / g * g) / 2;
+        var x = ox + food.X * g + g / 2f;
+        var y = oy + food.Y * g + g / 2f;
+        _fx.Burst(x, y, FoodColor, 16, 2f, 0.6f, 0.02f);
+        _fx.Burst(x, y, SnakeColor, 6, 1.2f, 0.5f, 0.02f);
+        _fx.Pop("+10", x, y - g * 0.5f, new SKColor(255, 240, 120));
+    }
 
-        // Use FoodColor for leaf with gradient
-        var lightFoodColor = new SKColor(
-            (byte)Math.Min(255, FoodColor.Red * 1.3),
-            (byte)Math.Min(255, FoodColor.Green * 1.3),
-            (byte)Math.Min(255, FoodColor.Blue * 1.3));
-
-        var darkFoodColor = new SKColor(
-            (byte)(FoodColor.Red * 0.7),
-            (byte)(FoodColor.Green * 0.7),
-            (byte)(FoodColor.Blue * 0.7));
-
-        // Leaf gradient
-        using var leafGradient = SKShader.CreateLinearGradient(
-            new SKPoint(x - size / 2, y),
-            new SKPoint(x + size / 2, y),
-            new[] { lightFoodColor, darkFoodColor },
-            null,
-            SKShaderTileMode.Clamp);
-
-        using var leafPaint = new SKPaint
+    /// <summary>Crash: every segment bursts, the board flashes red and shakes.</summary>
+    private void FxCrash()
+    {
+        var g = _gridSize;
+        var ox = (_canvas.Width - _canvas.Width / g * g) / 2;
+        var oy = (_canvas.Height - _canvas.Height / g * g) / 2;
+        for (var i = 0; i < _snake.Count; i++)
         {
-            Shader = leafGradient,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-        canvas.DrawPath(leafPath, leafPaint);
-
-        // Leaf vein using darker food color
-        var veinColor = new SKColor(
-            (byte)(FoodColor.Red * 0.5),
-            (byte)(FoodColor.Green * 0.5),
-            (byte)(FoodColor.Blue * 0.5),
-            150);
-
-        using var veinPaint = new SKPaint
-        {
-            Color = veinColor,
-            StrokeWidth = 2,
-            Style = SKPaintStyle.Stroke,
-            IsAntialias = true
-        };
-        canvas.DrawLine(x, y - size / 2, x, y + size / 2, veinPaint);
-
-        // Leaf outline using darker food color
-        var outlineColor = new SKColor(
-            (byte)(FoodColor.Red * 0.5),
-            (byte)(FoodColor.Green * 0.5),
-            (byte)(FoodColor.Blue * 0.5));
-
-        using var leafOutline = new SKPaint
-        {
-            Color = outlineColor,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 2,
-            IsAntialias = true
-        };
-        canvas.DrawPath(leafPath, leafOutline);
+            var s = _snake[i];
+            _fx.Burst(ox + s.X * g + g / 2f, oy + s.Y * g + g / 2f, GameFx.Lerp(SnakeColor, Hue(SnakeColor, 60), i / (float)Math.Max(1, _snake.Count)),
+                4, 2.5f, 1.0f, 0.06f, true);
+        }
+        _fx.Flash(new SKColor(255, 40, 40), 0.7f);
+        _fx.Shake(5);
+        _wasOver = true;
+        _overAt = _fx.Time;
     }
 
     private void Steer(Direction dir)
@@ -669,6 +563,27 @@ public class SnakeExtension : IDisposable
 
     #region Parameters
 
+    private GameSound? _snd;
+    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Chill);
+
+    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
+    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
+
+    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
+    public bool Music { get => _sound.Music; set => _sound.Music = value; }
+
+    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
+        MaxValue = 100, Order = 22)]
+    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
+
+    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
+        MaxValue = 100, Order = 23)]
+    public int MusicVolume
+    {
+        get => (int)MathF.Round(_sound.MusicVolume * 100);
+        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
+    }
+
     [ExtensionParameter("Game Speed", "Game speed (higher = faster)",
         DefaultValue = 7, MinValue = 1, MaxValue = 30)]
     public int GameSpeed { get; set; } = 7;
@@ -697,8 +612,8 @@ public class SnakeExtension : IDisposable
         DefaultValue = true)]
     public bool ShowGrid { get; set; } = true;
 
-    [ExtensionParameter("Use BDF Font", "Render score text with the crisp bitmap (BDF) font", DefaultValue = false)]
-    public bool UseBdfFont { get; set; }
+    [ExtensionParameter("Use BDF Font", "Render score text with the crisp bitmap (BDF) font", DefaultValue = true)]
+    public bool UseBdfFont { get; set; } = true;
 
     [ExtensionParameter("Font Size", "Score height in pixels (0 = auto)", DefaultValue = 0, MinValue = 0,
         MaxValue = 48, Unit = "px")]
