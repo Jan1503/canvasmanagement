@@ -12,7 +12,7 @@ public interface IExtensionAudio
     /// <param name="pan">-1 left, 0 center, 1 right.</param>
     void Noise(float seconds, float gain, float pan);
 
-    /// <summary>Up to four simultaneous loops. Slot 0 is the usual engine.</summary>
+    /// <summary>Up to eight simultaneous loops (slots 0-7). Slot 0 is the usual engine.</summary>
     void Loop(int slot, float hz, float gain);
 
     void StopLoop(int slot);
@@ -27,6 +27,19 @@ public interface IExtensionAudio
     ///     The same array keeps its playhead. Gain 0 or an empty buffer stops the slot.
     /// </summary>
     void LoopSample(int slot, float[] mono, int sampleRate, float gain, float playbackRate);
+}
+
+/// <summary>
+///     Optional. An extension that plays a medium (a film, a stream) implements this so the audio panel shows
+///     what is playing. Without it the panel shows the names of the running extensions and no cover.
+/// </summary>
+public interface ICanvasNowPlaying
+{
+    /// <summary>Title for the panel; null when nothing is playing.</summary>
+    string? NowPlayingTitle { get; }
+
+    /// <summary>Picture for the panel: an image URL, a data URI or a media file to grab a frame from. Null for none.</summary>
+    string? NowPlayingCover { get; }
 }
 
 /// <summary>

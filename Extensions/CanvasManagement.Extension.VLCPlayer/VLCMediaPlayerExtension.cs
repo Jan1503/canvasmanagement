@@ -11,8 +11,141 @@ namespace CanvasManagement.Extension.VLCPlayer;
     "Plays video files and streams directly on the canvas using LibVLC.",
     "Media Players",
     IconResourceName = "vlc.svg")]
-public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
+public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable, ICanvasAudioSource, ICanvasNowPlaying
 {
+    /// <summary>What the audio panel shows: the media's title (or file name) while it plays.</summary>
+    public string? NowPlayingTitle
+    {
+        get
+        {
+            var player = _mediaPlayer;
+            if (!IsRunning || player == null || string.IsNullOrWhiteSpace(_lastPlayedUrl)) return null;
+            try
+            {
+                var meta = player.Media?.Meta(MetadataType.Title);
+                if (!string.IsNullOrWhiteSpace(meta) && !meta.Contains("googlevideo", StringComparison.OrdinalIgnoreCase))
+                    return meta;
+            }
+            catch { /* no meta */ }
+            // Name it after what the user asked for, not the resolved stream address.
+            var url = string.IsNullOrWhiteSpace(_mediaUrl) ? _lastPlayedUrl : _mediaUrl;
+            if (url.Contains("youtube.com", StringComparison.OrdinalIgnoreCase) ||
+                url.Contains("youtu.be", StringComparison.OrdinalIgnoreCase))
+                return "YouTube";
+            try
+            {
+                if (Uri.TryCreate(url, UriKind.Absolute, out var u) && !u.IsFile)
+                    return Uri.UnescapeDataString(Path.GetFileNameWithoutExtension(u.AbsolutePath)) is { Length: > 0 } n ? n : u.Host;
+                return Path.GetFileNameWithoutExtension(url);
+            }
+            catch
+            {
+                return "VLC";
+            }
+        }
+    }
+
+    /// <summary>A frame from a local file as the cover; streams have none.</summary>
+    public string? NowPlayingCover
+    {
+        get
+        {
+            var url = _lastPlayedUrl;
+            if (!IsRunning || string.IsNullOrWhiteSpace(url)) return null;
+            return File.Exists(url) ? url : null;
+        }
+    }
+
+    // ---------------------------------------------------------------- audio to the board
+    // With an audio board (canvas.Audio != null) LibVLC hands us PCM through its audio callbacks instead of
+    // opening ALSA. The samples go into a ring buffer and the host pulls them in Mix() on its 48 kHz clock.
+    private const int BoardRate = 48000;
+    private readonly float[] _ring = new float[BoardRate * 2 * 2]; // 2 s stereo
+    private readonly object _ringLock = new();
+    private int _ringRead, _ringCount;
+    private volatile bool _boardAudio, _audioPaused;
+    private bool _primed;
+    private MediaPlayer.LibVLCAudioPlayCb? _playCb;
+    private MediaPlayer.LibVLCAudioPauseCb? _pauseCb;
+    private MediaPlayer.LibVLCAudioResumeCb? _resumeCb;
+    private MediaPlayer.LibVLCAudioFlushCb? _flushCb;
+    private MediaPlayer.LibVLCAudioDrainCb? _drainCb;
+
+    public bool IsAudible => _boardAudio && IsRunning && !_audioPaused && _ringCount > 0;
+
+    public void Mix(Span<float> stereo, int sampleRate)
+    {
+        if (!_boardAudio) return;
+        var gain = _mute ? 0f : _volume / 100f;
+        lock (_ringLock)
+        {
+            // VLC may run ahead; keep latency bounded (drop what is older than ~350 ms).
+            var max = BoardRate * 2 * 35 / 100;
+            if (_ringCount > max)
+            {
+                var drop = (_ringCount - max) & ~1;
+                _ringRead = (_ringRead + drop) % _ring.Length;
+                _ringCount -= drop;
+            }
+            // Keep ~100 ms in hand: VLC delivers in bursts, the board pulls evenly. After running dry, wait for
+            // the cushion again instead of stuttering block by block.
+            if (!_primed)
+            {
+                if (_ringCount < BoardRate * 2 / 10) return;
+                _primed = true;
+            }
+            var n = Math.Min(stereo.Length, _ringCount);
+            if (n < stereo.Length) _primed = false;
+            for (var i = 0; i < n; i++)
+            {
+                stereo[i] += _ring[_ringRead] * gain;
+                _ringRead = (_ringRead + 1) % _ring.Length;
+            }
+            _ringCount -= n;
+        }
+    }
+
+    private void OnAudioPlay(IntPtr data, IntPtr samples, uint count, long pts)
+    {
+        var values = (int)count * 2;
+        lock (_ringLock)
+        {
+            for (var i = 0; i < values; i++)
+            {
+                var v = Marshal.ReadInt16(samples, i * 2) / 32768f;
+                var w = (_ringRead + _ringCount) % _ring.Length;
+                _ring[w] = v;
+                if (_ringCount < _ring.Length) _ringCount++;
+                else _ringRead = (_ringRead + 1) % _ring.Length;
+            }
+        }
+    }
+
+    private void FlushRing()
+    {
+        lock (_ringLock)
+        {
+            _ringRead = 0;
+            _ringCount = 0;
+            _primed = false;
+        }
+    }
+
+    private void UseBoardAudio(MediaPlayer player)
+    {
+        _playCb = OnAudioPlay;
+        _pauseCb = (_, _) => _audioPaused = true;
+        _resumeCb = (_, _) => _audioPaused = false;
+        _flushCb = (_, _) => FlushRing();
+        _drainCb = _ => { };
+        player.SetAudioFormat("S16N", BoardRate, 2);
+        player.SetAudioCallbacks(_playCb, _pauseCb, _resumeCb, _flushCb, _drainCb);
+        player.Volume = 100;
+        _audioPaused = false;
+        FlushRing();
+        Console.WriteLine("[VLC] Audio goes to the audio board");
+    }
+
     private static bool _coreInitialized;
     private static readonly object _coreInitLock = new();
     private readonly ICanvas _canvas;
@@ -212,6 +345,26 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Enable Audio", "Enable audio playback (if supported)",
         DefaultValue = true)]
     public bool EnableAudio { get; set; } = true;
+
+    [ExtensionParameter("Audio Delay", "Shift the sound against the picture on the audio board (ms, negative = earlier)",
+        DefaultValue = 0, MinValue = -1000, MaxValue = 1000, Unit = "ms")]
+    public int AudioDelay
+    {
+        get => _audioDelay;
+        set
+        {
+            _audioDelay = Math.Clamp(value, -1000, 1000);
+            ApplyAudioDelay();
+        }
+    }
+
+    private int _audioDelay;
+
+    private void ApplyAudioDelay()
+    {
+        try { _mediaPlayer?.SetAudioDelay(_audioDelay * 1000L); }
+        catch (Exception ex) { Console.WriteLine($"[VLC] audio delay: {ex.Message}"); }
+    }
 
     [ExtensionParameter("Mute", "Mute audio playback",
         DefaultValue = false)]
@@ -693,9 +846,11 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
 
                 LibVLC? testLibVLC = null;
                 string? successfulConfig = null;
-                _playAudio = EnableAudio && !RunningInContainer() && HasSoundDevice();
-                if (!_playAudio)
-                    Console.WriteLine("[VLC] Audio off — no sound card. ALSA is not opened.");
+                // An audio board wins over a local sound card: the wall's sound comes out of the panel.
+                _boardAudio = EnableAudio && _canvas.Audio != null;
+                _playAudio = !_boardAudio && EnableAudio && !RunningInContainer() && HasSoundDevice();
+                if (!_playAudio && !_boardAudio)
+                    Console.WriteLine("[VLC] Audio off — no sound card and no audio board. ALSA is not opened.");
 
                 // Try each config until one initializes successfully
                 foreach (var config in hwDecoderConfigs)
@@ -708,7 +863,12 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
 
                     // Without a card, LibVLC retries "default" forever and the log fills with ALSA errors.
                     // --ignore-config stops a saved vlcrc from forcing the alsa module back on.
-                    if (!_playAudio)
+                    if (_boardAudio)
+                    {
+                        // Audio callbacks (amem) only; never ALSA.
+                        args.Add("--ignore-config");
+                    }
+                    else if (!_playAudio)
                     {
                         args.Add("--ignore-config");
                         args.Add("--no-audio");
@@ -772,10 +932,18 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
                 Console.WriteLine("[VLC] Setting video callbacks...");
                 _mediaPlayer.SetVideoCallbacks(LockVideo, null, DisplayVideo);
 
-                // Set volume. Mute as well when there is no device, so a later unmute cannot reopen ALSA.
-                _mediaPlayer.Volume = _playAudio ? _volume : 0;
-                if (!_playAudio)
-                    _mediaPlayer.Mute = true;
+                if (_boardAudio)
+                {
+                    UseBoardAudio(_mediaPlayer);
+                }
+                else
+                {
+                    // Set volume. Mute as well when there is no device, so a later unmute cannot reopen ALSA.
+                    _mediaPlayer.Volume = _playAudio ? _volume : 0;
+                    if (!_playAudio)
+                        _mediaPlayer.Mute = true;
+                }
+                ApplyAudioDelay();
                 
                 // Handle end reached for loop functionality
                 _mediaPlayer.EndReached += OnEndReached;
@@ -833,6 +1001,8 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
                 return;
 
             IsRunning = false;
+            _boardAudio = false;
+            FlushRing();
 
             try
             {
@@ -977,7 +1147,7 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
                 Console.WriteLine($"[VLC] Final URL: {HidePassword(mediaUrl)}");
 
                 var media = new Media(_libVLC, mediaUrl, fromType);
-                if (!_playAudio)
+                if (!_playAudio && !_boardAudio)
                     media.AddOption(":no-audio");
 
                 // For YouTube URLs, add required HTTP headers to avoid 403 Forbidden
@@ -996,7 +1166,7 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable
 
                 // If we have a separate audio stream (YouTube adaptive), use --input-slave.
                 // Skip it when audio is off — the slave would open ALSA again.
-                if (_playAudio && !string.IsNullOrWhiteSpace(audioSlaveUrl))
+                if ((_playAudio || _boardAudio) && !string.IsNullOrWhiteSpace(audioSlaveUrl))
                 {
                     Console.WriteLine("[VLC] Adding audio slave for adaptive stream...");
                     media.AddOption($":input-slave={audioSlaveUrl}");

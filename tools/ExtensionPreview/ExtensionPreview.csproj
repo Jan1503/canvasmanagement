@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Headless preview for any extension: frames, contact sheets, recorded sound. Not deployed. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" />
+    <ProjectReference Include="..\..\CanvasManagement\CanvasManagement.csproj" />
+    <ProjectReference Include="..\..\CanvasManagement.Interfaces\CanvasManagement.Interfaces.csproj" />
+    <ProjectReference Include="..\..\CanvasManagement.BdfFontManager\CanvasManagement.BdfFontManager.csproj" />
+  </ItemGroup>
+</Project>

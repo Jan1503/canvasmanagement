@@ -240,6 +240,15 @@ If `Start()` is called twice, no-op. If `Stop()` is called when idle, no-op.
 
 ## 11. Debug without a panel
 
+`tools/ExtensionPreview` runs any built extension headless, presses its Controls on a schedule, saves a contact sheet of frames and records its sound:
+
+```powershell
+dotnet build Extensions\CanvasManagement.Extension.PacMan -c Release
+dotnet run -c Release --project tools\ExtensionPreview -- PacMan --seconds 30 --every 2000 --wav --script "5:GoLeft,8:Pause"
+```
+
+Output goes to `%TEMP%\ExtensionPreview\<Name>` (`sheet.png`, `shot_*.png`, `sound.wav`).
+
 ```powershell
 dotnet run --project CanvasManagement.WinForms.Demo -c Debug
 ```
@@ -256,7 +265,12 @@ The constructor stays `(ICanvas canvas)`. Sound is optional and lives on the can
 
 - `canvas.Audio` is null when the host has no board. Use `canvas.Audio?.Tone(...)`.
 - `IExtensionAudio` is the shared voice pool: `Tone`, `Noise`, `Loop`, `StopLoop`, plus `Play` and `LoopSample` for a clip the extension decoded itself. The host mixes every extension into one stream. A pitched loop is how an engine follows speed; the samples stay in the plugin.
+- `SoundSynth` (in `CanvasManagement.Interfaces`) builds clips in code: notes and sweeps (`Tone`, `Add`), tunes (`Melody`, MIDI note numbers), and seamless loops (`Loop`). Render them once at start and pass the arrays to `Play` / `LoopSample` with `SoundSynth.Rate`. Pac-Man's sounds are all made this way.
+- `GameSound` (also in Interfaces) is the shortcut every bundled game uses: `Play(GameSfx.Coin)` for stock effects (jump, coin, explosion, line clear, game over …, throttled so a burst does not stack), and a looping background song from `ChipMusic` (eight original tunes composed in code) on slot 7. Games expose it as the parameters Sound, Music, Volume and Music Volume; call `Update()` once per frame and `Stop()` in `Stop()`.
+- `GameFx` (Interfaces) is the shared juice kit: glowing particles, bursts, sprays, confetti, screen shake, flash, rising score pop-ups, soft glows, gradients and a parallax starfield, all 1:1 pixel friendly.
+- Eight loop slots (0–7). Gain and pitch glide on the host, loops fade in and out, and switching the clip on a slot crossfades, so it is fine to call `LoopSample` every frame with new values.
 - `ICanvasAudioSource` is for an extension that fills its own block. `Mix` runs on the audio thread, never inside the compositor lock and never inside a filter.
 - A movie that is already streaming owns the board. Extension sound plays when nothing else is streaming.
 - Stop every loop in `Stop()`.
+- The audio panel shows the names of the running extensions (and no cover) while no film, YouTube video or radio station owns it. An extension that plays a medium implements `ICanvasNowPlaying` (`NowPlayingTitle`, `NowPlayingCover`: an image URL, data URI or a media file to grab a frame from); the VLC player does.
 

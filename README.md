@@ -40,7 +40,7 @@ Dated from the public GitHub history. Newest first.
 
 ### 2026-11-19 — Optional sound for extensions
 
-`ICanvas.Audio` is null when the host has no board. Otherwise an extension can play tones or its own clips (`Play`, `LoopSample`) without opening a device and without a new constructor. Turbo Kart GP uses that for a crossfaded engine, a skid, and short race cues. The samples and their licenses are in `Extensions/CanvasManagement.Extension.TurboKart/Audio/CREDITS.txt`. verpixeld mixes every extension into one stream and stays quiet while a movie owns the board.
+`ICanvas.Audio` is null when the host has no board. Otherwise an extension can play tones or its own clips (`Play`, `LoopSample`) without opening a device and without a new constructor. Turbo Kart GP uses that for a crossfaded engine that follows speed, a skid, the nearest rival and short race cues; Pac-Man makes all its sounds with `SoundSynth`. The samples and their licenses are in `Extensions/CanvasManagement.Extension.TurboKart/Audio/CREDITS.txt`. verpixeld mixes every extension into one stream and stays quiet while a movie owns the board.
 
 ### 2026-10-17 — Live display resize
 
@@ -50,7 +50,7 @@ Dated from the public GitHub history. Newest first.
 
 Seven new original games, all drawn **one sprite glyph = one LED pixel** (`PixelArt`, integer scale on taller walls): **Tetris** (7-bag, hold, next×3, ghost piece), **Pixel Plumber** (side-scroller, stomp, coins and power-ups), **Street Crosser**, **Rainbow Breakout**, **Bubble Pop**, **Bomber Maze**, **Fruit Fall**. Pac-Man, Snake, Pong, Space Invaders, Dino Runner and Flappy Bird use the same art path and BDF HUDs.
 
-Games **auto-play** until the first key in [verpixeld](https://github.com/Jan1503/verpixeld) Studio. The wall has no keyboard — Studio maps `KeyboardShortcut` on methods in category **Controls**. Dino Runner has an optional **Modern Look**. Pac-Man ghosts pathfind with BFS instead of greedy Euclidean on generated mazes.
+Every game has sound effects and its own background tune (made in code, switchable per game). Games **auto-play** until the first key in [verpixeld](https://github.com/Jan1503/verpixeld) Studio. The wall has no keyboard — Studio maps `KeyboardShortcut` on methods in category **Controls**. Dino Runner has an optional **Modern Look**. Pac-Man runs on generated symmetric mazes with a tunnel and a ghost pen; the ghosts have arcade personalities and scatter/chase waves, and the demo player plans each turn by playing the next seconds forward. It has synthesized sound and gamepad controls.
 
 Shared helpers in `CanvasManagement.Interfaces`: `PixelArt` (blit / disc / ring / HSV) and `CanvasText` (BDF or Skia labels). `ICanvas.GetBestBdfFontForHeight` picks the largest registered BDF that still fits.
 
