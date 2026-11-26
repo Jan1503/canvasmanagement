@@ -51,7 +51,10 @@ public class FilterSafetyTests
             new MatrixTransformFilter(),
             new MatrixCodeRainFilter(),
             new NeoCodeVisionFilter(),
-            new WeatherOverlayFilter()
+            new WeatherOverlayFilter(),
+            new RetroCrtFilter(),
+            new GlitchFilter(),
+            new KaleidoscopeFilter()
         ];
 
         foreach (var filter in filters)

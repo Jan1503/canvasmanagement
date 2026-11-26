@@ -1,0 +1,14 @@
+<svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <!-- Retro palette: a small picture in four green shades with a dither pattern -->
+  <rect width="48" height="48" rx="6" fill="#0F380F"/>
+  <rect x="6" y="6" width="36" height="36" fill="#306230"/>
+  <rect x="10" y="22" width="28" height="16" fill="#8BAC0F"/>
+  <circle cx="32" cy="14" r="5" fill="#9BBC0F"/>
+  <g fill="#9BBC0F">
+    <rect x="10" y="22" width="2" height="2"/><rect x="14" y="22" width="2" height="2"/>
+    <rect x="18" y="22" width="2" height="2"/><rect x="22" y="22" width="2" height="2"/>
+    <rect x="12" y="24" width="2" height="2"/><rect x="16" y="24" width="2" height="2"/>
+    <rect x="20" y="24" width="2" height="2"/>
+  </g>
+  <path d="M10 38 L18 28 L24 34 L30 26 L38 38 Z" fill="#0F380F"/>
+</svg>
