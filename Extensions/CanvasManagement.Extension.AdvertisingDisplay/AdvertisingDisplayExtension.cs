@@ -284,12 +284,15 @@ public class AdvertisingDisplayExtension : FrameExtension
     [ExtensionParameter("Preset",
         "One-click theme - Classic: None/CoffeeShop/Party/News/Retro/Minimal " +
         "Hollywood: Matrix/Cyberpunk/SciFi/Action/Horror - sets a nice combination of the options below",
-        DefaultValue = "None")]
+        DefaultValue = "None", AppliesFirst = true)]
     public SignagePreset Preset
     {
         get => _preset;
         set
         {
+            // Only a change applies a theme. Restoring a configuration sets every parameter again; re-applying
+            // the same preset (or None) here used to reset all the user's own settings to the theme's values.
+            if (_preset == value) return;
             _preset = value;
             // Selecting None must actually RESET the preset-influenced fields back to their
             // safe defaults; previously it did nothing so users couldn't back out of a preset.

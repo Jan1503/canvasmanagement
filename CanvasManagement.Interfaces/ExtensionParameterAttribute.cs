@@ -46,4 +46,11 @@ public class ExtensionParameterAttribute(string displayName, string description)
     ///     nested config object. Ties fall back to declaration order.
     /// </summary>
     public int Order { get; set; }
+
+    /// <summary>
+    ///     The parameter sets other parameters when it changes (a preset or theme). A host restoring a saved
+    ///     configuration applies such parameters first, so the user's own values set afterwards win instead
+    ///     of being overwritten by the preset.
+    /// </summary>
+    public bool AppliesFirst { get; set; }
 }
