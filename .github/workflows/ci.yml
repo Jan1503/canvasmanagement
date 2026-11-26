@@ -1,0 +1,33 @@
+# Build the whole solution warning-free (Release treats warnings as errors, see Directory.Build.props),
+# run the library tests, then the smoke and autopilot tests of every extension.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    # Windows: the solution has a WinForms demo, and the tests use SkiaSharp's Win32 native assets.
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore CanvasManagement.sln
+
+      - name: Build (Release, warnings are errors)
+        run: dotnet build CanvasManagement.sln -c Release --no-restore
+
+      - name: Library tests
+        run: dotnet test CanvasManagement.Tests -c Release --no-build
+
+      # Every extension at two sizes (start, frames, clean stop, no errors) and every game on autopilot.
+      - name: Extension smoke and autopilot tests
+        run: dotnet test CanvasManagement.Extensions.Tests -c Release --no-build

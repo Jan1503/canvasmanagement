@@ -35,6 +35,9 @@ public class ExtensionSmokeTests
 
     private static readonly Lazy<IReadOnlyList<Type>> Types = new(DiscoverTypes);
 
+    /// <summary>Every extension type (shared with the other extension tests).</summary>
+    internal static IReadOnlyList<Type> AllTypes() => Types.Value;
+
     public static IEnumerable<object[]> Cases() =>
         Types.Value.SelectMany(t => new[] { new object[] { t.FullName!, 256, 128 }, new object[] { t.FullName!, 384, 192 } });
 
