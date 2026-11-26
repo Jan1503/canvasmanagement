@@ -54,7 +54,8 @@ public class FilterSafetyTests
             new WeatherOverlayFilter(),
             new RetroCrtFilter(),
             new GlitchFilter(),
-            new KaleidoscopeFilter()
+            new KaleidoscopeFilter(),
+            new DigitalRainVisionFilter()
         ];
 
         foreach (var filter in filters)

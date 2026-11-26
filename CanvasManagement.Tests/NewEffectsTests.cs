@@ -12,7 +12,7 @@ public class NewEffectsTests(ITestOutputHelper output)
     public static TheoryData<string, int, int, SKColorType> Cases()
     {
         var data = new TheoryData<string, int, int, SKColorType>();
-        foreach (var name in new[] { "Bloom", "RetroCrt", "Glitch", "RetroPalette", "Kaleidoscope", "Afterglow" })
+        foreach (var name in new[] { "Bloom", "RetroCrt", "Glitch", "RetroPalette", "Kaleidoscope", "Afterglow", "DigitalRain" })
         foreach (var type in new[] { SKColorType.Bgra8888, SKColorType.Rgba8888 })
         {
             data.Add(name, 64, 32, type);
@@ -29,6 +29,7 @@ public class NewEffectsTests(ITestOutputHelper output)
         "RetroPalette" => new RetroPaletteFilter { Intensity = 1f },
         "Kaleidoscope" => new KaleidoscopeFilter { Intensity = 1f },
         "Afterglow" => new AfterglowFilter { Intensity = 1f },
+        "DigitalRain" => new DigitalRainVisionFilter { Intensity = 1f },
         _ => throw new ArgumentException(name)
     };
 
@@ -68,6 +69,7 @@ public class NewEffectsTests(ITestOutputHelper output)
     [InlineData("RetroPalette")]
     [InlineData("Kaleidoscope")]
     [InlineData("Afterglow")]
+    [InlineData("DigitalRain")]
     public void Off_or_zero_intensity_changes_nothing(string name)
     {
         using var bitmap = Picture(48, 24, SKColorType.Bgra8888);
@@ -152,6 +154,33 @@ public class NewEffectsTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void Digital_rain_turns_the_picture_green_and_keeps_its_light()
+    {
+        using var bitmap = new SKBitmap(new SKImageInfo(64, 32, SKColorType.Bgra8888, SKAlphaType.Premul));
+        using (var c = new SKCanvas(bitmap))
+        {
+            c.Clear(new SKColor(10, 10, 10));
+            using var light = new SKPaint { Color = SKColors.White };
+            c.DrawRect(32, 0, 32, 32, light); // right half bright
+        }
+
+        new DigitalRainVisionFilter { Intensity = 1f, Sparkles = 0, Glow = 0 }.Apply(bitmap);
+
+        double Green(int x0) => Enumerable.Range(0, 32 * 32).Select(i => (double)bitmap.GetPixel(x0 + i % 32, i / 32).Green).Average();
+        double Red(int x0) => Enumerable.Range(0, 32 * 32).Select(i => (double)bitmap.GetPixel(x0 + i % 32, i / 32).Red).Average();
+        Assert.True(Green(32) > Green(0) * 2, "the bright half should give much brighter code");
+        Assert.True(Green(32) > Red(32), "code is green");
+    }
+
+    [Fact]
+    public void Digital_rain_glyphs_are_neither_empty_nor_blocks()
+    {
+        var glyphs = DigitalRainVisionFilter.MakeGlyphs(3, 5, new Random(1));
+        Assert.All(glyphs, g => Assert.InRange(System.Numerics.BitOperations.PopCount(g), 6, 10));
+        Assert.True(glyphs.Distinct().Count() > 20, "the set should be varied");
+    }
+
+    [Fact]
     public void Afterglow_keeps_a_fading_trail_of_what_was_there()
     {
         using var bitmap = new SKBitmap(new SKImageInfo(8, 8, SKColorType.Bgra8888, SKAlphaType.Premul));
@@ -169,7 +198,7 @@ public class NewEffectsTests(ITestOutputHelper output)
     [Fact]
     public void Each_effect_is_cheap_enough_for_a_384x192_wall()
     {
-        foreach (var name in new[] { "Bloom", "RetroCrt", "Glitch", "RetroPalette", "Kaleidoscope", "Afterglow" })
+        foreach (var name in new[] { "Bloom", "RetroCrt", "Glitch", "RetroPalette", "Kaleidoscope", "Afterglow", "DigitalRain" })
         {
             using var bitmap = Picture(384, 192, SKColorType.Bgra8888);
             var filter = Create(name);

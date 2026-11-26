@@ -17,4 +17,8 @@
     <EmbeddedResource Include="Icons\*.svg" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="CanvasManagement.Tests" />
+  </ItemGroup>
+
 </Project>
