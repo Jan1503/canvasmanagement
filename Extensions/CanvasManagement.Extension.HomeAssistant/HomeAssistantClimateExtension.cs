@@ -129,10 +129,9 @@ public class HomeAssistantClimateExtension : FrameExtension
         }
 
         var align = HaText.ToSk(Align);
-        var fmt = "F" + Math.Clamp(Decimals, 0, 2);
         var main = !HomeAssistantBridge.Connected ? "HA offline"
             : double.IsNaN(current) ? "n/a"
-            : current.ToString(fmt, CultureInfo.InvariantCulture) + "°";
+            : DisplayNumber.Round(current, Decimals) + "°";
         var title = !string.IsNullOrWhiteSpace(Label)
             ? Label
             : found && !string.IsNullOrWhiteSpace(entity.FriendlyName) ? entity.FriendlyName! : "";
@@ -143,7 +142,7 @@ public class HomeAssistantClimateExtension : FrameExtension
         HaText.Draw(c, Canvas, main, ValueColor, 0, h * 0.28f, w, h * 0.28f, tempH, align, UseBdfFont);
         var sub = double.IsNaN(target)
             ? action
-            : $"soll {target.ToString(fmt, CultureInfo.InvariantCulture)}° · {action}";
+            : $"soll {DisplayNumber.Round(target, Decimals)}° · {action}";
         HaText.Draw(c, Canvas, sub, LabelColor, 0, h * 0.72f, w, h * 0.2f, h * 0.12f, align, UseBdfFont);
 
         c.Flush();

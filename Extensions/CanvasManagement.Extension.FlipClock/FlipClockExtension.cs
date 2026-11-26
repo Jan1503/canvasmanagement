@@ -87,19 +87,22 @@ public class FlipClockExtension : FrameExtension
         // Clear with background color
         canvas.Clear(BackgroundColor);
 
-        // Calculate card dimensions
-        var maxCardWidth = ShowSeconds ? Canvas.Width / 8 : Canvas.Width / 6;
-        var maxCardHeight = (int)(Canvas.Height * 0.6f);
-
-        var cardWidth = Math.Min(maxCardWidth, maxCardHeight / 2);
-        var cardHeight = (int)(cardWidth * 1.6f);
-        var spacing = Math.Max(cardWidth / 8, 10);
-
-        // Calculate total width
-        var separatorWidth = ShowSeparators ? spacing * 2 : 0;
+        // Card size: as big as the height allows, then shrunk until the whole row fits the width with a
+        // small margin (a fixed minimum spacing used to push the outer digits off a 256-wide panel).
         var numDigits = ShowSeconds ? 6 : 4;
         var numSeparators = ShowSeconds ? 2 : 1;
-        var totalWidth = numDigits * cardWidth + (numDigits - 1) * spacing + numSeparators * separatorWidth;
+        var cardWidth = (int)(Canvas.Height * 0.6f) / 2;
+        int spacing, separatorWidth, totalWidth;
+        while (true)
+        {
+            spacing = Math.Max(2, cardWidth / 6);
+            separatorWidth = ShowSeparators ? spacing * 2 : 0;
+            totalWidth = numDigits * cardWidth + (numDigits - 1) * spacing + numSeparators * separatorWidth;
+            if (totalWidth <= Canvas.Width - 4 || cardWidth <= 4) break;
+            cardWidth--;
+        }
+
+        var cardHeight = (int)(cardWidth * 1.6f);
 
         var startX = (Canvas.Width - totalWidth) / 2;
         var startY = (Canvas.Height - cardHeight) / 2;
@@ -224,7 +227,11 @@ public class FlipClockExtension : FrameExtension
         var color = new SKColor(TextColor.Red, TextColor.Green, TextColor.Blue, alpha);
         var size = CanvasText.ResolveSize(FontSize, height * 0.62f);
         var text = digit.ToString();
-        CanvasText.Draw(canvas, Canvas, text, color, x + width / 2f, y + height * 0.72f, size,
+        // The hinge runs through the middle of the digit. Skia: baseline below the centre by half the cap
+        // height. BDF: the bitmap's bottom sits on the baseline and includes room for descenders, so the
+        // baseline goes lower to centre the visible digit.
+        var baseline = UseBdfFont ? y + height / 2f + size * 0.55f : y + height * 0.72f;
+        CanvasText.Draw(canvas, Canvas, text, color, x + width / 2f, baseline, size,
             SKTextAlign.Center, UseBdfFont);
         canvas.Restore();
     }
@@ -238,7 +245,7 @@ public class FlipClockExtension : FrameExtension
             IsAntialias = false
         };
 
-        var dotSize = 6;
+        var dotSize = Math.Max(1, height / 14); // in proportion to the cards (6 px on a 384x192 wall)
         var centerY = y + height / 2;
 
         canvas.DrawCircle(x, centerY - height / 4, dotSize, paint);

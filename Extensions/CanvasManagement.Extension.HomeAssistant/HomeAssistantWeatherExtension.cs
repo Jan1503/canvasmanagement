@@ -102,7 +102,7 @@ public class HomeAssistantWeatherExtension : FrameExtension
         var tempText = !HomeAssistantBridge.Connected ? "HA offline"
             : !found ? "n/a"
             : double.IsNaN(temp) ? cond
-            : Fahrenheit ? $"{temp * 9 / 5 + 32:0}°F" : $"{temp:0}°C";
+            : Fahrenheit ? $"{DisplayNumber.Round(temp * 9 / 5 + 32)}°F" : $"{DisplayNumber.Round(temp)}°C";
 
         var condition = !string.IsNullOrWhiteSpace(Label)
             ? Label

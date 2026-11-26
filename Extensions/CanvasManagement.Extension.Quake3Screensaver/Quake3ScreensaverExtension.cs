@@ -408,11 +408,23 @@ public class Quake3ScreensaverExtension : FrameExtension
         var textHeight = (textBounds?.Height ?? 30) * effectiveTextScale;
         var spacing = Canvas.Height * 0.05f; // 5% spacing between symbol and text
 
-        // Total content height
-        var totalHeight = symbolHeight + spacing + textHeight;
+        // The quote line gets its own row under the logo; shrink the logo if all three do not fit.
+        var quoteSize = CanvasText.ResolveSize(FontSize, Math.Max(5f, Canvas.ScaleSizeF(10)));
+        var quoteRow = ShowText ? quoteSize + spacing : 0f;
+        var available = Canvas.Height * 0.94f - quoteRow;
+        var logoHeight = symbolHeight + spacing + textHeight;
+        if (logoHeight > available && logoHeight > 0)
+        {
+            var k = available / logoHeight;
+            effectiveSymbolScale *= k;
+            effectiveTextScale *= k;
+            symbolHeight *= k;
+            textHeight *= k;
+        }
 
-        // Center the combined content vertically (slightly above center for aesthetic)
-        var contentStartY = (Canvas.Height - totalHeight) / 2 - Canvas.Height * 0.05f;
+        // Center logo and quote together
+        var totalHeight = symbolHeight + spacing + textHeight + quoteRow;
+        var contentStartY = (Canvas.Height - totalHeight) / 2;
 
         // Draw 3D rotating logo symbol
         var symbolY = (int)(contentStartY + symbolHeight / 2);
@@ -422,10 +434,10 @@ public class Quake3ScreensaverExtension : FrameExtension
         var textY = (int)(contentStartY + symbolHeight + spacing + textHeight / 2);
         _logoRenderer?.RenderText(canvas, Canvas.Width / 2, textY, effectiveTextScale);
 
-        // Draw scrolling quotes at the bottom
+        // The quote, on its own row below "ARENA"
         if (ShowText)
         {
-            DrawText(canvas);
+            DrawText(canvas, contentStartY + symbolHeight + spacing + textHeight + spacing + quoteSize, quoteSize);
         }
 
         // Draw scanline effect (subtle)
@@ -437,13 +449,12 @@ public class Quake3ScreensaverExtension : FrameExtension
         canvas.Clear(SKColors.Black);
     }
 
-    private void DrawText(SKCanvas canvas)
+    private void DrawText(SKCanvas canvas, float baseline, float size)
     {
         var text = string.IsNullOrEmpty(CustomText) ? _quotes[_currentQuoteIndex] : CustomText;
         if (string.IsNullOrEmpty(text)) return;
 
-        // Calculate text position (bottom third of screen)
-        var textY = (int)(Canvas.Height * 0.75f);
+        var textY = (int)baseline;
 
         // Get current color based on scheme
         var textColor = _logoRenderer?.PrimaryColor ?? new SKColor(255, 0, 0);
@@ -452,7 +463,6 @@ public class Quake3ScreensaverExtension : FrameExtension
 
         try
         {
-            var size = CanvasText.ResolveSize(FontSize, Math.Max(5f, Canvas.ScaleSizeF(10)));
             var textWidth = CanvasText.Measure(Canvas, text, size, UseBdfFont);
             var textX = (Canvas.Width - textWidth) / 2;
             CanvasText.Draw(canvas, Canvas, text, textColor, textX, textY, size, SKTextAlign.Left, UseBdfFont);

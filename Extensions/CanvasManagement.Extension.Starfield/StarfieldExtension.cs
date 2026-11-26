@@ -11,7 +11,7 @@ public class StarfieldExtension : FrameExtension
 {
     private readonly Random _random = new();
     private readonly List<Star> _stars = new();
-    private readonly SKPaint _starPaint = new() { Style = SKPaintStyle.Fill };
+    private readonly SKPaint _starPaint = new() { Style = SKPaintStyle.Fill, IsAntialias = false };
 
     internal StarfieldExtension(ICanvas canvas) : base(canvas)
     {
@@ -51,74 +51,75 @@ public class StarfieldExtension : FrameExtension
         try { Canvas.Clear(); } catch { /* canvas already gone */ }
     }
 
+    /// <summary>
+    ///     Flight through a field of stars: each star has a place in space (x, y in -1..1, depth z in 0..1)
+    ///     and comes towards the viewer; its screen position is the perspective projection, so stars
+    ///     spread from the centre and speed up as they come close. Near stars are bigger and brighter
+    ///     and draw a short streak from where they were.
+    /// </summary>
     protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        var centerX = width / 2f;
-        var centerY = height / 2f;
+        var cx = width / 2f;
+        var cy = height / 2f;
+        var focal = Math.Max(width, height) * 0.5f;
 
-        // Apply Star Count changes live.
+        // Apply Star Count changes live; the first stars are spread over all depths.
         while (_stars.Count < StarCount)
-            _stars.Add(new Star
-            {
-                X = _random.Next(Canvas.Width),
-                Y = _random.Next(Canvas.Height),
-                Z = _random.Next(1, 20),
-                Speed = SpeedRange(),
-                Hue = ColoredStars ? _random.Next(360) : 0
-            });
+            _stars.Add(NewStar((float)_random.NextDouble()));
         if (_stars.Count > StarCount)
             _stars.RemoveRange(StarCount, _stars.Count - StarCount);
 
-        // Clear with background color
         canvas.Clear(BackgroundColor);
+        var alpha = (byte)(Canvas.Opacity * 255);
 
         foreach (var star in _stars)
         {
-            // Update star position (moving outward from center)
-            var dx = star.X - centerX;
-            var dy = star.Y - centerY;
-
-            star.X += dx / star.Z * star.Speed;
-            star.Y += dy / star.Z * star.Speed;
-            star.Z -= 0.1f;
-
-            // Reset star when it goes off screen or too close
-            if (star.X < 0 || star.X > Canvas.Width ||
-                star.Y < 0 || star.Y > Canvas.Height ||
-                star.Z < 1)
+            var (px, py) = Project(star, cx, cy, focal);
+            star.Z -= star.Speed * 0.12f * dt;
+            var (sx, sy) = Project(star, cx, cy, focal);
+            if (star.Z <= 0.02f || sx < -2 || sx > width + 2 || sy < -2 || sy > height + 2)
             {
-                star.X = centerX + _random.Next(-10, 10);
-                star.Y = centerY + _random.Next(-10, 10);
-                star.Z = 20;
-                star.Speed = SpeedRange();
-                if (ColoredStars)
-                    star.Hue = _random.Next(360);
+                var fresh = NewStar(1f);
+                star.X = fresh.X;
+                star.Y = fresh.Y;
+                star.Z = fresh.Z;
+                star.Speed = fresh.Speed;
+                star.Hue = fresh.Hue;
+                continue;
             }
 
-            // Draw star (size based on depth)
-            var size = (int)(5 - star.Z / 4);
-            if (size < 1) size = 1;
+            // Nearness 0 (far) .. 1 (at the viewer): size, brightness and streak follow it.
+            var near = 1f - star.Z;
+            var brightness = (byte)Math.Clamp(40 + 215 * near * near, 0, 255);
+            var color = ColoredStars
+                ? SKColor.FromHsl(star.Hue, 100, 20 + 40 * near)
+                : new SKColor(brightness, brightness, (byte)Math.Min(255, brightness + 20));
+            color = color.WithAlpha(alpha);
 
-            SKColor color;
-            if (ColoredStars)
+            if (near > 0.45f)
             {
-                var brightness = (byte)Math.Max(0, Math.Min(255, 255 - star.Z * 10));
-                color = SKColor.FromHsl(star.Hue, 100, brightness / 255f * 50);
-            }
-            else
-            {
-                var brightness = (byte)Math.Max(0, Math.Min(255, 255 - star.Z * 10));
-                color = new SKColor(brightness, brightness, brightness);
+                _starPaint.Color = color.WithAlpha((byte)(alpha * 0.45f));
+                _starPaint.StrokeWidth = 1;
+                canvas.DrawLine(px, py, sx, sy, _starPaint);
             }
 
-            // Apply canvas opacity to star color
-            color = new SKColor(color.Red, color.Green, color.Blue,
-                (byte)(Canvas.Opacity * 255));
-
+            var size = near > 0.85f ? 2 : 1;
             _starPaint.Color = color;
-            canvas.DrawRect((int)star.X, (int)star.Y, size, size, _starPaint);
+            canvas.DrawRect((int)sx, (int)sy, size, size, _starPaint);
         }
     }
+
+    private static (float X, float Y) Project(Star s, float cx, float cy, float focal) =>
+        (cx + s.X / s.Z * focal * 0.5f, cy + s.Y / s.Z * focal * 0.5f);
+
+    private Star NewStar(float z) => new()
+    {
+        X = (float)(_random.NextDouble() * 2 - 1),
+        Y = (float)(_random.NextDouble() * 2 - 1),
+        Z = Math.Max(0.05f, z),
+        Speed = SpeedRange(),
+        Hue = ColoredStars ? _random.Next(360) : 0
+    };
 
     protected override void Dispose(bool disposing)
     {

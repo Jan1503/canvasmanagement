@@ -188,7 +188,7 @@ public class WeatherExtension : FrameExtension
         DrawIcon(canvas, data.Code, data.IsDay, iconCx, iconCy, iconSize);
 
         // Temperature, auto-sized to the space right of the icon so it never overflows the panel.
-        var tempStr = $"{Math.Round(data.Temp)}{unit}";
+        var tempStr = $"{DisplayNumber.Round(data.Temp)}{unit}";
         var tempLeft = iconCx + iconSize * 0.5f + pad;
         var availW = Math.Max(8f, w - tempLeft - pad);
         var tempH = mainH * 0.62f;
@@ -218,7 +218,7 @@ public class WeatherExtension : FrameExtension
                 var label = i == 0 ? "Now" : day.Date.ToString("ddd", CultureInfo.InvariantCulture);
                 DrawTextDual(canvas, label, cx, topH + fH * 1.15f, fH, SKColors.White, SKTextAlign.Center, colW - 2);
                 DrawIcon(canvas, day.Code, true, cx, topH + forecastH * 0.52f, forecastH * 0.3f);
-                DrawTextDual(canvas, $"{Math.Round(day.Max)}°/{Math.Round(day.Min)}°", cx,
+                DrawTextDual(canvas, $"{DisplayNumber.Round(day.Max)}°/{DisplayNumber.Round(day.Min)}°", cx,
                     topH + forecastH - fH * 0.35f, fH, new SKColor(160, 185, 220), SKTextAlign.Center, colW - 2);
             }
         }
