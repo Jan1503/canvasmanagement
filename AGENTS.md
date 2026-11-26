@@ -18,7 +18,8 @@ Filters/
 - Draw with SkiaSharp. Pixel text is BDF (`CanvasText`). `IsAntialias = false` on a 1:1 LED grid.
 - Read the size every frame (`Render` gets it). Do not cache 256×128.
 - Sprites, discs and glows: `PixelArt.Blit/Disc/Ring`, `GameFx.GlowDisc` (cached images). Never one `DrawRect` per pixel in a frame; no `new SKPaint` per frame in hot paths.
-- Filters run **inside** the compositor lock — a slow filter drops the whole wall.
+- Filters run **inside** the compositor lock — a slow filter drops the whole wall. They also run per canvas (`Canvas.SetFilters`, “Effects” in the Studio), so they get bitmaps of different sizes and BGRA or RGBA (`ChannelLayout`).
+- A parameter whose setter sets other parameters (a preset or theme) is marked `AppliesFirst = true` and only acts when its value changes: hosts re-apply whole saved configurations.
 
 Full recipe: [docs/EXTENSIONS.md](docs/EXTENSIONS.md), [docs/FILTERS.md](docs/FILTERS.md).
 
