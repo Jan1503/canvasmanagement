@@ -764,9 +764,7 @@ public partial class ExtensionControlPanel : Form
                 if (ext.IsRunning) ext.Stop();
                 ext.Dispose();
             }
-            catch
-            {
-            }
+            catch { /* best effort, nothing to recover */ }
 
             _extensionsByCanvas.Remove(canvas);
         }
@@ -783,9 +781,7 @@ public partial class ExtensionControlPanel : Form
                 if (kvp.Value.IsRunning) kvp.Value.Stop();
                 kvp.Value.Dispose();
             }
-            catch
-            {
-            }
+            catch { /* best effort, nothing to recover */ }
 
         _extensionsByCanvas.Clear();
     }

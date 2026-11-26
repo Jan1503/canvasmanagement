@@ -2,6 +2,13 @@ using SkiaSharp;
 
 namespace CanvasManagement.Interfaces;
 
+/// <summary>
+///     What an extension sees of its canvas: size, visibility and layering, audio, frame statistics, and
+///     <see cref="SubmitCompletedFrame"/> to hand over a finished frame. Extensions draw into their own buffer
+///     with SkiaSharp (see <see cref="FrameExtension"/>); the immediate-mode drawing helpers of the concrete
+///     canvas are not part of this contract. <see cref="DrawBitmap(SKBitmap,int,int,float,float,bool)"/> and
+///     the BDF members remain for the BDF text helpers.
+/// </summary>
 public interface ICanvas
 {
     int Width { get; }
@@ -41,238 +48,22 @@ public interface ICanvas
     /// </summary>
     IExtensionAudio? Audio { get; }
 
-    // ===== BASIC DRAWING OPERATIONS =====
+    /// <summary>
+    ///     Frame timing of this canvas (fps, render time). Pass it to <see cref="ExtensionLoop"/> so render
+    ///     times are measured. Null when the host does not track it.
+    /// </summary>
+    FrameStats? Stats => null;
 
-    void MakeTransparent();
     void Show();
     void Hide();
     void Clear();
     void Clear(SKColor color);
-
-    /// <summary>Erases a rectangular region to fully transparent (alpha 0), revealing layers beneath.</summary>
-    void ClearRect(int x, int y, int width, int height);
-
-    // ===== PIXEL OPERATIONS =====
-
-    void SetPixel(int x, int y, SKColor color);
-    SKColor GetPixel(int x, int y);
-    IntPtr GetPixels();
-
-    // ===== BITMAP OPERATIONS =====
 
     void DrawBitmap(SKBitmap bitmap, int xPos, int yPos, int width, int height, float rotateDegrees = 0,
         float scale = 0);
 
     SKCanvas DrawBitmap(SKBitmap bitmap, int xPos, int yPos, float rotateDegrees = 0, float scale = 0,
         bool fitToCanvas = false);
-
-    /// <summary>
-    ///     Draws a bitmap with alpha blending (transparency support)
-    /// </summary>
-    void DrawBitmapWithAlpha(SKBitmap bitmap, int xPos, int yPos, byte alpha = 255);
-
-    /// <summary>
-    ///     Draws a portion of a bitmap (sprite sheet support)
-    /// </summary>
-    void DrawBitmapRegion(SKBitmap bitmap, SKRectI sourceRect, SKRect destRect);
-
-    /// <summary>
-    ///     Draws a bitmap with tint color
-    /// </summary>
-    void DrawBitmapTinted(SKBitmap bitmap, int xPos, int yPos, SKColor tintColor);
-
-    // ===== SHAPE DRAWING =====
-
-    void DrawCircle(float xPos, float yPos, float radius, SKColor color);
-
-    /// <summary>
-    ///     Draws a filled circle
-    /// </summary>
-    void DrawFilledCircle(float xPos, float yPos, float radius, SKColor color);
-
-    /// <summary>
-    ///     Draws an ellipse
-    /// </summary>
-    void DrawEllipse(float xPos, float yPos, float radiusX, float radiusY, SKColor color,
-        SKPaintStyle style = SKPaintStyle.Stroke);
-
-    void DrawRect(int xPos, int yPos, int width, int height, SKColor color, SKPaintStyle style);
-
-    /// <summary>
-    ///     Draws a rounded rectangle
-    /// </summary>
-    void DrawRoundRect(int xPos, int yPos, int width, int height, float cornerRadius, SKColor color,
-        SKPaintStyle style = SKPaintStyle.Stroke);
-
-    /// <summary>
-    ///     Draws a polygon
-    /// </summary>
-    void DrawPolygon(SKPoint[] points, SKColor color, SKPaintStyle style = SKPaintStyle.Stroke);
-
-    /// <summary>
-    ///     Draws a triangle
-    /// </summary>
-    void DrawTriangle(SKPoint p1, SKPoint p2, SKPoint p3, SKColor color, SKPaintStyle style = SKPaintStyle.Stroke);
-
-    void DrawLine(int x1Pos, int y1Pos, int x2Pos, int y2Pos, SKColor color);
-
-    /// <summary>
-    ///     Draws a line with specified thickness
-    /// </summary>
-    void DrawLine(int x1Pos, int y1Pos, int x2Pos, int y2Pos, SKColor color, float strokeWidth);
-
-    /// <summary>
-    ///     Draws multiple connected lines (polyline)
-    /// </summary>
-    void DrawPolyline(SKPoint[] points, SKColor color, float strokeWidth = 1);
-
-    /// <summary>
-    ///     Draws an arc
-    /// </summary>
-    void DrawArc(float xPos, float yPos, float radius, float startAngle, float sweepAngle, SKColor color,
-        float strokeWidth = 1);
-
-    // ===== TEXT OPERATIONS =====
-
-    void DrawText(string text, int xPos, int yPos, int width, int height, SKPaint paintStyle, bool centered = false);
-
-    /// <summary>
-    ///     Draws text with custom font and size
-    /// </summary>
-    void DrawText(string text, int xPos, int yPos, SKColor color, float fontSize = 12, string fontFamily = "Arial");
-
-    /// <summary>
-    ///     Draws text with alignment options
-    /// </summary>
-    void DrawTextAligned(string text, int xPos, int yPos, int width, int height, SKColor color,
-        float fontSize = 12, SKTextAlign alignment = SKTextAlign.Left, string fontFamily = "Arial");
-
-    /// <summary>
-    ///     Measures text dimensions
-    /// </summary>
-    SKRect MeasureText(string text, float fontSize, string fontFamily = "Arial");
-
-    // ===== GRADIENT AND EFFECTS =====
-
-    /// <summary>
-    ///     Fills a rectangle with a linear gradient
-    /// </summary>
-    void FillGradient(int xPos, int yPos, int width, int height, SKColor startColor, SKColor endColor,
-        bool horizontal = true);
-
-    /// <summary>
-    ///     Fills a rectangle with a radial gradient
-    /// </summary>
-    void FillRadialGradient(float centerX, float centerY, float radius, SKColor centerColor, SKColor edgeColor);
-
-    /// <summary>
-    ///     Draws with a drop shadow effect
-    /// </summary>
-    void DrawWithShadow(Action drawAction, float offsetX, float offsetY, float blurRadius, SKColor shadowColor);
-
-    // ===== PATH OPERATIONS =====
-
-    /// <summary>
-    ///     Draws a Bezier curve
-    /// </summary>
-    void DrawBezier(SKPoint start, SKPoint control1, SKPoint control2, SKPoint end, SKColor color,
-        float strokeWidth = 1);
-
-    /// <summary>
-    ///     Draws a custom path
-    /// </summary>
-    void DrawPath(SKPath path, SKColor color, SKPaintStyle style = SKPaintStyle.Stroke, float strokeWidth = 1);
-
-    // ===== TRANSFORMATION OPERATIONS =====
-
-    void Scale(float x, float y);
-    void Rotate(float degrees);
-
-    /// <summary>
-    ///     Translates (moves) the drawing origin
-    /// </summary>
-    void Translate(float dx, float dy);
-
-    /// <summary>
-    ///     Saves the current transformation state
-    /// </summary>
-    int SaveTransform();
-
-    /// <summary>
-    ///     Restores a saved transformation state
-    /// </summary>
-    void RestoreTransform(int saveCount);
-
-    /// <summary>
-    ///     Resets all transformations
-    /// </summary>
-    void ResetTransform();
-
-    // ===== IMAGE MANIPULATION =====
-
-    /// <summary>
-    ///     Applies a color filter to the entire canvas
-    /// </summary>
-    void ApplyColorFilter(SKColorFilter filter);
-
-    /// <summary>
-    ///     Inverts colors on the canvas
-    /// </summary>
-    void InvertColors();
-
-    /// <summary>
-    ///     Converts canvas to grayscale
-    /// </summary>
-    void Grayscale();
-
-    /// <summary>
-    ///     Adjusts brightness (-1.0 to 1.0)
-    /// </summary>
-    void AdjustBrightness(float amount);
-
-    /// <summary>
-    ///     Adjusts contrast (0.0 to 2.0, 1.0 = normal)
-    /// </summary>
-    void AdjustContrast(float amount);
-
-    /// <summary>
-    ///     Applies a blur effect
-    /// </summary>
-    void ApplyBlur(float sigma);
-
-    // ===== SPECIAL DRAWING =====
-
-    void DrawPicture(SKPicture picture, float xPos, float yPos);
-
-    Task DrawAnalogClock(int xPos, int yPos, int radius, SKColor circleColor, SKColor quarterMarkColor,
-        SKColor hourHandColor, SKColor minuteHandColor, SKColor secondHandColor, CancellationToken ct = default);
-
-    /// <summary>
-    ///     Draws a grid pattern
-    /// </summary>
-    void DrawGrid(int cellWidth, int cellHeight, SKColor color, float strokeWidth = 1);
-
-    /// <summary>
-    ///     Fills the entire canvas with a pattern
-    /// </summary>
-    void FillPattern(SKBitmap patternBitmap, SKShaderTileMode tileMode = SKShaderTileMode.Repeat);
-
-    /// <summary>
-    ///     Clips drawing to a rectangular region
-    /// </summary>
-    void ClipRect(int xPos, int yPos, int width, int height);
-
-    /// <summary>
-    ///     Clips drawing to a circular region
-    /// </summary>
-    void ClipCircle(float xPos, float yPos, float radius);
-
-    /// <summary>
-    ///     Removes clipping region
-    /// </summary>
-    void ResetClip();
-
-    // ===== BDF FONT OPERATIONS =====
 
     /// <summary>
     ///     Draws text using a BDF (Bitmap Distribution Format) font

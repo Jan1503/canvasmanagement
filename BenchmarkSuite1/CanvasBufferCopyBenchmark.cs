@@ -7,9 +7,9 @@ namespace BenchmarkSuite1;
 [CPUUsageDiagnoser]
 public class CanvasBufferCopyBenchmark
 {
-    private CanvasManager _canvasManager;
-    private Canvas _sourceCanvas;
-    private SKBitmap _testBitmap;
+    private CanvasManager _canvasManager = null!;
+    private Canvas _sourceCanvas = null!;
+    private SKBitmap _testBitmap = null!;
     [Params(64, 192, 384)]
     public int Width { get; set; }
 

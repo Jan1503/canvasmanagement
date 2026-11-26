@@ -90,7 +90,7 @@ public sealed class TurboKartExtension : ICanvasExtension, IDisposable
             _audio = new KartAudio(_canvas);
             _watch.Restart();
             _lastTime = 0;
-            _loop = new ExtensionLoop(FrameRate, Tick);
+            _loop = new ExtensionLoop(FrameRate, Tick, _canvas.Stats);
             _loop.Start();
         }
     }

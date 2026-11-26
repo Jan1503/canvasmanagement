@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.HomeAssistant;
 
@@ -13,17 +11,12 @@ namespace CanvasManagement.Extension.HomeAssistant;
     "Home Assistant weather entity with an animated sky",
     "Information",
     IconResourceName = "home-assistant.svg")]
-public class HomeAssistantWeatherExtension : ICanvasExtension, IDisposable
+public class HomeAssistantWeatherExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private int _frame;
 
-    internal HomeAssistantWeatherExtension(ICanvas canvas)
+    internal HomeAssistantWeatherExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Entity ID", "weather.* entity", DefaultValue = "weather.home", Order = 1)]
@@ -69,67 +62,20 @@ public class HomeAssistantWeatherExtension : ICanvasExtension, IDisposable
         DefaultValue = "#0A1A2F", Order = 13)]
     public SKColor BackgroundColor { get; set; } = new(10, 26, 47);
 
-    public string Name => "HA Weather";
-    public bool IsRunning { get; private set; }
+    public override string Name => "HA Weather";
+    protected override double FrameIntervalMs => 120;
 
-    public void Dispose()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        Draw(canvas);
+        _frame++;
     }
 
-    public void Start()
+    private void Draw(SKCanvas canvas)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(120) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
+        var c = canvas;
 
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try
-            {
-                Render();
-                _frame++;
-            }
-            catch (Exception ex) { Console.WriteLine($"[HA Weather] {ex.Message}"); }
-        }
-    }
-
-    private void Render()
-    {
-        var bb = _backBuffer;
-        if (bb == null) return;
-        using var c = new SKCanvas(bb);
-
-        float w = _canvas.Width, h = _canvas.Height;
+        float w = Canvas.Width, h = Canvas.Height;
         var cond = "";
         var temp = double.NaN;
         var humidity = double.NaN;
@@ -164,17 +110,16 @@ public class HomeAssistantWeatherExtension : ICanvasExtension, IDisposable
         var align = HaText.ToSk(Align);
         var tempH = ValueSize > 0 ? ValueSize : h * 0.32f;
 
-        HaText.Draw(c, _canvas, tempText, ValueColor,
+        HaText.Draw(c, Canvas, tempText, ValueColor,
             textX, h * 0.12f, textW, h * 0.42f, tempH, align, UseBdfFont);
         if (ShowLabel && !string.IsNullOrWhiteSpace(condition))
-            HaText.Draw(c, _canvas, condition, LabelColor,
+            HaText.Draw(c, Canvas, condition, LabelColor,
                 textX, h * 0.52f, textW, h * 0.22f, h * 0.16f, align, UseBdfFont);
         if (ShowHumidity && !double.IsNaN(humidity))
-            HaText.Draw(c, _canvas, $"{humidity:0}%", LabelColor,
+            HaText.Draw(c, Canvas, $"{humidity:0}%", LabelColor,
                 textX, h * 0.72f, textW, h * 0.2f, h * 0.14f, align, UseBdfFont);
 
         c.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private void DrawSky(SKCanvas c, float w, float h, string cond)

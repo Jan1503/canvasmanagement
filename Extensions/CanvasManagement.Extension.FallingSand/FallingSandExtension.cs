@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.FallingSand;
 
@@ -14,22 +12,18 @@ namespace CanvasManagement.Extension.FallingSand;
     "Mesmerising cellular sand & water physics simulation",
     "Visual Effects",
     IconResourceName = "falling-sand.svg")]
-public class FallingSandExtension : ICanvasExtension, IDisposable
+public class FallingSandExtension : FrameExtension
 {
     private const byte Empty = 0;
     private const byte Sand = 1;
     private const byte Water = 2;
     private const byte Stone = 3;
 
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _random = new();
 
-    private SKBitmap? _backBuffer;
     private int _cell = 3;
     private int[] _emitters = Array.Empty<int>();
     private int _frame;
-    private Timer? _timer;
     private int _gw;
     private int _gh;
     private byte[,] _mat = new byte[1, 1];
@@ -41,9 +35,8 @@ public class FallingSandExtension : ICanvasExtension, IDisposable
     private bool _draining;
     private int _lastObstacles = -1;
 
-    internal FallingSandExtension(ICanvas canvas)
+    internal FallingSandExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     public enum SandMaterial
@@ -84,81 +77,32 @@ public class FallingSandExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Background Color", "Background colour", DefaultValue = "#000000", Order = 8)]
     public SKColor BackgroundColor { get; set; } = SKColors.Black;
 
-    public string Name => "Falling Sand";
-    public bool IsRunning { get; private set; }
+    public override string Name => "Falling Sand";
+    protected override double FrameIntervalMs => FrameDelay;
 
-    public void Dispose()
+    protected override void OnStart()
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        RebuildGrid();
+
+        Console.WriteLine($"[FallingSand] Started {_gw}x{_gh} (cell {_cell})");
     }
 
-    public void Start()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-
+        if (Math.Clamp(CellSize, 1, 4) != _cell)
             RebuildGrid();
 
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-
-            _timer = new Timer(FrameDelay) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-            Console.WriteLine($"[FallingSand] Started {_gw}x{_gh} (cell {_cell})");
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
+        BuildEmitters(); // cheap; honours live EmitterCount changes
+        if (Obstacles != _lastObstacles)
         {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
+            ReplaceObstacles();
+            _lastObstacles = Obstacles;
         }
-    }
 
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
+        for (var s = 0; s < SimSpeed; s++) Step();
 
-            try
-            {
-                if (_timer != null && Math.Abs(_timer.Interval - FrameDelay) > 0.5) _timer.Interval = FrameDelay;
-
-                if (Math.Clamp(CellSize, 1, 4) != _cell)
-                    RebuildGrid();
-
-                BuildEmitters(); // cheap; honours live EmitterCount changes
-                if (Obstacles != _lastObstacles)
-                {
-                    ReplaceObstacles();
-                    _lastObstacles = Obstacles;
-                }
-
-                for (var s = 0; s < SimSpeed; s++) Step();
-
-                Render();
-                _frame++;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[FallingSand] {ex.Message}");
-            }
-        }
+        Draw(canvas);
+        _frame++;
     }
 
     /// <summary>
@@ -168,10 +112,10 @@ public class FallingSandExtension : ICanvasExtension, IDisposable
     private void RebuildGrid()
     {
         _cell = Math.Clamp(CellSize, 1, 4);
-        _gw = Math.Max(8, _canvas.Width / _cell);
-        _gh = Math.Max(8, _canvas.Height / _cell);
-        _offsetX = (_canvas.Width - _gw * _cell) / 2;
-        _offsetY = (_canvas.Height - _gh * _cell) / 2;
+        _gw = Math.Max(8, Canvas.Width / _cell);
+        _gh = Math.Max(8, Canvas.Height / _cell);
+        _offsetX = (Canvas.Width - _gw * _cell) / 2;
+        _offsetY = (Canvas.Height - _gh * _cell) / 2;
 
         _mat = new byte[_gw, _gh];
         _hue = new byte[_gw, _gh];
@@ -377,12 +321,8 @@ public class FallingSandExtension : ICanvasExtension, IDisposable
 
     // ── Render ──────────────────────────────────────────────────────────────
 
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
-
-        using var canvas = new SKCanvas(bb);
         canvas.Clear(BackgroundColor);
 
         using var paint = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = false };
@@ -403,8 +343,5 @@ public class FallingSandExtension : ICanvasExtension, IDisposable
 
             canvas.DrawRect(_offsetX + x * _cell, _offsetY + y * _cell, _cell, _cell, paint);
         }
-
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 }

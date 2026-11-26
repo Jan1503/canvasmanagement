@@ -1,9 +1,7 @@
 using System.Globalization;
-using System.Timers;
 using CanvasManagement.BdfFontManager;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.HomeAssistant;
 
@@ -23,17 +21,12 @@ public enum HaBdfMode { None, Value, Label, Both }
     "Show a Home Assistant entity value (requires HomeAssistant enabled in appsettings)",
     "Information",
     IconResourceName = "home-assistant.svg")]
-public class HomeAssistantSensorExtension : ICanvasExtension, IDisposable
+public class HomeAssistantSensorExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private float _scale = 1f;
 
-    internal HomeAssistantSensorExtension(ICanvas canvas)
+    internal HomeAssistantSensorExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Entity ID", "Home Assistant entity, e.g. sensor.og_wohnzimmer_fernseher_energy",
@@ -120,67 +113,25 @@ public class HomeAssistantSensorExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Graph Color", "Colour of the history sparkline", DefaultValue = "#553FA7FF", Order = 23)]
     public SKColor GraphColor { get; set; } = new(63, 167, 255, 85);
 
-    public string Name => "HA Sensor";
-    public bool IsRunning { get; private set; }
+    public override string Name => "HA Sensor";
+    protected override double FrameIntervalMs => 1000;
 
-    public void Dispose()
+    protected override void OnStart()
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        _scale = DisplayScale.GetScale(Canvas.Width, Canvas.Height);
     }
 
-    public void Start()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-
-            _timer = new Timer(1000) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
+        Draw(canvas);
     }
 
-    public void Stop()
+    private void Draw(SKCanvas canvas)
     {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try { Render(); }
-            catch (Exception ex) { Console.WriteLine($"[HA Sensor] render: {ex.Message}"); }
-        }
-    }
-
-    private void Render()
-    {
-        var bb = _backBuffer;
-        if (bb == null) return;
-
-        using var c = new SKCanvas(bb);
+        var c = canvas;
         c.Clear(BackgroundColor);
 
-        float w = _canvas.Width, h = _canvas.Height;
+        float w = Canvas.Width, h = Canvas.Height;
         var pad = Math.Max(2f, 3f * _scale);
 
         // History sparkline behind the content (registers interest so the host seeds + buffers it).
@@ -274,7 +225,6 @@ public class HomeAssistantSensorExtension : ICanvasExtension, IDisposable
             DrawText(c, ageText, LabelColor, pad, h - ageH - pad, w - pad * 2, ageH, ageH, true, labelBdf);
 
         c.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private string MapState(string raw)
@@ -377,8 +327,8 @@ public class HomeAssistantSensorExtension : ICanvasExtension, IDisposable
 
         if (useBdf)
         {
-            var fontName = _canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
-            using var bmp = _canvas.RenderBdfTextToBitmap(text, color, fontName);
+            var fontName = Canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
+            using var bmp = Canvas.RenderBdfTextToBitmap(text, color, fontName);
             if (bmp is not { Width: > 0, Height: > 0 }) return;
             var (dw, dh) = CanvasText.DestSize(bmp, fit ? Math.Min(targetH, rh) : targetH, rw);
             var left = AlignX(rx, rw, dw);

@@ -1,4 +1,4 @@
-﻿namespace CanvasManagement.Interfaces;
+namespace CanvasManagement.Interfaces;
 
 /// <summary>
 ///     Information about a discovered canvas extension type
@@ -61,8 +61,4 @@ public class ExtensionTypeInfo
     /// </summary>
     public List<ExtensionMethodInfo> Methods { get; set; } = new();
 
-    /// <summary>
-    ///     Extension method name (e.g., "GetTetrisAnimation", "GetMatrixAnimation")
-    /// </summary>
-    public string? ExtensionMethodName { get; set; }
 }

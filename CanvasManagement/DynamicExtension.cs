@@ -3,14 +3,19 @@
 namespace CanvasManagement;
 
 /// <summary>
-///     Provides strongly-typed access to dynamically created extensions
+///     Access to a discovered extension. Lifecycle calls go through <see cref="ICanvasExtension"/>, which every
+///     built-in extension implements; reflection is only the fallback for a plugin that does not.
+///     Parameters and <c>[ExtensionMethod]</c>s are found by name (reflection), as they differ per extension.
 /// </summary>
 public class DynamicExtension : IDisposable
 {
+    private readonly ICanvasExtension? _extension;
+
     internal DynamicExtension(object instance)
     {
         Instance = instance;
         Type = instance.GetType();
+        _extension = instance as ICanvasExtension;
     }
 
     /// <summary>
@@ -30,6 +35,7 @@ public class DynamicExtension : IDisposable
     {
         get
         {
+            if (_extension != null) return _extension.IsRunning;
             var prop = Type.GetProperty("IsRunning");
             return prop != null && (bool)(prop.GetValue(Instance) ?? false);
         }
@@ -42,6 +48,7 @@ public class DynamicExtension : IDisposable
     {
         get
         {
+            if (_extension != null) return _extension.Name;
             var prop = Type.GetProperty("Name");
             return prop?.GetValue(Instance)?.ToString() ?? Type.Name;
         }
@@ -76,7 +83,13 @@ public class DynamicExtension : IDisposable
     /// </summary>
     public void Start()
     {
-        var method = Type.GetMethod("Start");
+        if (_extension != null)
+        {
+            _extension.Start();
+            return;
+        }
+
+        var method = Type.GetMethod("Start", Type.EmptyTypes);
         method?.Invoke(Instance, null);
     }
 
@@ -85,7 +98,13 @@ public class DynamicExtension : IDisposable
     /// </summary>
     public void Stop()
     {
-        var method = Type.GetMethod("Stop");
+        if (_extension != null)
+        {
+            _extension.Stop();
+            return;
+        }
+
+        var method = Type.GetMethod("Stop", Type.EmptyTypes);
         method?.Invoke(Instance, null);
     }
 

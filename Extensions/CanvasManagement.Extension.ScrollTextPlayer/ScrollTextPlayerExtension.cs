@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.ScrollTextPlayer;
 
@@ -9,19 +7,14 @@ namespace CanvasManagement.Extension.ScrollTextPlayer;
     "Smooth scrolling text display with pixel-perfect BDF fonts or Skia rendering",
     "Text & Display",
     IconResourceName = "scrolltext.svg")]
-public class ScrollTextPlayerExtension : IDisposable
+public class ScrollTextPlayerExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _renderLock = new();
-    private SKBitmap? _backBuffer;
     private float _currentX;
-    private bool _disposed;
     private bool _isInEndPause;
     private bool _isInStartDelay;
 
     private bool _isReversed;
     private bool _lastAntiAlias = true;
-    private SKColor _lastBackgroundColor = SKColors.Black;
     private string _lastBdfFont = "";
     private bool _lastBold;
     private int _lastDirection;
@@ -44,137 +37,94 @@ public class ScrollTextPlayerExtension : IDisposable
     private int _lastVerticalAlignment = 1;
     private int _loopCount;
     private DateTime _pauseStartTime;
-    private Timer? _scrollTimer;
+    private bool _paused;
     private SKBitmap? _textBitmap;
 
-    internal ScrollTextPlayerExtension(ICanvas canvas)
+    internal ScrollTextPlayerExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
-    public bool IsRunning { get; private set; }
+    public override string Name => "Scrolling Text";
+
+    protected override double FrameIntervalMs => 1000.0 / Math.Clamp(FrameRate, 1, 60);
+
+    protected override bool ClearOnStop => false;
 
     private ScrollDirection CurrentDirection => (ScrollDirection)Direction;
     private LoopBehavior CurrentLoopMode => (LoopBehavior)LoopMode;
     private VerticalAlign CurrentVerticalAlignment => (VerticalAlign)VerticalAlignment;
 
-    public void Dispose()
+    protected override void OnStart()
     {
-        if (_disposed) return;
-
-        Stop();
-
-        lock (_renderLock)
-        {
-            _textBitmap?.Dispose();
-            _textBitmap = null;
-
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-        }
-
-        _disposed = true;
-        GC.SuppressFinalize(this);
+        _paused = false;
+        _textBitmap?.Dispose();
+        _textBitmap = null; // prepared for the canvas size in OnResize, before the first frame
     }
 
-    public void Start()
+    protected override void OnResize(int width, int height) => PrepareText();
+
+    protected override void OnStop()
     {
-        if (IsRunning) return;
+        _textBitmap?.Dispose();
+        _textBitmap = null;
+        try { Canvas.Clear(BackgroundColor); } catch { /* canvas already gone */ }
+        Console.WriteLine("ScrollText stopped");
+    }
 
-        Stop(); // Clean up any previous state
-
+    /// <summary>Renders the text (BDF, falling back to Skia) and starts the scroll from the beginning.</summary>
+    private void PrepareText()
+    {
         try
         {
-            if (UseBdfFonts)
-                StartBdfScrolling();
-            else
-                StartSkiaScrolling();
+            if (UseBdfFonts) PrepareBdfTextBitmap();
+            else PrepareTextBitmap();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error starting ScrollText: {ex.Message}");
-
-            // Fallback to Skia if BDF fails
+            Console.WriteLine($"Error preparing ScrollText: {ex.Message}");
+            _textBitmap?.Dispose();
+            _textBitmap = null;
             if (UseBdfFonts)
             {
                 Console.WriteLine("Falling back to Skia rendering...");
                 try
                 {
                     UseBdfFonts = false;
-                    _lastUseBdfFonts = false;
-                    StartSkiaScrolling();
-                    Console.WriteLine("Successfully fell back to Skia rendering");
+                    PrepareTextBitmap();
                 }
                 catch (Exception fallbackEx)
                 {
                     Console.WriteLine($"Fallback to Skia also failed: {fallbackEx.Message}");
-                    Stop();
+                    _textBitmap?.Dispose();
+                    _textBitmap = null;
                 }
             }
-            else
-            {
-                Stop();
-            }
         }
-    }
 
-    private void StartBdfScrolling()
-    {
-        try
-        {
-            // ? PRE-RENDER BDF text to bitmap using interface method (NO FLICKERING!)
-            PrepareBdfTextBitmap();
-
-            if (_textBitmap == null || _textBitmap.Width == 0)
-                throw new InvalidOperationException("Failed to create BDF text bitmap");
-
-            // ? Create back buffer for double-buffering
-            lock (_renderLock)
-            {
-                _backBuffer?.Dispose();
-                _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            }
-
-            UpdateLastValues();
-
-            // ? Use SAME timer-based scrolling as Skia (proven pattern)
-            _currentX = GetStartPosition();
-            _isReversed = false;
-            _loopCount = 0;
-            _isInStartDelay = StartDelay > 0;
-            _isInEndPause = false;
-            _pauseStartTime = DateTime.Now;
-
-            _scrollTimer = new Timer();
-            _scrollTimer.Interval = 1000.0 / FrameRate;
-            _scrollTimer.Elapsed += OnScrollTick;
-            _scrollTimer.AutoReset = true;
-            _scrollTimer.Start();
-
-            IsRunning = true;
-
-            Console.WriteLine(
-                $"BDF ScrollText started: '{Text}' ({_textBitmap.Width}x{_textBitmap.Height}) at {FrameRate}fps");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error starting BDF ScrollText: {ex.Message}");
-            throw;
-        }
+        UpdateLastValues();
+        _currentX = GetStartPosition();
+        _isReversed = false;
+        _loopCount = 0;
+        _isInStartDelay = StartDelay > 0;
+        _isInEndPause = false;
+        _pauseStartTime = DateTime.Now;
+        if (_textBitmap != null)
+            Console.WriteLine($"ScrollText started: '{Text}' ({_textBitmap.Width}x{_textBitmap.Height}, " +
+                              $"{(UseBdfFonts ? "BDF" : "Skia")}) at {FrameRate}fps");
     }
 
     private void PrepareBdfTextBitmap()
     {
-        lock (_renderLock)
+        lock (Sync)
         {
             _textBitmap?.Dispose();
 
-            var targetH = FontSize > 0 ? FontSize : Math.Max(8f, _canvas.Height * 0.8f);
+            var targetH = FontSize > 0 ? FontSize : Math.Max(8f, Canvas.Height * 0.8f);
             var fontName = !string.IsNullOrWhiteSpace(BdfFont)
                 ? BdfFont
-                : _canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
+                : Canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
 
-            var baseBitmap = _canvas.RenderBdfTextToBitmap(Text, TextColor, fontName);
+            var baseBitmap = Canvas.RenderBdfTextToBitmap(Text, TextColor, fontName);
 
             if (baseBitmap == null || baseBitmap.Width == 0 || baseBitmap.Height == 0)
                 throw new InvalidOperationException("BDF rendering returned empty bitmap");
@@ -184,16 +134,16 @@ public class ScrollTextPlayerExtension : IDisposable
             var destH = Math.Max(1, (int)Math.Ceiling(dh));
 
             // Handle vertical alignment by creating a canvas-height bitmap
-            _textBitmap = new SKBitmap(destW, _canvas.Height);
+            _textBitmap = new SKBitmap(destW, Canvas.Height);
             using var canvas = new SKCanvas(_textBitmap);
             canvas.Clear(SKColors.Transparent);
 
             var yPos = CurrentVerticalAlignment switch
             {
                 VerticalAlign.Top => 0,
-                VerticalAlign.Center => (_canvas.Height - destH) / 2,
-                VerticalAlign.Bottom => _canvas.Height - destH,
-                _ => (_canvas.Height - destH) / 2
+                VerticalAlign.Center => (Canvas.Height - destH) / 2,
+                VerticalAlign.Bottom => Canvas.Height - destH,
+                _ => (Canvas.Height - destH) / 2
             };
 
             CanvasText.Blit(canvas, baseBitmap, 0, yPos, dw, dh);
@@ -204,75 +154,15 @@ public class ScrollTextPlayerExtension : IDisposable
         }
     }
 
-    private void StartSkiaScrolling()
-    {
-        PrepareTextBitmap();
-
-        // ? Create back buffer for double-buffering
-        lock (_renderLock)
-        {
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-        }
-
-        UpdateLastValues();
-
-        _currentX = GetStartPosition();
-        _isReversed = false;
-        _loopCount = 0;
-        _isInStartDelay = StartDelay > 0;
-        _isInEndPause = false;
-        _pauseStartTime = DateTime.Now;
-
-        _scrollTimer = new Timer();
-        _scrollTimer.Interval = 1000.0 / FrameRate;
-        _scrollTimer.Elapsed += OnScrollTick;
-        _scrollTimer.AutoReset = true;
-        _scrollTimer.Start();
-
-        IsRunning = true;
-        Console.WriteLine($"Skia ScrollText started: '{Text}' at {FrameRate}fps, speed {ScrollSpeed}px");
-    }
-
-    public void Stop()
-    {
-        if (!IsRunning && _scrollTimer == null) return;
-
-        // Stop timer (works for both BDF and Skia)
-        _scrollTimer?.Stop();
-        _scrollTimer?.Dispose();
-        _scrollTimer = null;
-
-        lock (_renderLock)
-        {
-            _textBitmap?.Dispose();
-            _textBitmap = null;
-
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-        }
-
-        try
-        {
-            _canvas.Clear(BackgroundColor);
-        }
-        catch
-        {
-            // Ignore cleanup errors
-        }
-
-        IsRunning = false;
-        Console.WriteLine("ScrollText stopped");
-    }
-
+    /// <summary>Freezes the text where it is.</summary>
     public void Pause()
     {
-        _scrollTimer?.Stop();
+        lock (Sync) _paused = true;
     }
 
     public void Resume()
     {
-        _scrollTimer?.Start();
+        lock (Sync) _paused = false;
     }
 
     private bool HasVisualPropertiesChanged()
@@ -307,7 +197,6 @@ public class ScrollTextPlayerExtension : IDisposable
         _lastBold = Bold;
         _lastItalic = Italic;
         _lastTextColor = TextColor;
-        _lastBackgroundColor = BackgroundColor;
         _lastDirection = Direction;
         _lastLoopMode = LoopMode;
         _lastVerticalAlignment = VerticalAlignment;
@@ -326,7 +215,7 @@ public class ScrollTextPlayerExtension : IDisposable
     {
         if (string.IsNullOrWhiteSpace(Text)) Text = "Scrolling Text";
 
-        var fontSize = FontSize > 0 ? FontSize : _canvas.Height * 0.8f;
+        var fontSize = FontSize > 0 ? FontSize : Canvas.Height * 0.8f;
 
         var fontStyle = GetFontStyle();
 
@@ -346,16 +235,16 @@ public class ScrollTextPlayerExtension : IDisposable
         var textBounds = new SKRect();
         font.MeasureText(Text, out textBounds);
 
-        while (textBounds.Height > _canvas.Height && font.Size > 10)
+        while (textBounds.Height > Canvas.Height && font.Size > 10)
         {
             font.Size *= 0.95f;
             font.MeasureText(Text, out textBounds);
         }
 
         var bitmapWidth = (int)Math.Ceiling(textBounds.Width) + Math.Abs((int)textBounds.Left) + 20;
-        var bitmapHeight = _canvas.Height;
+        var bitmapHeight = Canvas.Height;
 
-        lock (_renderLock)
+        lock (Sync)
         {
             _textBitmap?.Dispose();
             _textBitmap = new SKBitmap(bitmapWidth, bitmapHeight);
@@ -399,134 +288,70 @@ public class ScrollTextPlayerExtension : IDisposable
         }
     }
 
-    private void OnScrollTick(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
+    {
+        if (HasVisualPropertiesChanged())
+        {
+            Console.WriteLine("Properties changed - re-rendering the text");
+            PrepareText();
+        }
+
+        if (!_paused) Advance();
+        DrawFrame(canvas);
+    }
+
+    private void Advance()
     {
         if (_textBitmap == null) return;
 
-        try
+        if (_isInStartDelay)
         {
-            _scrollTimer?.Stop();
+            if ((DateTime.Now - _pauseStartTime).TotalSeconds < StartDelay) return;
+            _isInStartDelay = false;
+        }
 
-            if (HasVisualPropertiesChanged())
+        if (_isInEndPause)
+        {
+            if ((DateTime.Now - _pauseStartTime).TotalSeconds < EndPause) return;
+            _isInEndPause = false;
+
+            if (CurrentLoopMode == LoopBehavior.Once)
             {
-                Console.WriteLine("Properties changed - restarting with new settings");
-
-                // First set IsRunning to false to allow Start() to work
-                IsRunning = false;
-
-                // Now Start() will work properly
-                Start();
+                // Stop waits for this frame to end, so it runs on another thread.
+                _ = Task.Run(Stop);
                 return;
             }
 
-            if (_scrollTimer != null && Math.Abs(_scrollTimer.Interval - 1000.0 / FrameRate) > 0.1)
-                _scrollTimer.Interval = 1000.0 / FrameRate;
+            if (CurrentLoopMode == LoopBehavior.Bounce) _isReversed = !_isReversed;
 
-            if (BackgroundColor != _lastBackgroundColor) _lastBackgroundColor = BackgroundColor;
-
-            if (_isInStartDelay)
-            {
-                if ((DateTime.Now - _pauseStartTime).TotalSeconds >= StartDelay)
-                {
-                    _isInStartDelay = false;
-                }
-                else
-                {
-                    RenderFrame();
-                    _scrollTimer?.Start();
-                    return;
-                }
-            }
-
-            if (_isInEndPause)
-            {
-                if ((DateTime.Now - _pauseStartTime).TotalSeconds >= EndPause)
-                {
-                    _isInEndPause = false;
-
-                    if (CurrentLoopMode == LoopBehavior.Once)
-                    {
-                        Stop();
-                        return;
-                    }
-
-                    if (CurrentLoopMode == LoopBehavior.Bounce) _isReversed = !_isReversed;
-
-                    _currentX = GetStartPosition();
-                    _loopCount++;
-                }
-                else
-                {
-                    RenderFrame();
-                    _scrollTimer?.Start();
-                    return;
-                }
-            }
-
-            float movement = ScrollSpeed * (_isReversed ? -1 : 1);
-
-            if (CurrentDirection == ScrollDirection.Left)
-                _currentX -= movement;
-            else
-                _currentX += movement;
-
-            if (HasReachedEnd())
-            {
-                if (CurrentLoopMode == LoopBehavior.Infinite)
-                {
-                    _currentX = GetStartPosition();
-                }
-                else
-                {
-                    _isInEndPause = true;
-                    _pauseStartTime = DateTime.Now;
-                }
-            }
-
-            RenderFrame();
-
-            if (IsRunning && _scrollTimer != null) _scrollTimer.Start();
+            _currentX = GetStartPosition();
+            _loopCount++;
         }
-        catch (Exception ex)
+
+        float movement = ScrollSpeed * (_isReversed ? -1 : 1);
+        if (CurrentDirection == ScrollDirection.Left)
+            _currentX -= movement;
+        else
+            _currentX += movement;
+
+        if (HasReachedEnd())
         {
-            Console.WriteLine($"Scroll tick error: {ex.Message}");
-            try
+            if (CurrentLoopMode == LoopBehavior.Infinite)
             {
-                _scrollTimer?.Start();
+                _currentX = GetStartPosition();
             }
-            catch
+            else
             {
-                Stop();
+                _isInEndPause = true;
+                _pauseStartTime = DateTime.Now;
             }
         }
     }
 
-    private void RenderFrame()
+    private void DrawFrame(SKCanvas canvas)
     {
-        if (_textBitmap == null || _backBuffer == null) return;
-
-        lock (_renderLock)
-        {
-            try
-            {
-                // ? RENDER COMPLETE FRAME to back buffer (with background)
-                using var backCanvas = new SKCanvas(_backBuffer);
-
-                // Clear with background color
-                backCanvas.Clear(BackgroundColor);
-
-                // Draw text bitmap to back buffer
-                backCanvas.DrawBitmap(_textBitmap, (int)_currentX, 0);
-
-                // Force flush to ensure back buffer is complete
-                backCanvas.Flush();// ? ATOMIC SUBMIT: Send complete frame to canvas
-                _canvas.SubmitCompletedFrame(_backBuffer);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Render error: {ex.Message}");
-            }
-        }
+        canvas.Clear(BackgroundColor);
+        if (_textBitmap != null) canvas.DrawBitmap(_textBitmap, (int)_currentX, 0);
     }
 
     private float GetStartPosition()
@@ -535,7 +360,7 @@ public class ScrollTextPlayerExtension : IDisposable
 
         return CurrentDirection switch
         {
-            ScrollDirection.Left => _canvas.Width,
+            ScrollDirection.Left => Canvas.Width,
             ScrollDirection.Right => -_textBitmap.Width,
             _ => 0
         };
@@ -548,7 +373,7 @@ public class ScrollTextPlayerExtension : IDisposable
         return CurrentDirection switch
         {
             ScrollDirection.Left => _currentX <= -_textBitmap.Width,
-            ScrollDirection.Right => _currentX >= _canvas.Width,
+            ScrollDirection.Right => _currentX >= Canvas.Width,
             _ => false
         };
     }

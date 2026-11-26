@@ -11,22 +11,18 @@ namespace CanvasManagement.Extension.Sky;
     "Stars and moon phase; optional ISS position",
     "Visual Effects",
     IconResourceName = "night-sky.svg")]
-public class NightSkyExtension : ICanvasExtension, IDisposable
+public class NightSkyExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _rng = new(7);
-    private SKBitmap? _backBuffer;
-    private CancellationTokenSource? _cts;
-    private Task? _loop;
     private Star[] _stars = [];
     private double _issLat = double.NaN, _issLon = double.NaN;
     private DateTime _issFetch = DateTime.MinValue;
 
-    internal NightSkyExtension(ICanvas canvas)
+    internal NightSkyExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
+
+    private int _frame;
 
     [ExtensionParameter("Location", "Observer city — use the search button", DefaultValue = "Berlin", Order = 1)]
     public string Location { get; set; } = "Berlin";
@@ -55,67 +51,22 @@ public class NightSkyExtension : ICanvasExtension, IDisposable
         MaxValue = 48, Unit = "px", Order = 8)]
     public int FontSize { get; set; }
 
-    public string Name => "Night Sky";
-    public bool IsRunning { get; private set; }
+    public override string Name => "Night Sky";
 
-    public void Dispose()
+    protected override double FrameIntervalMs => 80;
+
+    protected override void OnStart()
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        _frame = 0;
+        SeedStars();
     }
 
-    public void Start()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            SeedStars();
-            _cts = new CancellationTokenSource();
-            var ct = _cts.Token;
-            IsRunning = true;
-            _loop = Task.Run(() => Run(ct));
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            try { _cts?.Cancel(); } catch { }
-            _cts?.Dispose();
-            _cts = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private async Task Run(CancellationToken ct)
-    {
-        var frame = 0;
-        try
-        {
-            while (!ct.IsCancellationRequested && IsRunning)
-            {
-                lock (_lock)
-                {
-                    if (_backBuffer != null) Render(frame);
-                }
-
-                if (ShowIss && (DateTime.UtcNow - _issFetch).TotalSeconds > 20)
-                    _ = FetchIss();
-
-                frame++;
-                await Task.Delay(80, ct);
-            }
-        }
-        catch (OperationCanceledException) { }
+        Draw(canvas, _frame);
+        if (ShowIss && (DateTime.UtcNow - _issFetch).TotalSeconds > 20)
+            _ = FetchIss();
+        _frame++;
     }
 
     private void SeedStars()
@@ -130,8 +81,8 @@ public class NightSkyExtension : ICanvasExtension, IDisposable
                 : tint > 0.88 ? new SKColor(255, 214, 170)
                 : new SKColor(236, 240, 255);
             _stars[i] = new Star(
-                (float)_rng.NextDouble() * _canvas.Width,
-                (float)_rng.NextDouble() * _canvas.Height,
+                (float)_rng.NextDouble() * Canvas.Width,
+                (float)_rng.NextDouble() * Canvas.Height,
                 0.25f + mag * 1.7f,
                 (float)_rng.NextDouble() * 6.28f,
                 col,
@@ -139,13 +90,12 @@ public class NightSkyExtension : ICanvasExtension, IDisposable
         }
     }
 
-    private void Render(int frame)
+    private void Draw(SKCanvas c, int frame)
     {
-        var bb = _backBuffer;
+        var bb = BackBuffer;
         if (bb == null) return;
         if (_stars.Length != Math.Clamp(StarCount, 20, 500)) SeedStars();
 
-        using var c = new SKCanvas(bb);
         DrawSkyGradient(c, bb.Width, bb.Height);
         DrawMilkyWay(c, bb.Width, bb.Height);
         DrawStars(c, frame);
@@ -163,12 +113,9 @@ public class NightSkyExtension : ICanvasExtension, IDisposable
         if (label.Length > 0)
         {
             var size = CanvasText.ResolveSize(FontSize, Math.Max(7f, bb.Height * 0.09f));
-            CanvasText.Draw(c, _canvas, label, new SKColor(200, 210, 230, 180),
+            CanvasText.Draw(c, Canvas, label, new SKColor(200, 210, 230, 180),
                 4, bb.Height - 4, size, SKTextAlign.Left, UseBdfFont);
         }
-
-        c.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private void DrawSkyGradient(SKCanvas c, int w, int h)
@@ -286,7 +233,7 @@ public class NightSkyExtension : ICanvasExtension, IDisposable
         c.DrawCircle(x, y, 5.5f, glow);
         c.DrawCircle(x, y, 1.8f, core);
         var size = CanvasText.ResolveSize(FontSize, Math.Max(6f, h * 0.07f));
-        CanvasText.Draw(c, _canvas, "ISS", new SKColor(255, 180, 140),
+        CanvasText.Draw(c, Canvas, "ISS", new SKColor(255, 180, 140),
             x + 4, y - 2, size, SKTextAlign.Left, UseBdfFont);
     }
 
@@ -302,8 +249,8 @@ public class NightSkyExtension : ICanvasExtension, IDisposable
         _issFetch = DateTime.UtcNow;
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
-            var json = await http.GetStringAsync("http://api.open-notify.org/iss-now.json");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+            var json = await ExtensionHttp.Client.GetStringAsync("http://api.open-notify.org/iss-now.json", cts.Token);
             var lat = Slice(json, "\"latitude\"");
             var lon = Slice(json, "\"longitude\"");
             if (double.TryParse(lat, NumberStyles.Float, CultureInfo.InvariantCulture, out var la) &&

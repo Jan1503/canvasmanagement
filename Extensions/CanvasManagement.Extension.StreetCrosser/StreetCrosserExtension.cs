@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.StreetCrosser;
 
@@ -13,7 +11,7 @@ namespace CanvasManagement.Extension.StreetCrosser;
     "Hop across neon traffic and a river — arrows / WASD, or autopilot",
     "Games",
     IconResourceName = "street-crosser.svg")]
-public class StreetCrosserExtension : ICanvasExtension, IDisposable
+public class StreetCrosserExtension : GameExtension
 {
     // d outline, g body, w/k eye, p blush
     private static readonly string[] Frog =
@@ -74,14 +72,10 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
         new(60, 190, 255), new(200, 80, 255), new(255, 80, 210)
     };
 
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _random = new();
     private readonly List<Mover> _movers = new();
     private readonly bool[] _homes = new bool[5];
 
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private int _px = 2;
     private int _cols, _rows;
     private float _cw, _ch;
@@ -94,7 +88,7 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
     private bool _human;
     private int _frame;
 
-    internal StreetCrosserExtension(ICanvas canvas) => _canvas = canvas;
+    internal StreetCrosserExtension(ICanvas canvas) : base(canvas, GameSong.Chill) { }
 
     [ExtensionParameter("Game Speed", "Frame interval in milliseconds (lower = faster)", DefaultValue = 28,
         MinValue = 16, MaxValue = 60, Unit = "ms", Order = 1)]
@@ -117,79 +111,25 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Auto Pilot", "AI hops until you press a key in Studio", DefaultValue = true, Order = 6)]
     public bool AutoPilot { get; set; } = true;
 
-    private GameSound? _snd;
-    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Chill);
+    public override string Name => "Street Crosser";
+    protected override double FrameIntervalMs => GameSpeed;
 
-    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
-    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
-
-    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
-    public bool Music { get => _sound.Music; set => _sound.Music = value; }
-
-    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
-        MaxValue = 100, Order = 22)]
-    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
-
-    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
-        MaxValue = 100, Order = 23)]
-    public int MusicVolume
+    protected override void OnStart()
     {
-        get => (int)MathF.Round(_sound.MusicVolume * 100);
-        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
-    }
-
-    public string Name => "Street Crosser";
-    public bool IsRunning { get; private set; }
-
-    public void Dispose()
-    {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _px = PixelArt.Scale(_canvas.Height);
-            _human = false;
-            _score = 0;
-            _lives = 3;
-            Layout();
-            NewLife();
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(GameSpeed) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _sound.Stop();
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); } catch { }
-        }
+        _px = PixelArt.Scale(Canvas.Height);
+        _human = false;
+        _score = 0;
+        _lives = 3;
+        Layout();
+        NewLife();
     }
 
     private void Layout()
     {
         _cols = 16;
         _rows = 13;
-        _cw = _canvas.Width / (float)_cols;
-        _ch = _canvas.Height / (float)_rows;
+        _cw = Canvas.Width / (float)_cols;
+        _ch = Canvas.Height / (float)_rows;
         _movers.Clear();
         for (var i = 0; i < _homes.Length; i++) _homes[i] = false;
 
@@ -204,7 +144,7 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
                 _movers.Add(new Mover
                 {
                     Row = row,
-                    X = i * (_canvas.Width / (float)count) + _random.Next(Math.Max(1, (int)_cw)),
+                    X = i * (Canvas.Width / (float)count) + _random.Next(Math.Max(1, (int)_cw)),
                     W = visW,
                     Spd = spd,
                     Water = water,
@@ -241,36 +181,24 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
     private float CellX(int c) => c * _cw + _cw * 0.5f;
     private float CellY(int r) => r * _ch + _ch * 0.5f;
 
-    private void OnTick(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
+        if (_crashTimer > 0)
         {
-            if (!IsRunning || _backBuffer == null) return;
-            try
+            _crashTimer--;
+            if (_crashTimer == 0)
             {
-                if (_timer != null && Math.Abs(_timer.Interval - GameSpeed) > 0.5) _timer.Interval = GameSpeed;
-                if (_crashTimer > 0)
-                {
-                    _crashTimer--;
-                    if (_crashTimer == 0)
-                    {
-                        if (_lives <= 0) { _lives = 3; _score = 0; Layout(); }
-                        NewLife();
-                    }
-                }
-                else
-                    Update();
-
-                Render();
-                _sound.Duck(_lives <= 0 && _crashTimer > 0 ? 0.3f : 1f);
-                _sound.Update();
-                _frame++;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[StreetCrosser] {ex.Message}");
+                if (_lives <= 0) { _lives = 3; _score = 0; Layout(); }
+                NewLife();
             }
         }
+        else
+            Update();
+
+        Draw(canvas);
+        Audio.Duck(_lives <= 0 && _crashTimer > 0 ? 0.3f : 1f);
+        Audio.Update();
+        _frame++;
     }
 
     private void Update()
@@ -302,7 +230,7 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
 
         // Landed (or standing): ride the log, then check what is under the frog now.
         CarryOnLog();
-        if (_fx < 4 || _fx > _canvas.Width - 4) { Squash("swept away"); return; }
+        if (_fx < 4 || _fx > Canvas.Width - 4) { Squash("swept away"); return; }
         if (IsRoad(_row) && HitCar()) { Squash("hit by a car"); return; }
         if (IsWater(_row) && !OnLog()) { Squash("fell in"); return; }
 
@@ -313,14 +241,14 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
             if (_homes[slot]) { Squash("pad taken"); return; }
             _homes[slot] = true;
             _score += 100 + _time;
-            _gfx.Burst((slot + 0.5f) * _canvas.Width / 5f, _ch / 2f, new SKColor(200, 255, 120), 20, 2f, 0.7f, 0.03f);
-            _gfx.Pop($"+{100 + _time}", (slot + 0.5f) * _canvas.Width / 5f, _ch * 2, new SKColor(255, 255, 160));
-            _sound.Play(GameSfx.Score);
+            _gfx.Burst((slot + 0.5f) * Canvas.Width / 5f, _ch / 2f, new SKColor(200, 255, 120), 20, 2f, 0.7f, 0.03f);
+            _gfx.Pop($"+{100 + _time}", (slot + 0.5f) * Canvas.Width / 5f, _ch * 2, new SKColor(255, 255, 160));
+            Audio.Play(GameSfx.Score);
             if (_homes.All(h => h))
             {
                 _score += 500;
-                _gfx.Confetti(_canvas.Width / 2f, _ch, 60, 3f);
-                _sound.Play(GameSfx.LevelUp);
+                _gfx.Confetti(Canvas.Width / 2f, _ch, 60, 3f);
+                Audio.Play(GameSfx.LevelUp);
                 Layout();
             }
 
@@ -362,7 +290,7 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
 
     private int HomeSlot(float x)
     {
-        var band = _canvas.Width / 5f;
+        var band = Canvas.Width / 5f;
         var slot = Math.Clamp((int)(x / band), 0, 4);
         var cx = (slot + 0.5f) * band;
         return Math.Abs(x - cx) <= band * 0.34f ? slot : -1;
@@ -396,8 +324,8 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
 
     private float WrapX(float x, float w)
     {
-        var span = _canvas.Width + w * 2f;
-        while (x > _canvas.Width + w) x -= span;
+        var span = Canvas.Width + w * 2f;
+        while (x > Canvas.Width + w) x -= span;
         while (x < -w) x += span;
         return x;
     }
@@ -470,7 +398,7 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
                 {
                     var row = n.Row + dr;
                     if (row < 0 || row >= _rows) continue;
-                    var x = Math.Clamp(n.X + dc * _cw, _cw * 0.5f, _canvas.Width - _cw * 0.5f);
+                    var x = Math.Clamp(n.X + dc * _cw, _cw * 0.5f, Canvas.Width - _cw * 0.5f);
                     if (dc != 0 && Math.Abs(x - n.X) < _cw * 0.5f) continue;
                     if (row == 0)
                     {
@@ -516,7 +444,7 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
             x += spd.Value;
             if (LogAt(x, row, ahead) == null) return false;
         }
-        if (x < 4 || x > _canvas.Width - 4) return false;
+        if (x < 4 || x > Canvas.Width - 4) return false;
         if (IsRoad(row) && CarAt(x, row, ahead)) return false;
         return true;
     }
@@ -527,7 +455,7 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
         var nr = _row + dr;
         if (nr < 0 || nr >= _rows) return;
         // Sideways hops move one cell from where the frog is (it may be riding a log); up and down keep x.
-        var nx = Math.Clamp(_fx + dc * _cw, _cw * 0.5f, _canvas.Width - _cw * 0.5f);
+        var nx = Math.Clamp(_fx + dc * _cw, _cw * 0.5f, Canvas.Width - _cw * 0.5f);
         if (dc != 0 && Math.Abs(nx - _fx) < _cw * 0.5f) return;
         _row = nr;
         _col = Math.Clamp((int)(nx / _cw), 0, _cols - 1);
@@ -537,7 +465,7 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
         _ty = CellY(_row);
         _hop = 6;
         if (dr < 0) _score += 10;
-        _sound.Play(GameSfx.Hop, 0.6f, (_fx / _canvas.Width) * 2 - 1);
+        Audio.Play(GameSfx.Hop, 0.6f, (_fx / Canvas.Width) * 2 - 1);
         if (!IsWater(_row)) _gfx.Spray(_fx, _fy + 4, MathF.PI / 2, 1.2f, new SKColor(200, 230, 160), 3, 0.8f, 0.25f, 0.02f);
     }
 
@@ -547,7 +475,7 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
         _crashTimer = 36;
         _death = why;
         _plan.Clear();
-        _sound.Play(why == "fell in" ? GameSfx.Splash : why == "hit by a car" ? GameSfx.Hit : GameSfx.Thud);
+        Audio.Play(why == "fell in" ? GameSfx.Splash : why == "hit by a car" ? GameSfx.Hit : GameSfx.Thud);
         if (why == "fell in")
         {
             _gfx.Spray(_fx, _fy, -MathF.PI / 2, 0.9f, new SKColor(170, 220, 255), 18, 2.4f, 0.7f, 0.12f);
@@ -559,53 +487,50 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
             _gfx.Shake(4);
             _gfx.Flash(new SKColor(255, 60, 60), 0.4f);
         }
-        _sound.Play(_lives <= 0 ? GameSfx.GameOver : GameSfx.Die, 0.7f);
+        Audio.Play(_lives <= 0 ? GameSfx.GameOver : GameSfx.Die, 0.7f);
     }
 
     [ExtensionMethod("Hop Up", "Hop forward — takes over from autopilot",
         Category = "Controls", KeyboardShortcut = "Up|W", Order = 1)]
     public void HopUp()
     {
-        lock (_lock) { _human = true; TryHop(0, -1); }
+        lock (Sync) { _human = true; TryHop(0, -1); }
     }
 
     [ExtensionMethod("Hop Down", "Hop back",
         Category = "Controls", KeyboardShortcut = "Down|S", Order = 2)]
     public void HopDown()
     {
-        lock (_lock) { _human = true; TryHop(0, 1); }
+        lock (Sync) { _human = true; TryHop(0, 1); }
     }
 
     [ExtensionMethod("Hop Left", "Hop left",
         Category = "Controls", KeyboardShortcut = "Left|A", Order = 3)]
     public void HopLeft()
     {
-        lock (_lock) { _human = true; TryHop(-1, 0); }
+        lock (Sync) { _human = true; TryHop(-1, 0); }
     }
 
     [ExtensionMethod("Hop Right", "Hop right",
         Category = "Controls", KeyboardShortcut = "Right|D", Order = 4)]
     public void HopRight()
     {
-        lock (_lock) { _human = true; TryHop(1, 0); }
+        lock (Sync) { _human = true; TryHop(1, 0); }
     }
 
     private readonly GameFx _gfx = new();
     private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     private double _lastRender;
 
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
         var now = _clock.Elapsed.TotalSeconds;
         var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
         _lastRender = now;
         _gfx.Update(dt);
-        using var canvas = new SKCanvas(bb);
         using var paint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
-        var w = _canvas.Width;
-        var h = _canvas.Height;
+        var w = Canvas.Width;
+        var h = Canvas.Height;
 
         void Band(int r0, int r1, SKColor a, SKColor b)
         {
@@ -721,20 +646,18 @@ public class StreetCrosserExtension : ICanvasExtension, IDisposable
         if (ShowScore)
         {
             var size = CanvasText.ResolveSize(FontSize, Math.Max(8f, h * 0.08f));
-            CanvasText.Draw(canvas, _canvas, $"{_score}  x{_lives}  {_time}", SKColors.White,
+            CanvasText.Draw(canvas, Canvas, $"{_score}  x{_lives}  {_time}", SKColors.White,
                 4, size + 1, size, SKTextAlign.Left, UseBdfFont);
         }
 
         if (_crashTimer > 0 && !string.IsNullOrEmpty(_death))
         {
             var size = CanvasText.ResolveSize(FontSize, Math.Max(10f, h * 0.11f));
-            CanvasText.Draw(canvas, _canvas, _death.ToUpperInvariant(), SKColors.White,
+            CanvasText.Draw(canvas, Canvas, _death.ToUpperInvariant(), SKColors.White,
                 w / 2f, h * 0.48f, size, SKTextAlign.Center, UseBdfFont);
         }
 
-        _gfx.DrawOverlay(canvas, _canvas, w, h, Math.Max(7f, h * 0.07f));
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
+        _gfx.DrawOverlay(canvas, Canvas, w, h, Math.Max(7f, h * 0.07f));
     }
 
     private static SKColor ChFrog(char ch) => ch switch

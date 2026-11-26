@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.Aquarium;
 
@@ -9,16 +7,10 @@ namespace CanvasManagement.Extension.Aquarium;
     "Animated aquarium with colorful swimming fish and bubbles",
     "Nature",
     IconResourceName = "aquarium.svg")]
-public class AquariumExtension : IDisposable
+public class AquariumExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _renderLock = new();
-
-    // Double buffering to prevent flicker
-    private SKBitmap? _backBuffer;
     private readonly List<Bubble> _bubbles = new();
     private readonly List<Crab> _crabs = new();
-    private bool _disposed;
 
     private readonly List<Fish> _fish = new();
     private readonly List<Plant> _plants = new();
@@ -29,15 +21,13 @@ public class AquariumExtension : IDisposable
     private readonly List<Snail> _snails = new();
     private readonly List<Starfish> _starfishes = new();
     private float _time;
-    private Timer? _updateTimer;
 
     // Scale factor relative to the 384x192 design; creature sizes and vertical bands are
     // multiplied by this so the aquarium fits any panel (and avoids negative random ranges).
     private float _scale = 1f;
 
-    internal AquariumExtension(ICanvas canvas)
+    internal AquariumExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
         _scale = DisplayScale.GetScale(canvas.Width, canvas.Height);
     }
 
@@ -55,56 +45,24 @@ public class AquariumExtension : IDisposable
         return b > a ? _random.Next(a, b) : a;
     }
 
-    public bool IsRunning { get; private set; }
+    public override string Name => "Aquarium";
 
-    public void Dispose()
+    protected override double FrameIntervalMs => 33;
+
+    protected override bool ClearOnStop => false;
+
+    protected override void OnStart()
     {
-        if (_disposed) return;
-        Stop();
-        _backBuffer?.Dispose();
-        _disposed = true;
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        if (IsRunning) return;
-
-        // Create back buffer
-        _backBuffer?.Dispose();
-        _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-
+        _scale = DisplayScale.GetScale(Canvas.Width, Canvas.Height);
         InitializeAquarium();
 
-        _updateTimer = new Timer(33); // ~30 FPS
-        _updateTimer.Elapsed += OnUpdate;
-        _updateTimer.AutoReset = true;
-        _updateTimer.Start();
-
-        IsRunning = true;
         Console.WriteLine("Aquarium started");
     }
 
-    public void Stop()
+    protected override void OnStop()
     {
-        if (!IsRunning) return;
+        try { Canvas.Clear(WaterColor); } catch { /* canvas already gone */ }
 
-        _updateTimer?.Stop();
-        _updateTimer?.Dispose();
-        _updateTimer = null;
-
-        _backBuffer?.Dispose();
-        _backBuffer = null;
-
-        try
-        {
-            _canvas.Clear(WaterColor);
-        }
-        catch
-        {
-        }
-
-        IsRunning = false;
         Console.WriteLine("Aquarium stopped");
     }
 
@@ -135,11 +93,11 @@ public class AquariumExtension : IDisposable
 
         // Vertical bands are derived from the panel height so nothing goes off-screen or
         // produces an inverted random range on small displays.
-        var h = _canvas.Height;
+        var h = Canvas.Height;
         for (var i = 0; i < FishCount; i++)
             _fish.Add(new Fish
             {
-                X = _random.Next(_canvas.Width),
+                X = _random.Next(Canvas.Width),
                 Y = RandY(Sc(50), h - Sc(100)),
                 Size = ScRange(15, 40),
                 Speed = 0.5f + (float)_random.NextDouble() * 1.5f,
@@ -153,7 +111,7 @@ public class AquariumExtension : IDisposable
         for (var i = 0; i < SharkCount; i++)
             _sharks.Add(new Shark
             {
-                X = _random.Next(_canvas.Width),
+                X = _random.Next(Canvas.Width),
                 Y = RandY(Sc(30), h / 2),
                 Size = ScRange(60, 100),
                 Speed = 0.3f + (float)_random.NextDouble() * 0.5f,
@@ -165,7 +123,7 @@ public class AquariumExtension : IDisposable
         for (var i = 0; i < CrabCount; i++)
             _crabs.Add(new Crab
             {
-                X = _random.Next(_canvas.Width),
+                X = _random.Next(Canvas.Width),
                 Y = h - Sc(35),
                 Size = ScRange(10, 20),
                 Speed = 0.2f + (float)_random.NextDouble() * 0.3f,
@@ -177,7 +135,7 @@ public class AquariumExtension : IDisposable
         for (var i = 0; i < SeahorseCount; i++)
             _seahorses.Add(new Seahorse
             {
-                X = _random.Next(_canvas.Width),
+                X = _random.Next(Canvas.Width),
                 Y = RandY(h / 2, h - Sc(60)),
                 Size = ScRange(20, 35),
                 SwayPhase = (float)(_random.NextDouble() * Math.PI * 2),
@@ -188,7 +146,7 @@ public class AquariumExtension : IDisposable
         for (var i = 0; i < SnailCount; i++)
             _snails.Add(new Snail
             {
-                X = _random.Next(_canvas.Width),
+                X = _random.Next(Canvas.Width),
                 Y = RandY(h / 2, h - Sc(40)),
                 Size = ScRange(8, 15),
                 Speed = 0.05f + (float)_random.NextDouble() * 0.1f,
@@ -199,7 +157,7 @@ public class AquariumExtension : IDisposable
         for (var i = 0; i < StarfishCount; i++)
             _starfishes.Add(new Starfish
             {
-                X = _random.Next(_canvas.Width),
+                X = _random.Next(Canvas.Width),
                 Y = h - Sc(35) - _random.Next(Sc(10)),
                 Size = ScRange(10, 20),
                 Rotation = (float)(_random.NextDouble() * Math.PI * 2),
@@ -215,7 +173,7 @@ public class AquariumExtension : IDisposable
         for (var i = 0; i < ShellCount; i++)
             _shells.Add(new Shell
             {
-                X = _random.Next(_canvas.Width),
+                X = _random.Next(Canvas.Width),
                 Y = h - Sc(30) - _random.Next(Sc(15)),
                 Size = ScRange(6, 15),
                 Rotation = (float)(_random.NextDouble() * Math.PI),
@@ -226,8 +184,8 @@ public class AquariumExtension : IDisposable
         for (var i = 0; i < BubbleCount; i++)
             _bubbles.Add(new Bubble
             {
-                X = _random.Next(_canvas.Width),
-                Y = _random.Next(_canvas.Height),
+                X = _random.Next(Canvas.Width),
+                Y = _random.Next(Canvas.Height),
                 Size = ScRange(3, 10),
                 Speed = 0.2f + (float)_random.NextDouble() * 0.5f,
                 WobblePhase = (float)(_random.NextDouble() * Math.PI * 2)
@@ -237,7 +195,7 @@ public class AquariumExtension : IDisposable
         for (var i = 0; i < PlantCount; i++)
             _plants.Add(new Plant
             {
-                X = _random.Next(_canvas.Width),
+                X = _random.Next(Canvas.Width),
                 Height = ScRange(80, 150),
                 SwayPhase = (float)(_random.NextDouble() * Math.PI * 2),
                 Segments = _random.Next(8, 15),
@@ -254,203 +212,166 @@ public class AquariumExtension : IDisposable
         return _random.Next(min, max);
     }
 
-    private void OnUpdate(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        if (!IsRunning) return;
+        _time += 0.03f * (float)AnimationSpeed;
 
-        try
+        // Update fish
+        foreach (var fish in _fish)
         {
-            _updateTimer?.Stop();
+            fish.SwimPhase += 0.1f * (float)AnimationSpeed;
 
-            _time += 0.03f * (float)AnimationSpeed;
-
-            // Update fish
-            foreach (var fish in _fish)
+            if (fish.DirectionRight)
             {
-                fish.SwimPhase += 0.1f * (float)AnimationSpeed;
-
-                if (fish.DirectionRight)
-                {
-                    fish.X += fish.Speed * (float)AnimationSpeed;
-                    if (fish.X > _canvas.Width + fish.Size)
-                        fish.X = -fish.Size;
-                }
-                else
-                {
-                    fish.X -= fish.Speed * (float)AnimationSpeed;
-                    if (fish.X < -fish.Size)
-                        fish.X = _canvas.Width + fish.Size;
-                }
-
-                fish.Y += (float)Math.Sin(fish.SwimPhase) * 0.3f * (float)AnimationSpeed;
-                // Proportional swim band (raw 50/100px margins go negative on short panels and crash Clamp).
-                fish.Y = Math.Clamp(fish.Y, _canvas.Height * 0.12f, _canvas.Height * 0.88f);
+                fish.X += fish.Speed * (float)AnimationSpeed;
+                if (fish.X > Canvas.Width + fish.Size)
+                    fish.X = -fish.Size;
+            }
+            else
+            {
+                fish.X -= fish.Speed * (float)AnimationSpeed;
+                if (fish.X < -fish.Size)
+                    fish.X = Canvas.Width + fish.Size;
             }
 
-            // Update sharks
-            foreach (var shark in _sharks)
-            {
-                shark.SwimPhase += 0.05f * (float)AnimationSpeed;
-
-                if (shark.DirectionRight)
-                {
-                    shark.X += shark.Speed * (float)AnimationSpeed;
-                    if (shark.X > _canvas.Width + shark.Size * 2)
-                        shark.X = -shark.Size * 2;
-                }
-                else
-                {
-                    shark.X -= shark.Speed * (float)AnimationSpeed;
-                    if (shark.X < -shark.Size * 2)
-                        shark.X = _canvas.Width + shark.Size * 2;
-                }
-
-                shark.Y += (float)Math.Sin(shark.SwimPhase) * 0.2f * (float)AnimationSpeed;
-                shark.Y = Math.Clamp(shark.Y, _canvas.Height * 0.08f, _canvas.Height * 0.55f);
-            }
-
-            // Update crabs
-            foreach (var crab in _crabs)
-            {
-                crab.WalkPhase += 0.15f * (float)AnimationSpeed;
-
-                if (crab.DirectionRight)
-                {
-                    crab.X += crab.Speed * (float)AnimationSpeed;
-                    if (crab.X > _canvas.Width + 30)
-                        crab.X = -30;
-                }
-                else
-                {
-                    crab.X -= crab.Speed * (float)AnimationSpeed;
-                    if (crab.X < -30)
-                        crab.X = _canvas.Width + 30;
-                }
-            }
-
-            // Update snails
-            foreach (var snail in _snails)
-                if (snail.DirectionRight)
-                {
-                    snail.X += snail.Speed * (float)AnimationSpeed;
-                    if (snail.X > _canvas.Width + 20)
-                        snail.X = -20;
-                }
-                else
-                {
-                    snail.X -= snail.Speed * (float)AnimationSpeed;
-                    if (snail.X < -20)
-                        snail.X = _canvas.Width + 20;
-                }
-
-            // Update seahorses
-            foreach (var seahorse in _seahorses)
-            {
-                seahorse.SwayPhase += 0.05f * (float)AnimationSpeed;
-                seahorse.BobPhase += 0.08f * (float)AnimationSpeed;
-            }
-
-            // Update bubbles
-            foreach (var bubble in _bubbles)
-            {
-                bubble.Y -= bubble.Speed * (float)AnimationSpeed;
-                bubble.WobblePhase += 0.05f * (float)AnimationSpeed;
-                bubble.X += (float)Math.Sin(bubble.WobblePhase) * 0.5f;
-
-                if (bubble.Y < -bubble.Size)
-                {
-                    bubble.Y = _canvas.Height + bubble.Size;
-                    bubble.X = _random.Next(_canvas.Width);
-                }
-            }
-
-            Render();
-
-            if (IsRunning && _updateTimer != null) _updateTimer.Start();
+            fish.Y += (float)Math.Sin(fish.SwimPhase) * 0.3f * (float)AnimationSpeed;
+            // Proportional swim band (raw 50/100px margins go negative on short panels and crash Clamp).
+            fish.Y = Math.Clamp(fish.Y, Canvas.Height * 0.12f, Canvas.Height * 0.88f);
         }
-        catch (Exception ex)
+
+        // Update sharks
+        foreach (var shark in _sharks)
         {
-            Console.WriteLine($"Aquarium update error: {ex.Message}");
-            try
+            shark.SwimPhase += 0.05f * (float)AnimationSpeed;
+
+            if (shark.DirectionRight)
             {
-                _updateTimer?.Start();
+                shark.X += shark.Speed * (float)AnimationSpeed;
+                if (shark.X > Canvas.Width + shark.Size * 2)
+                    shark.X = -shark.Size * 2;
             }
-            catch
+            else
             {
-                Stop();
+                shark.X -= shark.Speed * (float)AnimationSpeed;
+                if (shark.X < -shark.Size * 2)
+                    shark.X = Canvas.Width + shark.Size * 2;
+            }
+
+            shark.Y += (float)Math.Sin(shark.SwimPhase) * 0.2f * (float)AnimationSpeed;
+            shark.Y = Math.Clamp(shark.Y, Canvas.Height * 0.08f, Canvas.Height * 0.55f);
+        }
+
+        // Update crabs
+        foreach (var crab in _crabs)
+        {
+            crab.WalkPhase += 0.15f * (float)AnimationSpeed;
+
+            if (crab.DirectionRight)
+            {
+                crab.X += crab.Speed * (float)AnimationSpeed;
+                if (crab.X > Canvas.Width + 30)
+                    crab.X = -30;
+            }
+            else
+            {
+                crab.X -= crab.Speed * (float)AnimationSpeed;
+                if (crab.X < -30)
+                    crab.X = Canvas.Width + 30;
             }
         }
+
+        // Update snails
+        foreach (var snail in _snails)
+            if (snail.DirectionRight)
+            {
+                snail.X += snail.Speed * (float)AnimationSpeed;
+                if (snail.X > Canvas.Width + 20)
+                    snail.X = -20;
+            }
+            else
+            {
+                snail.X -= snail.Speed * (float)AnimationSpeed;
+                if (snail.X < -20)
+                    snail.X = Canvas.Width + 20;
+            }
+
+        // Update seahorses
+        foreach (var seahorse in _seahorses)
+        {
+            seahorse.SwayPhase += 0.05f * (float)AnimationSpeed;
+            seahorse.BobPhase += 0.08f * (float)AnimationSpeed;
+        }
+
+        // Update bubbles
+        foreach (var bubble in _bubbles)
+        {
+            bubble.Y -= bubble.Speed * (float)AnimationSpeed;
+            bubble.WobblePhase += 0.05f * (float)AnimationSpeed;
+            bubble.X += (float)Math.Sin(bubble.WobblePhase) * 0.5f;
+
+            if (bubble.Y < -bubble.Size)
+            {
+                bubble.Y = Canvas.Height + bubble.Size;
+                bubble.X = _random.Next(Canvas.Width);
+            }
+        }
+
+        Draw(canvas);
     }
 
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        if (_backBuffer == null) return;
+        // Clear with background color
+        canvas.Clear(BackgroundColor);
 
-        lock (_renderLock)
-        {
-            try
+        // Draw water gradient background
+        using var waterGradient = SKShader.CreateLinearGradient(
+            new SKPoint(0, 0),
+            new SKPoint(0, Canvas.Height),
+            new[]
             {
-                using var canvas = new SKCanvas(_backBuffer);
+                new SKColor(0, 40, 80),
+                WaterColor,
+                new SKColor(0, 10, 30)
+            },
+            new[] { 0f, 0.5f, 1f },
+            SKShaderTileMode.Clamp);
 
-                // Clear with background color
-                canvas.Clear(BackgroundColor);
+        using var waterPaint = new SKPaint { Shader = waterGradient };
+        canvas.DrawRect(0, 0, Canvas.Width, Canvas.Height, waterPaint);
 
-                // Draw water gradient background
-                using var waterGradient = SKShader.CreateLinearGradient(
-                    new SKPoint(0, 0),
-                    new SKPoint(0, _canvas.Height),
-                    new[]
-                    {
-                        new SKColor(0, 40, 80),
-                        WaterColor,
-                        new SKColor(0, 10, 30)
-                    },
-                    new[] { 0f, 0.5f, 1f },
-                    SKShaderTileMode.Clamp);
+        // Draw light rays
+        if (ShowLightRays) DrawLightRays(canvas);
 
-                using var waterPaint = new SKPaint { Shader = waterGradient };
-                canvas.DrawRect(0, 0, _canvas.Width, _canvas.Height, waterPaint);
+        // Draw sand at bottom (before creatures)
+        DrawSand(canvas);
 
-                // Draw light rays
-                if (ShowLightRays) DrawLightRays(canvas);
+        // Draw shells on sand
+        foreach (var shell in _shells) DrawShell(canvas, shell);
 
-                // Draw sand at bottom (before creatures)
-                DrawSand(canvas);
+        // Draw starfish on sand
+        foreach (var starfish in _starfishes) DrawStarfish(canvas, starfish);
 
-                // Draw shells on sand
-                foreach (var shell in _shells) DrawShell(canvas, shell);
+        // Draw plants (background)
+        foreach (var plant in _plants) DrawPlant(canvas, plant);
 
-                // Draw starfish on sand
-                foreach (var starfish in _starfishes) DrawStarfish(canvas, starfish);
+        // Draw snails on plants
+        foreach (var snail in _snails) DrawSnail(canvas, snail);
 
-                // Draw plants (background)
-                foreach (var plant in _plants) DrawPlant(canvas, plant);
+        // Draw crabs on sand
+        foreach (var crab in _crabs) DrawCrab(canvas, crab);
 
-                // Draw snails on plants
-                foreach (var snail in _snails) DrawSnail(canvas, snail);
+        // Draw seahorses
+        foreach (var seahorse in _seahorses) DrawSeahorse(canvas, seahorse);
 
-                // Draw crabs on sand
-                foreach (var crab in _crabs) DrawCrab(canvas, crab);
+        // Draw fish (mid-layer)
+        foreach (var fish in _fish) DrawFish(canvas, fish);
 
-                // Draw seahorses
-                foreach (var seahorse in _seahorses) DrawSeahorse(canvas, seahorse);
+        // Draw sharks (top layer with fish)
+        foreach (var shark in _sharks) DrawShark(canvas, shark);
 
-                // Draw fish (mid-layer)
-                foreach (var fish in _fish) DrawFish(canvas, fish);
-
-                // Draw sharks (top layer with fish)
-                foreach (var shark in _sharks) DrawShark(canvas, shark);
-
-                // Draw bubbles (foreground)
-                foreach (var bubble in _bubbles) DrawBubble(canvas, bubble);
-
-                canvas.Flush();_canvas.SubmitCompletedFrame(_backBuffer);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Render error: {ex.Message}");
-            }
-        }
+        // Draw bubbles (foreground)
+        foreach (var bubble in _bubbles) DrawBubble(canvas, bubble);
     }
 
     private void DrawFish(SKCanvas canvas, Fish fish)
@@ -823,7 +744,7 @@ public class AquariumExtension : IDisposable
         var leafColor = new SKColor(60, 120, 60);
 
         var baseX = plant.X;
-        float baseY = _canvas.Height - 30;
+        float baseY = Canvas.Height - 30;
 
         // Main stem using smooth bezier curves
         using var stemPath = new SKPath();
@@ -913,7 +834,7 @@ public class AquariumExtension : IDisposable
         var grassColor = new SKColor(80, 150, 80);
 
         var baseX = plant.X;
-        float baseY = _canvas.Height - 30;
+        float baseY = Canvas.Height - 30;
 
         using var grassPath = new SKPath();
         grassPath.MoveTo(baseX, baseY);
@@ -954,8 +875,8 @@ public class AquariumExtension : IDisposable
     {
         // Draw sand with better gradient
         using var sandGradient = SKShader.CreateLinearGradient(
-            new SKPoint(0, _canvas.Height - 35),
-            new SKPoint(0, _canvas.Height),
+            new SKPoint(0, Canvas.Height - 35),
+            new SKPoint(0, Canvas.Height),
             new[]
             {
                 new SKColor(180, 160, 110),
@@ -969,7 +890,7 @@ public class AquariumExtension : IDisposable
             Shader = sandGradient,
             Style = SKPaintStyle.Fill
         };
-        canvas.DrawRect(0, _canvas.Height - 35, _canvas.Width, 35, sandPaint);
+        canvas.DrawRect(0, Canvas.Height - 35, Canvas.Width, 35, sandPaint);
 
         // Add pebbles for texture
         using var pebblePaint = new SKPaint
@@ -981,8 +902,8 @@ public class AquariumExtension : IDisposable
 
         for (var i = 0; i < 30; i++)
         {
-            var x = _random.Next(_canvas.Width);
-            var y = _canvas.Height - _random.Next(30);
+            var x = _random.Next(Canvas.Width);
+            var y = Canvas.Height - _random.Next(30);
             float size = 1 + _random.Next(3);
             canvas.DrawOval(x, y, size * 1.5f, size, pebblePaint);
         }
@@ -1407,13 +1328,13 @@ public class AquariumExtension : IDisposable
         for (var i = 0; i < 5; i++)
         {
             var angle = (float)Math.Sin(_time * 0.5f + i) * 0.3f;
-            var x1 = _canvas.Width * (0.2f + i * 0.2f);
-            var x2 = x1 + (float)Math.Tan(angle) * _canvas.Height;
+            var x1 = Canvas.Width * (0.2f + i * 0.2f);
+            var x2 = x1 + (float)Math.Tan(angle) * Canvas.Height;
 
             using var path = new SKPath();
             path.MoveTo(x1, 0);
-            path.LineTo(x2, _canvas.Height);
-            path.LineTo(x2 + 50, _canvas.Height);
+            path.LineTo(x2, Canvas.Height);
+            path.LineTo(x2 + 50, Canvas.Height);
             path.LineTo(x1 + 50, 0);
             path.Close();
 

@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.HomeAssistant;
 
@@ -13,16 +11,10 @@ namespace CanvasManagement.Extension.HomeAssistant;
     "Track / artist / progress from a Home Assistant media player",
     "Information",
     IconResourceName = "home-assistant.svg")]
-public class HomeAssistantMediaExtension : ICanvasExtension, IDisposable
+public class HomeAssistantMediaExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
-
-    internal HomeAssistantMediaExtension(ICanvas canvas)
+    internal HomeAssistantMediaExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Entity ID", "media_player.* entity", DefaultValue = "media_player.living_room", Order = 1)]
@@ -62,64 +54,20 @@ public class HomeAssistantMediaExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Background Color", "Background (alpha 0 for overlay)", DefaultValue = "#101015", Order = 12)]
     public SKColor BackgroundColor { get; set; } = new(16, 16, 21);
 
-    public string Name => "HA Now Playing";
-    public bool IsRunning { get; private set; }
+    public override string Name => "HA Now Playing";
+    protected override double FrameIntervalMs => 200;
 
-    public void Dispose()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        Draw(canvas);
     }
 
-    public void Start()
+    private void Draw(SKCanvas canvas)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(200) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try { Render(); }
-            catch (Exception ex) { Console.WriteLine($"[HA Media] {ex.Message}"); }
-        }
-    }
-
-    private void Render()
-    {
-        var bb = _backBuffer;
-        if (bb == null) return;
-        using var c = new SKCanvas(bb);
+        var c = canvas;
         c.Clear(BackgroundColor);
 
-        float w = _canvas.Width, h = _canvas.Height;
+        float w = Canvas.Width, h = Canvas.Height;
         var found = HomeAssistantBridge.TryGet(EntityId, out var entity);
         var state = found ? entity.State : "";
         var title = HomeAssistantBridge.Attr(EntityId, "media_title")
@@ -156,12 +104,12 @@ public class HomeAssistantMediaExtension : ICanvasExtension, IDisposable
         var tw = w - tx - 4;
         var align = HaText.ToSk(Align);
         var titleH = ValueSize > 0 ? ValueSize : h * 0.28f;
-        HaText.Draw(c, _canvas, title, ValueColor, tx, 2, tw, h * 0.4f, titleH, align, UseBdfFont);
+        HaText.Draw(c, Canvas, title, ValueColor, tx, 2, tw, h * 0.4f, titleH, align, UseBdfFont);
         var sub = string.IsNullOrWhiteSpace(artist) ? album : artist;
         if (ShowArtist && !string.IsNullOrWhiteSpace(sub))
         {
             var subH = ValueSize > 0 ? Math.Max(6f, ValueSize * 0.7f) : h * 0.2f;
-            HaText.Draw(c, _canvas, sub, LabelColor, tx, h * 0.4f, tw, h * 0.28f, subH, align, UseBdfFont);
+            HaText.Draw(c, Canvas, sub, LabelColor, tx, h * 0.4f, tw, h * 0.28f, subH, align, UseBdfFont);
         }
 
         if (ShowProgress)
@@ -176,7 +124,6 @@ public class HomeAssistantMediaExtension : ICanvasExtension, IDisposable
         }
 
         c.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private static SKColor HashColor(string s)

@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.LavaLamp;
 
@@ -35,24 +33,19 @@ public enum LampStyle
     "Hypnotic metaball physics: floating blobs with smooth merging, customizable colors, gravity, and multiple visual styles",
     "Visual Effects",
     IconResourceName = "lava-lamp.svg")]
-public class LavaLampExtension : ICanvasExtension, IDisposable
+public class LavaLampExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _random = new();
     private readonly float _scale;
 
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private readonly List<Blob> _blobs = new();
     private float _time;
     private int _lastBlobCount;
     private int _lastMinSize;
     private int _lastMaxSize;
 
-    internal LavaLampExtension(ICanvas canvas)
+    internal LavaLampExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
         _scale = DisplayScale.GetScale(canvas.Width, canvas.Height);
     }
 
@@ -135,77 +128,34 @@ public class LavaLampExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Shimmer", "Add subtle shimmer to blobs", DefaultValue = false)]
     public bool Shimmer { get; set; }
 
-    public string Name => "Lava Lamp";
-    public bool IsRunning { get; private set; }
+    public override string Name => "Lava Lamp";
+    protected override double FrameIntervalMs => 1000.0 / 30;
 
-    public void Dispose()
+    protected override void OnStart()
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        InitializeBlobs();
     }
 
-    public void Start()
+    protected override void OnStop()
     {
-        lock (_lock)
+        _blobs.Clear();
+    }
+
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
+    {
+        _time += 0.033f * (float)Speed;
+
+        if (_lastBlobCount != BlobCount)
         {
-            if (IsRunning) return;
-
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-
             InitializeBlobs();
-
-            _timer = new Timer(33) { AutoReset = true }; // ~30 FPS
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
         }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
+        else if (_lastMinSize != MinBlobSize || _lastMaxSize != MaxBlobSize)
         {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _blobs.Clear();
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { /* Canvas might be disposed */ }
+            ApplyBlobSizeChanges();
         }
-    }
 
-    private void OnTick(object? sender, System.Timers.ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try
-            {
-                _time += 0.033f * (float)Speed;
-
-                if (_lastBlobCount != BlobCount)
-                {
-                    InitializeBlobs();
-                }
-                else if (_lastMinSize != MinBlobSize || _lastMaxSize != MaxBlobSize)
-                {
-                    ApplyBlobSizeChanges();
-                }
-
-                UpdatePhysics();
-                Render();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[LavaLamp] render: {ex.Message}");
-            }
-        }
+        UpdatePhysics();
+        Draw(canvas);
     }
 
     private void InitializeBlobs()
@@ -215,8 +165,8 @@ public class LavaLampExtension : ICanvasExtension, IDisposable
         _lastMinSize = MinBlobSize;
         _lastMaxSize = MaxBlobSize;
 
-        var w = _canvas.Width;
-        var h = _canvas.Height;
+        var w = Canvas.Width;
+        var h = Canvas.Height;
         var min = Math.Min(MinBlobSize, MaxBlobSize);
         var max = Math.Max(MinBlobSize, MaxBlobSize);
 
@@ -249,8 +199,8 @@ public class LavaLampExtension : ICanvasExtension, IDisposable
     {
         if (_blobs.Count == 0) return;
 
-        var w = _canvas.Width;
-        var h = _canvas.Height;
+        var w = Canvas.Width;
+        var h = Canvas.Height;
         var newMin = Math.Min(MinBlobSize, MaxBlobSize);
         var newMax = Math.Max(MinBlobSize, MaxBlobSize);
         var oldMin = Math.Min(_lastMinSize, _lastMaxSize);
@@ -274,8 +224,8 @@ public class LavaLampExtension : ICanvasExtension, IDisposable
 
     private void UpdatePhysics()
     {
-        var w = _canvas.Width;
-        var h = _canvas.Height;
+        var w = Canvas.Width;
+        var h = Canvas.Height;
 
         // Speed is a playback multiplier — it scales how fast blobs *travel*, but does NOT scale
         // per-frame force magnitudes (which caused runaway "table tennis" velocities: Speed=3 meant
@@ -417,15 +367,14 @@ public class LavaLampExtension : ICanvasExtension, IDisposable
         }
     }
 
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        if (_backBuffer == null) return;
+        if (BackBuffer == null) return;
 
-        using var canvas = new SKCanvas(_backBuffer);
         canvas.Clear(BackgroundColor);
 
-        var w = _canvas.Width;
-        var h = _canvas.Height;
+        var w = Canvas.Width;
+        var h = Canvas.Height;
 
         // Render based on style
         switch (Style)
@@ -451,12 +400,11 @@ public class LavaLampExtension : ICanvasExtension, IDisposable
         }
 
         canvas.Flush();
-        _canvas.SubmitCompletedFrame(_backBuffer);
     }
 
     private void RenderClassicMetaballs(SKCanvas canvas, int w, int h)
     {
-        if (_backBuffer == null) return;
+        if (BackBuffer == null) return;
         if (_blobs.Count == 0) return;
 
         var threshold = (float)MetaballThreshold;
@@ -489,7 +437,7 @@ public class LavaLampExtension : ICanvasExtension, IDisposable
 
         unsafe
         {
-            var pixels = (uint*)_backBuffer.GetPixels().ToPointer();
+            var pixels = (uint*)BackBuffer.GetPixels().ToPointer();
 
             for (var y = 0; y < h; y += res)
             for (var x = 0; x < w; x += res)
@@ -554,7 +502,7 @@ public class LavaLampExtension : ICanvasExtension, IDisposable
                 ImageFilter = SKImageFilter.CreateBlur(GlowStrength * 2, GlowStrength * 2),
                 BlendMode = SKBlendMode.Plus
             };
-            using var snapshot = SKImage.FromBitmap(_backBuffer);
+            using var snapshot = SKImage.FromBitmap(BackBuffer);
             canvas.DrawImage(snapshot, 0, 0, glowPaint);
         }
     }
@@ -609,7 +557,7 @@ public class LavaLampExtension : ICanvasExtension, IDisposable
 
     private void RenderPlasmaBlobs(SKCanvas canvas, int w, int h)
     {
-        if (_backBuffer == null) return;
+        if (BackBuffer == null) return;
         if (_blobs.Count == 0) return;
 
         var res = Math.Max(1, Resolution);
@@ -632,7 +580,7 @@ public class LavaLampExtension : ICanvasExtension, IDisposable
 
         unsafe
         {
-            var pixels = (uint*)_backBuffer.GetPixels().ToPointer();
+            var pixels = (uint*)BackBuffer.GetPixels().ToPointer();
 
             for (var y = 0; y < h; y += res)
             for (var x = 0; x < w; x += res)

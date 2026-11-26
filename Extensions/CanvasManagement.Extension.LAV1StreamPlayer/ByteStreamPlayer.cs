@@ -35,9 +35,7 @@ internal sealed class ByteStreamPlayer : IDisposable
                     {
                         _alsa?.Stop();
                     }
-                    catch
-                    {
-                    }
+                    catch { /* best effort, nothing to recover */ }
 
                     _alsa?.Dispose();
                     _alsa = null;

@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.FlappyBird;
 
@@ -13,7 +11,7 @@ namespace CanvasManagement.Extension.FlappyBird;
     "Flappy Bird — autopilot, or play with Space / Up in Studio",
     "Games",
     IconResourceName = "flappy-bird.svg")]
-public class FlappyBirdExtension : ICanvasExtension, IDisposable
+public class FlappyBirdExtension : GameExtension
 {
     // d outline, y body, B belly, o/n beak, w/k eye, r wing, p blush, .=empty
     private static readonly string[] BirdUp =
@@ -54,14 +52,10 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         ".1111111111."
     };
 
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _random = new();
     private readonly List<Pipe> _pipes = new();
     private readonly List<CloudPos> _clouds = new();
 
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private float _scale = 1f;
     private int _px = 2;
     private int _frame;
@@ -83,9 +77,8 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
     private int _crashTimer;
     private bool _human;
 
-    internal FlappyBirdExtension(ICanvas canvas)
+    internal FlappyBirdExtension(ICanvas canvas) : base(canvas, GameSong.Retro)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Game Speed", "Frame interval in milliseconds (lower = faster)", DefaultValue = 30,
@@ -114,82 +107,27 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Auto Pilot", "AI flies until you press a key in Studio", DefaultValue = true, Order = 7)]
     public bool AutoPilot { get; set; } = true;
 
-    private GameSound? _snd;
-    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Retro);
+    public override string Name => "Flappy Bird";
+    protected override double FrameIntervalMs => GameSpeed;
 
-    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
-    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
+    private float PlayH => Canvas.Height - _groundH;
 
-    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
-    public bool Music { get => _sound.Music; set => _sound.Music = value; }
-
-    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
-        MaxValue = 100, Order = 22)]
-    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
-
-    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
-        MaxValue = 100, Order = 23)]
-    public int MusicVolume
+    protected override void OnStart()
     {
-        get => (int)MathF.Round(_sound.MusicVolume * 100);
-        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
-    }
-
-    public string Name => "Flappy Bird";
-    public bool IsRunning { get; private set; }
-
-    private float PlayH => _canvas.Height - _groundH;
-
-    public void Dispose()
-    {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
-            _px = Math.Max(1, (int)Math.Round(_canvas.Height / 64f));
-            _human = false;
-            Reset();
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(GameSpeed) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _sound.Stop();
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
+        _scale = DisplayScale.GetScale(Canvas.Width, Canvas.Height);
+        _px = Math.Max(1, (int)Math.Round(Canvas.Height / 64f));
+        _human = false;
+        Reset();
     }
 
     private void Reset()
     {
-        _groundH = Math.Max(8, _canvas.Height * 14 / 100);
-        _px = Math.Max(1, (int)Math.Round(_canvas.Height / 64f));
+        _groundH = Math.Max(8, Canvas.Height * 14 / 100);
+        _px = Math.Max(1, (int)Math.Round(Canvas.Height / 64f));
         _birdW = BirdUp[0].Length * _px;
         _birdH = BirdUp.Length * _px;
         _hitR = Math.Max(2f, Math.Min(_birdW, _birdH) * 0.28f);
-        _birdX = _canvas.Width * 0.26f;
+        _birdX = Canvas.Width * 0.26f;
         _birdY = PlayH * 0.45f;
         _vy = 0;
         _pipeW = Math.Max(8, 7 * _px);
@@ -199,13 +137,13 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         for (var i = 0; i < 3; i++)
             _clouds.Add(new CloudPos
             {
-                X = i * _canvas.Width / 3f + _random.Next(20),
+                X = i * Canvas.Width / 3f + _random.Next(20),
                 Y = 4 + _random.Next(Math.Max(4, (int)(PlayH * 0.28f)))
             });
         _score = 0;
         _crashTimer = 0;
         // First pipe well to the right, gap near centre so the opening is readable.
-        SpawnPipe(_canvas.Width + _pipeW, centerBias: 0.85f);
+        SpawnPipe(Canvas.Width + _pipeW, centerBias: 0.85f);
     }
 
     private void TunePhysics()
@@ -220,45 +158,32 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         _speed = Math.Max(1.1f, (1.35f + Difficulty * 0.18f) * Math.Max(0.45f, _scale * 1.4f));
     }
 
-    private void OnTick(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
+        if (_crashTimer > 0)
         {
-            if (!IsRunning || _backBuffer == null) return;
-            try
-            {
-                if (_timer != null && Math.Abs(_timer.Interval - GameSpeed) > 0.5) _timer.Interval = GameSpeed;
-
-                if (_crashTimer > 0)
-                {
-                    _crashTimer--;
-                    if (_crashTimer == 0) Reset();
-                }
-                else
-                {
-                    Update();
-                }
-
-                Render();
-                _sound.Duck(_crashTimer > 0 ? 0.35f : 1f);
-                _sound.Update();
-                _frame++;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[FlappyBird] {ex.Message}");
-            }
+            _crashTimer--;
+            if (_crashTimer == 0) Reset();
         }
+        else
+        {
+            Update();
+        }
+
+        Draw(canvas);
+        Audio.Duck(_crashTimer > 0 ? 0.35f : 1f);
+        Audio.Update();
+        _frame++;
     }
 
     private void Update()
     {
         TunePhysics();
 
-        var spacing = _canvas.Width * (0.48f - Difficulty * 0.015f);
+        var spacing = Canvas.Width * (0.48f - Difficulty * 0.015f);
         spacing = Math.Max(spacing, _pipeW * 4f + _birdW);
-        if (_pipes.Count == 0 || _canvas.Width - _pipes[^1].X > spacing)
-            SpawnPipe(_canvas.Width + _pipeW, centerBias: _score < 2 ? 0.55f : 0.15f);
+        if (_pipes.Count == 0 || Canvas.Width - _pipes[^1].X > spacing)
+            SpawnPipe(Canvas.Width + _pipeW, centerBias: _score < 2 ? 0.55f : 0.15f);
 
         for (var i = _pipes.Count - 1; i >= 0; i--)
         {
@@ -270,7 +195,7 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
                 _score++;
                 _fx.Burst(p.X + _pipeW, p.GapTop + _gap / 2f, new SKColor(255, 240, 120), 10, 1.8f, 0.5f, 0, true);
                 _fx.Pop("+1", _birdX, _birdY - _birdH, new SKColor(255, 250, 200));
-                _sound.Play(GameSfx.Coin, 0.5f);
+                Audio.Play(GameSfx.Coin, 0.5f);
                 _best = Math.Max(_best, _score);
             }
 
@@ -284,7 +209,7 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
             c.X -= _speed * 0.22f;
             if (c.X + 14 * _px < 0)
             {
-                c.X = _canvas.Width + _random.Next(30);
+                c.X = Canvas.Width + _random.Next(30);
                 c.Y = 4 + _random.Next(Math.Max(4, (int)(PlayH * 0.28f)));
             }
 
@@ -393,7 +318,7 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
     private void DoFlap()
     {
         _vy = _flapV;
-        _sound.Play(GameSfx.Flap, 0.5f);
+        Audio.Play(GameSfx.Flap, 0.5f);
         _fx.Spray(_birdX - _birdW * 0.3f, _birdY, MathF.PI * 0.75f, 0.5f, new SKColor(255, 240, 200), 4, 1.2f, 0.45f, 0.03f);
     }
 
@@ -401,7 +326,7 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Space|Up", Order = 1)]
     public void Flap()
     {
-        lock (_lock)
+        lock (Sync)
         {
             _human = true;
             if (_crashTimer > 0)
@@ -422,8 +347,8 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         _fx.Spray(_birdX, _birdY, -MathF.PI / 2, 1.2f, new SKColor(255, 255, 240), 8, 2f, 0.9f, 0.05f);
         _fx.Flash(SKColors.White, 0.7f);
         _fx.Shake(5);
-        _sound.Play(GameSfx.Hit, 0.7f);
-        _sound.Play(GameSfx.Die, 0.5f);
+        Audio.Play(GameSfx.Hit, 0.7f);
+        Audio.Play(GameSfx.Die, 0.5f);
     }
 
     private void SpawnPipe(float x, float centerBias)
@@ -449,19 +374,16 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
     ///     a city skyline and hedges scroll behind the pipes at their own speeds, feathers puff on every flap,
     ///     a sparkle marks each pipe passed, and a crash shakes and flashes.
     /// </summary>
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
         var now = _clock.Elapsed.TotalSeconds;
         var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
         _lastRender = now;
         _fx.Update(dt);
         if (_crashTimer == 0) _scroll += _speed;
 
-        using var canvas = new SKCanvas(bb);
-        var h = _canvas.Height;
-        var w = _canvas.Width;
+        var h = Canvas.Height;
+        var w = Canvas.Width;
 
         // Time of day from the score: day, sunset, night, dawn, round and round every 40 pipes.
         var phase = _score % 40 / 40f;
@@ -557,15 +479,13 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
         if (ShowScore)
         {
             var size = CanvasText.ResolveSize(FontSize, Math.Max(10f, h * 0.13f));
-            CanvasText.Draw(canvas, _canvas, $"{_score}", new SKColor(0, 0, 0, 140),
+            CanvasText.Draw(canvas, Canvas, $"{_score}", new SKColor(0, 0, 0, 140),
                 w / 2f + 1, h * 0.16f + 1, size, SKTextAlign.Center, UseBdfFont);
-            CanvasText.Draw(canvas, _canvas, $"{_score}", SKColors.White,
+            CanvasText.Draw(canvas, Canvas, $"{_score}", SKColors.White,
                 w / 2f, h * 0.16f, size, SKTextAlign.Center, UseBdfFont);
         }
 
-        _fx.DrawOverlay(canvas, _canvas, w, h, Math.Max(7f, h * 0.07f));
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
+        _fx.DrawOverlay(canvas, Canvas, w, h, Math.Max(7f, h * 0.07f));
     }
 
     private void DrawPipe(SKCanvas canvas, SKPaint paint, Pipe p)
@@ -619,16 +539,16 @@ public class FlappyBirdExtension : ICanvasExtension, IDisposable
     {
         var y = PlayH;
         paint.Color = new SKColor(214, 168, 70);
-        canvas.DrawRect(0, y, _canvas.Width, _groundH, paint);
+        canvas.DrawRect(0, y, Canvas.Width, _groundH, paint);
         paint.Color = new SKColor(116, 191, 46);
-        canvas.DrawRect(0, y, _canvas.Width, Math.Max(2, _px + 1), paint);
+        canvas.DrawRect(0, y, Canvas.Width, Math.Max(2, _px + 1), paint);
         paint.Color = new SKColor(88, 150, 34);
-        canvas.DrawRect(0, y + Math.Max(2, _px + 1), _canvas.Width, 1, paint);
+        canvas.DrawRect(0, y + Math.Max(2, _px + 1), Canvas.Width, 1, paint);
 
         paint.Color = new SKColor(186, 138, 52);
         var tile = Math.Max(6, 5 * _px);
         var scroll = (int)(_frame * _speed) % tile;
-        for (var x = -scroll; x < _canvas.Width; x += tile)
+        for (var x = -scroll; x < Canvas.Width; x += tile)
             canvas.DrawRect(x, y + _groundH * 0.45f, Math.Max(2, _px), Math.Max(2, _px), paint);
     }
 

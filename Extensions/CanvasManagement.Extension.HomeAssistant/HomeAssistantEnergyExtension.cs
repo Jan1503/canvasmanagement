@@ -1,8 +1,6 @@
 using System.Globalization;
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.HomeAssistant;
 
@@ -14,17 +12,12 @@ namespace CanvasManagement.Extension.HomeAssistant;
     "House / solar / grid / battery power as a ring (Home Assistant sensors)",
     "Information",
     IconResourceName = "home-assistant.svg")]
-public class HomeAssistantEnergyExtension : ICanvasExtension, IDisposable
+public class HomeAssistantEnergyExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private float _scale = 1f;
 
-    internal HomeAssistantEnergyExtension(ICanvas canvas)
+    internal HomeAssistantEnergyExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("House Entity", "House load / consumption (pick a power sensor)",
@@ -101,65 +94,25 @@ public class HomeAssistantEnergyExtension : ICanvasExtension, IDisposable
         DefaultValue = "#FF0A1218", Order = 21)]
     public SKColor BackgroundColor { get; set; } = new(10, 18, 24);
 
-    public string Name => "HA Energy";
-    public bool IsRunning { get; private set; }
+    public override string Name => "HA Energy";
+    protected override double FrameIntervalMs => 1000;
 
-    public void Dispose()
+    protected override void OnStart()
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        _scale = DisplayScale.GetScale(Canvas.Width, Canvas.Height);
     }
 
-    public void Start()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(1000) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
+        Draw(canvas);
     }
 
-    public void Stop()
+    private void Draw(SKCanvas canvas)
     {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try { Render(); }
-            catch (Exception ex) { Console.WriteLine($"[HA Energy] {ex.Message}"); }
-        }
-    }
-
-    private void Render()
-    {
-        var bb = _backBuffer;
-        if (bb == null) return;
-        using var c = new SKCanvas(bb);
+        var c = canvas;
         c.Clear(BackgroundColor);
 
-        float w = _canvas.Width, h = _canvas.Height;
+        float w = Canvas.Width, h = Canvas.Height;
         var house = ReadWatts(HouseEntity);
         var solar = ReadWatts(SolarEntity);
         var grid = ReadWatts(GridEntity);
@@ -170,10 +123,9 @@ public class HomeAssistantEnergyExtension : ICanvasExtension, IDisposable
 
         if (!HomeAssistantBridge.Connected)
         {
-            HaText.Draw(c, _canvas, "HA offline", LabelColor, 0, 0, w, h, Math.Max(8f, h * 0.2f),
+            HaText.Draw(c, Canvas, "HA offline", LabelColor, 0, 0, w, h, Math.Max(8f, h * 0.2f),
                 HaText.ToSk(Align), UseBdfFont);
             c.Flush();
-            _canvas.SubmitCompletedFrame(bb);
             return;
         }
 
@@ -181,7 +133,6 @@ public class HomeAssistantEnergyExtension : ICanvasExtension, IDisposable
         else DrawRing(c, w, h, house, solar, grid, battery, max);
 
         c.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private void DrawRing(SKCanvas c, float w, float h, double house, double solar, double grid, double battery,
@@ -217,9 +168,9 @@ public class HomeAssistantEnergyExtension : ICanvasExtension, IDisposable
 
         var centreH = ValueSize > 0 ? ValueSize : r * 0.32f;
         var align = HaText.ToSk(Align);
-        HaText.Draw(c, _canvas, Fmt(house), ValueColor,
+        HaText.Draw(c, Canvas, Fmt(house), ValueColor,
             cx - r, cy - r * 0.22f, r * 2, r * 0.4f, centreH, align, UseBdfFont);
-        HaText.Draw(c, _canvas, NameOr(HouseLabel, "house"), LabelColor,
+        HaText.Draw(c, Canvas, NameOr(HouseLabel, "house"), LabelColor,
             cx - r, cy + r * 0.08f, r * 2, r * 0.22f, r * 0.16f, align, UseBdfFont);
 
         var listX = w * 0.68f;
@@ -253,9 +204,9 @@ public class HomeAssistantEnergyExtension : ICanvasExtension, IDisposable
         using var dot = new SKPaint { Color = color, IsAntialias = false };
         var r = Math.Max(2f, h * 0.12f);
         c.DrawCircle(x + r * 2, y + h * 0.5f, r, dot);
-        HaText.Draw(c, _canvas, label, LabelColor, x + r * 4, y, w * 0.4f, h * 0.45f, h * 0.28f,
+        HaText.Draw(c, Canvas, label, LabelColor, x + r * 4, y, w * 0.4f, h * 0.45f, h * 0.28f,
             SKTextAlign.Left, UseBdfFont);
-        HaText.Draw(c, _canvas, value, ValueColor, x + r * 4, y + h * 0.4f, w - r * 5, h * 0.5f, h * 0.36f,
+        HaText.Draw(c, Canvas, value, ValueColor, x + r * 4, y + h * 0.4f, w - r * 5, h * 0.5f, h * 0.36f,
             SKTextAlign.Left, UseBdfFont);
     }
 
@@ -270,9 +221,9 @@ public class HomeAssistantEnergyExtension : ICanvasExtension, IDisposable
         var barW = w - pad * 2;
         c.DrawRect(x + pad, barY, barW, barH, track);
         c.DrawRect(x + pad, barY, (float)(barW * Math.Clamp(value / max, 0, 1)), barH, fill);
-        HaText.Draw(c, _canvas, label, LabelColor, x + pad, y, w * 0.4f, h * 0.5f, h * 0.32f,
+        HaText.Draw(c, Canvas, label, LabelColor, x + pad, y, w * 0.4f, h * 0.5f, h * 0.32f,
             SKTextAlign.Left, UseBdfFont);
-        HaText.Draw(c, _canvas, text, ValueColor, x + w * 0.4f, y, w * 0.6f - pad, h * 0.5f, h * 0.36f,
+        HaText.Draw(c, Canvas, text, ValueColor, x + w * 0.4f, y, w * 0.6f - pad, h * 0.5f, h * 0.36f,
             SKTextAlign.Right, UseBdfFont);
     }
 

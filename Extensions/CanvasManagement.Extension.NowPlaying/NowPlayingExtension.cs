@@ -1,8 +1,6 @@
 using System.Text.Json;
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.NowPlaying;
 
@@ -15,13 +13,9 @@ namespace CanvasManagement.Extension.NowPlaying;
     "Shows the track, artist and album art currently playing (fed by the PC companion agent)",
     "Information",
     IconResourceName = "now-playing.svg")]
-public class NowPlayingExtension : ICanvasExtension, IDisposable
+public class NowPlayingExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
-    private SKBitmap? _backBuffer;
     private SKBitmap? _art;
-    private Timer? _timer;
     private float _scale = 1f;
     private int _frame;
 
@@ -32,9 +26,8 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
     private Track _track = new();
     private float _titleScroll;
 
-    internal NowPlayingExtension(ICanvas canvas)
+    internal NowPlayingExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Data Folder", "Folder with current.json (blank = app's nowplaying folder)",
@@ -59,69 +52,28 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
         MaxValue = 64, Unit = "px", Order = 6)]
     public int FontSize { get; set; }
 
-    public string Name => "Now Playing";
-    public bool IsRunning { get; private set; }
+    public override string Name => "Now Playing";
+    protected override double FrameIntervalMs => 200;
 
-    public void Dispose()
+    protected override void OnStart()
     {
-        Stop();
-        _backBuffer?.Dispose();
+        _scale = DisplayScale.GetScale(Canvas.Width, Canvas.Height);
+        _dir = string.IsNullOrWhiteSpace(DataFolder)
+            ? Path.Combine(AppContext.BaseDirectory, "nowplaying")
+            : DataFolder;
+    }
+
+    protected override void OnStop()
+    {
         _art?.Dispose();
-        GC.SuppressFinalize(this);
+        _art = null;
     }
 
-    public void Start()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
-            _dir = string.IsNullOrWhiteSpace(DataFolder)
-                ? Path.Combine(AppContext.BaseDirectory, "nowplaying")
-                : DataFolder;
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(200) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            _art?.Dispose();
-            _art = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try
-            {
-                LoadSnapshot();
-                Render();
-                _frame++;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[NowPlaying] {ex.Message}");
-            }
-        }
+        LoadSnapshot();
+        Draw(canvas);
+        _frame++;
     }
 
     private void LoadSnapshot()
@@ -181,12 +133,8 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
     private static double Num(JsonElement r, string n) =>
         r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var d) ? d : 0;
 
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
-
-        using var canvas = new SKCanvas(bb);
         canvas.Clear(BackgroundColor);
 
         var idle = _track.Title.Length == 0 ||
@@ -194,16 +142,14 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
 
         if (idle)
         {
-            var idleSize = CanvasText.ResolveSize(FontSize, Math.Max(9f, _canvas.Height * 0.12f));
-            CanvasText.Draw(canvas, _canvas, "Nothing playing", new SKColor(150, 150, 160),
-                _canvas.Width / 2f, _canvas.Height / 2f, idleSize, SKTextAlign.Center, UseBdfFont);
-            canvas.Flush();
-            _canvas.SubmitCompletedFrame(bb);
+            var idleSize = CanvasText.ResolveSize(FontSize, Math.Max(9f, Canvas.Height * 0.12f));
+            CanvasText.Draw(canvas, Canvas, "Nothing playing", new SKColor(150, 150, 160),
+                Canvas.Width / 2f, Canvas.Height / 2f, idleSize, SKTextAlign.Center, UseBdfFont);
             return;
         }
 
-        var h = _canvas.Height;
-        var w = _canvas.Width;
+        var h = Canvas.Height;
+        var w = Canvas.Width;
         var pad = Math.Max(2f, 4f * _scale);
 
         // Album art (square) on the left.
@@ -233,10 +179,10 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
         var titleSize = CanvasText.ResolveSize(FontSize, Math.Max(10f, h * 0.26f));
         var subSize = FontSize > 0 ? Math.Max(6f, FontSize * 0.7f) : Math.Max(8f, h * 0.18f);
         var ty = pad + titleSize;
-        var tw = CanvasText.Measure(_canvas, _track.Title, titleSize, UseBdfFont);
+        var tw = CanvasText.Measure(Canvas, _track.Title, titleSize, UseBdfFont);
         if (tw <= textW)
         {
-            CanvasText.Draw(canvas, _canvas, _track.Title, SKColors.White, textX, ty, titleSize,
+            CanvasText.Draw(canvas, Canvas, _track.Title, SKColors.White, textX, ty, titleSize,
                 SKTextAlign.Left, UseBdfFont);
         }
         else
@@ -246,16 +192,16 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
             _titleScroll += 0.6f * _scale;
             var span = tw + textW * 0.4f;
             if (_titleScroll > span) _titleScroll = 0;
-            CanvasText.Draw(canvas, _canvas, _track.Title, SKColors.White, textX - _titleScroll, ty, titleSize,
+            CanvasText.Draw(canvas, Canvas, _track.Title, SKColors.White, textX - _titleScroll, ty, titleSize,
                 SKTextAlign.Left, UseBdfFont);
             canvas.Restore();
         }
 
         var ay = pad + titleSize + subSize * 1.3f;
-        CanvasText.Draw(canvas, _canvas, Trunc(_track.Artist, subSize, textW), new SKColor(200, 205, 215),
+        CanvasText.Draw(canvas, Canvas, Trunc(_track.Artist, subSize, textW), new SKColor(200, 205, 215),
             textX, ay, subSize, SKTextAlign.Left, UseBdfFont);
         if (h > 40 && !string.IsNullOrEmpty(_track.Album))
-            CanvasText.Draw(canvas, _canvas, Trunc(_track.Album, subSize, textW), new SKColor(140, 145, 160),
+            CanvasText.Draw(canvas, Canvas, Trunc(_track.Album, subSize, textW), new SKColor(140, 145, 160),
                 textX, ay + subSize * 1.25f, subSize, SKTextAlign.Left, UseBdfFont);
 
         // Progress bar.
@@ -275,15 +221,12 @@ public class NowPlayingExtension : ICanvasExtension, IDisposable
             canvas.DrawRect(w - pad - s * 3, pad, s, s * 3, pf);
             canvas.DrawRect(w - pad - s, pad, s, s * 3, pf);
         }
-
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private string Trunc(string s, float size, float maxW)
     {
-        if (string.IsNullOrEmpty(s) || CanvasText.Measure(_canvas, s, size, UseBdfFont) <= maxW) return s;
-        while (s.Length > 1 && CanvasText.Measure(_canvas, s + "…", size, UseBdfFont) > maxW) s = s[..^1];
+        if (string.IsNullOrEmpty(s) || CanvasText.Measure(Canvas, s, size, UseBdfFont) <= maxW) return s;
+        while (s.Length > 1 && CanvasText.Measure(Canvas, s + "…", size, UseBdfFont) > maxW) s = s[..^1];
         return s + "…";
     }
 

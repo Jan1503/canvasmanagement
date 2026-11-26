@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.PixelPlumber;
 
@@ -13,7 +11,7 @@ namespace CanvasManagement.Extension.PixelPlumber;
     "Colorful jump'n'run — arrows / WASD + Space, or autopilot",
     "Games",
     IconResourceName = "pixel-plumber.svg")]
-public class PixelPlumberExtension : ICanvasExtension, IDisposable
+public class PixelPlumberExtension : GameExtension
 {
     // d outline, c teal cap, s skin, w/k eye, m mustache, o shirt, t overalls, n button, b shoe
     private static readonly string[] WalkA =
@@ -292,8 +290,6 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
         ".1111111111111.."
     };
 
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _random = new();
     private readonly List<Platform> _plats = new();
     private readonly List<Pit> _pits = new();
@@ -301,8 +297,6 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
     private readonly List<Foe> _foes = new();
     private readonly List<Spark> _sparks = new();
 
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private int _px = 2;
     private int _frame;
     private float _cam;
@@ -323,7 +317,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
     private int _toastLife;
     private float _lastPowerX;
 
-    internal PixelPlumberExtension(ICanvas canvas) => _canvas = canvas;
+    internal PixelPlumberExtension(ICanvas canvas) : base(canvas, GameSong.Adventure) { }
 
     [ExtensionParameter("Game Speed", "Frame interval in milliseconds (lower = faster)", DefaultValue = 28,
         MinValue = 16, MaxValue = 80, Unit = "ms", Order = 1)]
@@ -346,79 +340,25 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Auto Pilot", "AI runs until you press a key in Studio", DefaultValue = true, Order = 6)]
     public bool AutoPilot { get; set; } = true;
 
-    private GameSound? _snd;
-    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Adventure);
+    public override string Name => "Pixel Plumber";
+    protected override double FrameIntervalMs => GameSpeed;
 
-    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
-    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
+    private float GroundY => Canvas.Height - Math.Max(16, 16 * _px);
 
-    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
-    public bool Music { get => _sound.Music; set => _sound.Music = value; }
-
-    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
-        MaxValue = 100, Order = 22)]
-    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
-
-    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
-        MaxValue = 100, Order = 23)]
-    public int MusicVolume
+    protected override void OnStart()
     {
-        get => (int)MathF.Round(_sound.MusicVolume * 100);
-        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
-    }
-
-    public string Name => "Pixel Plumber";
-    public bool IsRunning { get; private set; }
-
-    private float GroundY => _canvas.Height - Math.Max(16, 16 * _px);
-
-    public void Dispose()
-    {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _px = PixelArt.Scale(_canvas.Height);
-            _human = false;
-            _holdX = 0;
-            Reset(full: true);
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(GameSpeed) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _sound.Stop();
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); } catch { }
-        }
+        _px = PixelArt.Scale(Canvas.Height);
+        _human = false;
+        _holdX = 0;
+        Reset(full: true);
     }
 
     private void Reset(bool full)
     {
         _pw = WalkA[0].Length * _px;
         _ph = WalkA.Length * _px;
-        _gravity = Math.Max(0.28f, _canvas.Height * 0.0055f);
-        _baseJump = -(float)Math.Sqrt(Math.Max(2, 2 * _gravity * _canvas.Height * 0.38f));
+        _gravity = Math.Max(0.28f, Canvas.Height * 0.0055f);
+        _baseJump = -(float)Math.Sqrt(Math.Max(2, 2 * _gravity * Canvas.Height * 0.38f));
         _baseWalk = Math.Max(1.4f, (1.6f + Difficulty * 0.12f) * _px);
         _jumpV = _baseJump;
         _walkSpd = _baseWalk;
@@ -433,7 +373,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
         _lastPowerX = -1_000_000;
         _cam = 0;
         _genX = 0;
-        _pxX = _canvas.Width * 0.18f;
+        _pxX = Canvas.Width * 0.18f;
         _pxY = GroundY - _ph;
         _vx = _vy = 0;
         _onGround = true;
@@ -445,17 +385,17 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
             _lives = 3;
         }
 
-        StampGround(0, _canvas.Width * 1.4f);
+        StampGround(0, Canvas.Width * 1.4f);
         // The first stretch is safe ground; the level proper starts after it.
-        _genX = _canvas.Width * 1.4f;
+        _genX = Canvas.Width * 1.4f;
         _stuckX = _pxX;
         _stuckTicks = 0;
         _lastPlan = new PlanSpec(0, 1, 1, -1);
-        while (_genX < _cam + _canvas.Width * 2.2f) GenerateAhead();
+        while (_genX < _cam + Canvas.Width * 2.2f) GenerateAhead();
     }
 
     private void StampGround(float x, float w) =>
-        _plats.Add(new Platform { X = x, Y = GroundY, W = w, H = _canvas.Height - GroundY + 4, Brick = false });
+        _plats.Add(new Platform { X = x, Y = GroundY, W = w, H = Canvas.Height - GroundY + 4, Brick = false });
 
     private void GenerateAhead()
     {
@@ -546,7 +486,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
         }
 
         // One power-up every ~2 screens, not on every platform.
-        var gap = Math.Max(220f, _canvas.Width * 2.1f);
+        var gap = Math.Max(220f, Canvas.Width * 2.1f);
         if (_genX - _lastPowerX < gap || _random.Next(100) >= 70)
             return;
 
@@ -569,41 +509,29 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
         return PickupKind.Gem;
     }
 
-    private void OnTick(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
+        if (_crashTimer > 0)
         {
-            if (!IsRunning || _backBuffer == null) return;
-            try
+            _crashTimer--;
+            if (_crashTimer == 0)
             {
-                if (_timer != null && Math.Abs(_timer.Interval - GameSpeed) > 0.5) _timer.Interval = GameSpeed;
-                if (_crashTimer > 0)
-                {
-                    _crashTimer--;
-                    if (_crashTimer == 0)
-                    {
-                        if (_lives <= 0) Reset(full: true);
-                        else Reset(full: false);
-                    }
-                }
-                else
-                    Update();
-
-                Render();
-                _sound.Duck(_lives <= 0 && _crashTimer > 0 ? 0.3f : 1f);
-                _sound.Update();
-                _frame++;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[PixelPlumber] {ex.Message}");
+                if (_lives <= 0) Reset(full: true);
+                else Reset(full: false);
             }
         }
+        else
+            Update();
+
+        Draw(canvas);
+        Audio.Duck(_lives <= 0 && _crashTimer > 0 ? 0.3f : 1f);
+        Audio.Update();
+        _frame++;
     }
 
     private void Update()
     {
-        while (_genX < _cam + _canvas.Width * 2.4f) GenerateAhead();
+        while (_genX < _cam + Canvas.Width * 2.4f) GenerateAhead();
 
         if (_starTimer > 0) _starTimer--;
         if (_speedTimer > 0) _speedTimer--;
@@ -624,7 +552,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
         Move(0, _vy);
         if (_onGround) _vy = Math.Min(_vy, 0);
 
-        _cam = Math.Max(0, _pxX - _canvas.Width * 0.28f);
+        _cam = Math.Max(0, _pxX - Canvas.Width * 0.28f);
         PruneBehindCamera();
 
         for (var i = _foes.Count - 1; i >= 0; i--)
@@ -645,7 +573,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
                 _vy = _jumpV * 0.62f;
                 _onGround = false;
                 _score += s.Kind == FoeKind.Bat ? 80 : 50;
-                _sound.Play(GameSfx.Stomp);
+                Audio.Play(GameSfx.Stomp);
                 _gfx.Burst(s.X + sw * 0.5f, sy + sh * 0.5f, PixelArt.Hsv(s.Hue, 0.8f, 1f), 14, 2f, 0.6f, 0.06f);
                 _gfx.Pop(s.Kind == FoeKind.Bat ? "+80" : "+50", s.X + sw * 0.5f - _cam, sy - 2, SKColors.White);
                 Burst(s.X + sw * 0.5f, sy, PixelArt.Hsv(s.Hue, 0.8f, 1f));
@@ -656,7 +584,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
             {
                 _foes.RemoveAt(i);
                 _score += 40;
-                _sound.Play(GameSfx.Hit, 0.7f);
+                Audio.Play(GameSfx.Hit, 0.7f);
                 Burst(s.X + sw * 0.5f, sy, new SKColor(255, 230, 80));
                 continue;
             }
@@ -676,7 +604,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
             _pickups.RemoveAt(i);
         }
 
-        if (_pxY > _canvas.Height + 8)
+        if (_pxY > Canvas.Height + 8)
         {
             Die();
             return;
@@ -721,8 +649,6 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
 
     private static readonly PlanSpec[] Plans = BuildPlans();
     private PlanSpec _lastPlan = new(0, 1, 1, -1);
-    private static readonly bool Debug = Environment.GetEnvironmentVariable("PLUMBER_DEBUG") == "1";
-    private bool DebugTrace;
     private Foe[] _simFoes = [];
     private float _stuckX, _lastScore;
     private bool _wasGround = true;
@@ -769,17 +695,6 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
             }
         }
 
-        if (Debug && _stuckTicks == 50)
-        {
-            var dead = Plans.Count(pl => Simulate(pl, horizon) < -50000);
-            DebugTrace = true;
-            Simulate(new PlanSpec(0, 1, 1, -1), horizon);
-            Simulate(new PlanSpec(0, 1, 1, -1, true), horizon);
-            Simulate(new PlanSpec(6, 0, 1, -1), horizon);
-            DebugTrace = false;
-            Console.WriteLine("   " + string.Join(" | ", Plans.Select(pl => (pl, sc: Simulate(pl, horizon))).OrderByDescending(q => q.sc).Take(8).Select(q => $"k{q.pl.K} {q.pl.W1}/{q.pl.W2} j{q.pl.Jump}={q.sc:0}")));
-            Console.WriteLine($"[AI] x {_pxX:0} y {_pxY:0} ground {_onGround} best k{best.K} {best.W1}/{best.W2} j{best.Jump} score {bestScore:0} dead {dead}/{Plans.Length} foes {string.Join(",", _foes.Where(f => f.X < _pxX + 120).Select(f => $"{f.Kind}@{f.X - _pxX:0}"))} pits {string.Join(",", _pits.Where(q => q.X > _pxX - 20 && q.X < _pxX + 150).Select(q => $"{q.X - _pxX:0}w{q.W:0}"))}");
-        }
         // Never stall for good: if nothing has moved him forward for a few seconds, just go.
         if (_pxX > _stuckX + 8 * _px) { _stuckX = _pxX; _stuckTicks = 0; }
         else if (++_stuckTicks > 90)
@@ -882,7 +797,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
                 gain += p.Kind == PickupKind.Coin ? 25 : 60;
             }
 
-            if (b.Y > _canvas.Height + 8)
+            if (b.Y > Canvas.Height + 8)
             {
                 dead = t;
                 break;
@@ -900,7 +815,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
                 MoveBody(ref b, _baseWalk, 0);
                 b.OnGround = false;
                 MoveBody(ref b, 0, b.Vy);
-                if (b.Y > _canvas.Height + 8)
+                if (b.Y > Canvas.Height + 8)
                 {
                     dead = horizon;
                     break;
@@ -909,7 +824,6 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
         }
         b.X = endX;
 
-        if (DebugTrace) Console.WriteLine($"      sim k{plan.K} {plan.W1}/{plan.W2} j{plan.Jump} r{plan.Reflex}: dead {dead} end x {b.X - startX:0} y {b.Y:0} ground {b.OnGround} mid {midX - startX:0} gain {gain}");
         // A death far ahead comes from the simple runner, not from this plan: weigh it, do not veto it.
         if (dead >= 0 && dead < horizon * 0.7f) return -100000 + dead * 100;
         // The closer to the horizon, the less it says about this plan.
@@ -995,7 +909,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
     private void DoJump()
     {
         if (!_onGround) return;
-        _sound.Play(GameSfx.Jump, 0.6f, 0, _springTimer > 0 ? 0.8f : 1f);
+        Audio.Play(GameSfx.Jump, 0.6f, 0, _springTimer > 0 ? 0.8f : 1f);
         _vy = _jumpV;
         _onGround = false;
         Burst(_pxX + _pw * 0.5f, _pxY + _ph, new SKColor(200, 170, 90));
@@ -1005,12 +919,10 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
     {
         _lives--;
         _crashTimer = 36;
-        _sound.Play(_lives <= 0 ? GameSfx.GameOver : GameSfx.Die, 0.8f);
+        Audio.Play(_lives <= 0 ? GameSfx.GameOver : GameSfx.Die, 0.8f);
         _gfx.Burst(_pxX + _pw / 2f, _pxY + _ph / 2f, new SKColor(255, 90, 60), 24, 2.6f, 0.8f, 0.08f);
         _gfx.Flash(new SKColor(255, 60, 40), 0.6f);
         _gfx.Shake(5);
-        if (Debug)
-            Console.WriteLine($"[DIE] x {_pxX:0} y {_pxY:0} vy {_vy:0.0} ground {_onGround} stuck {_stuckTicks} plan k{_lastPlan.K} {_lastPlan.W1}/{_lastPlan.W2} j{_lastPlan.Jump} last {_lastScore:0} foes {string.Join(",", _foes.Where(f => Math.Abs(f.X - _pxX) < 60).Select(f => $"{f.Kind}@{f.X - _pxX:0},{f.Y - _pxY:0}"))}");
         Burst(_pxX + _pw * 0.5f, _pxY + _ph * 0.5f, new SKColor(255, 80, 60));
     }
 
@@ -1031,35 +943,35 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Left|A", Order = 1)]
     public void MoveLeft()
     {
-        lock (_lock) { _human = true; _holdX = -1; }
+        lock (Sync) { _human = true; _holdX = -1; }
     }
 
     [ExtensionMethod("Move Right", "Hold right — takes over from autopilot",
         Category = "Controls", KeyboardShortcut = "Right|D", Order = 2)]
     public void MoveRight()
     {
-        lock (_lock) { _human = true; _holdX = 1; }
+        lock (Sync) { _human = true; _holdX = 1; }
     }
 
     [ExtensionMethod("Release Left", "Release left",
         Category = "Controls", KeyboardShortcut = "Left:up|A:up", Order = 3)]
     public void ReleaseLeft()
     {
-        lock (_lock) { if (_holdX < 0) _holdX = 0; }
+        lock (Sync) { if (_holdX < 0) _holdX = 0; }
     }
 
     [ExtensionMethod("Release Right", "Release right",
         Category = "Controls", KeyboardShortcut = "Right:up|D:up", Order = 4)]
     public void ReleaseRight()
     {
-        lock (_lock) { if (_holdX > 0) _holdX = 0; }
+        lock (Sync) { if (_holdX > 0) _holdX = 0; }
     }
 
     [ExtensionMethod("Jump", "Jump — takes over from autopilot",
         Category = "Controls", KeyboardShortcut = "Space|Up|W", Order = 5)]
     public void Jump()
     {
-        lock (_lock)
+        lock (Sync)
         {
             _human = true;
             if (_crashTimer > 0)
@@ -1080,17 +992,14 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
     ///     A sun and drifting clouds over the hills, glowing power-ups, dust when he runs and lands, a rainbow
     ///     trail with the star, bursts and score pop-ups for stomps and coins, and a shake when he gets hurt.
     /// </summary>
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
         var gnow = _gclock.Elapsed.TotalSeconds;
         var gdt = (float)Math.Clamp(gnow - _glast, 0.001, 0.1);
         _glast = gnow;
         _gfx.Update(gdt);
-        using var canvas = new SKCanvas(bb);
-        var w = _canvas.Width;
-        var h = _canvas.Height;
+        var w = Canvas.Width;
+        var h = Canvas.Height;
 
         canvas.Clear(new SKColor(18, 10, 28));
         using (var sky = new SKPaint())
@@ -1191,24 +1100,21 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
             if (_starTimer > 0) hud += "  STAR";
             if (_speedTimer > 0) hud += "  SPD";
             if (_springTimer > 0) hud += "  JMP";
-            CanvasText.Draw(canvas, _canvas, hud, SKColors.White,
+            CanvasText.Draw(canvas, Canvas, hud, SKColors.White,
                 4, size + 1, size, SKTextAlign.Left, UseBdfFont);
             if (_toastLife > 0 && _toast.Length > 0)
-                CanvasText.Draw(canvas, _canvas, _toast, new SKColor(255, 230, 90),
+                CanvasText.Draw(canvas, Canvas, _toast, new SKColor(255, 230, 90),
                     w / 2f, size * 2.2f, size, SKTextAlign.Center, UseBdfFont);
         }
 
-        _gfx.DrawOverlay(canvas, _canvas, w, h, Math.Max(7f, h * 0.07f));
+        _gfx.DrawOverlay(canvas, Canvas, w, h, Math.Max(7f, h * 0.07f));
         if (_crashTimer > 0)
         {
             var msg = _lives <= 0 ? "TRY AGAIN" : "OUCH";
             var size = CanvasText.ResolveSize(FontSize, Math.Max(12f, h * 0.14f));
-            CanvasText.Draw(canvas, _canvas, msg, SKColors.White,
+            CanvasText.Draw(canvas, Canvas, msg, SKColors.White,
                 w / 2f, h * 0.42f, size, SKTextAlign.Center, UseBdfFont);
         }
-
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private void DrawHills(SKCanvas canvas, float parallax, SKColor col, int amp)
@@ -1216,7 +1122,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
         using var p = new SKPaint { Color = col, IsAntialias = false, Style = SKPaintStyle.Fill };
         var baseY = GroundY - amp * _px;
         var scroll = _cam * parallax;
-        for (var x = 0; x < _canvas.Width; x++)
+        for (var x = 0; x < Canvas.Width; x++)
         {
             var wx = x + scroll;
             var y = baseY
@@ -1399,37 +1305,37 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
         switch (p.Kind)
         {
             case PickupKind.Heart:
-                _sound.Play(GameSfx.LevelUp, 0.7f);
+                Audio.Play(GameSfx.LevelUp, 0.7f);
                 _lives = Math.Min(9, _lives + 1);
                 Toast("1 UP");
                 Burst(p.X, p.Y, new SKColor(255, 70, 100));
                 break;
             case PickupKind.Star:
-                _sound.Play(GameSfx.PowerUp, 0.7f);
+                Audio.Play(GameSfx.PowerUp, 0.7f);
                 _starTimer = 200;
                 Toast("STAR");
                 Burst(p.X, p.Y, new SKColor(255, 230, 70));
                 break;
             case PickupKind.Speed:
-                _sound.Play(GameSfx.PowerUp, 0.7f, 0, 1.25f);
+                Audio.Play(GameSfx.PowerUp, 0.7f, 0, 1.25f);
                 _speedTimer = 180;
                 Toast("SPEED");
                 Burst(p.X, p.Y, new SKColor(80, 200, 255));
                 break;
             case PickupKind.Spring:
-                _sound.Play(GameSfx.PowerUp, 0.7f, 0, 0.85f);
+                Audio.Play(GameSfx.PowerUp, 0.7f, 0, 0.85f);
                 _springTimer = 180;
                 Toast("SUPER JUMP");
                 Burst(p.X, p.Y, new SKColor(80, 220, 70));
                 break;
             case PickupKind.Gem:
-                _sound.Play(GameSfx.Score, 0.7f);
+                Audio.Play(GameSfx.Score, 0.7f);
                 _score += 100;
                 Toast("+100");
                 Burst(p.X, p.Y, new SKColor(180, 90, 255));
                 break;
             default:
-                _sound.Play(GameSfx.Coin, 0.6f);
+                Audio.Play(GameSfx.Coin, 0.6f);
                 _gfx.Burst(p.X + 3 * _px, p.Y + 3 * _px, new SKColor(255, 230, 80), 8, 1.4f, 0.4f, 0, true);
                 _score += 10;
                 Burst(p.X, p.Y, new SKColor(255, 220, 60));
@@ -1573,7 +1479,7 @@ public class PixelPlumberExtension : ICanvasExtension, IDisposable
 
     private void PruneBehindCamera()
     {
-        var cutoff = _cam - Math.Max(32, _canvas.Width);
+        var cutoff = _cam - Math.Max(32, Canvas.Width);
         _plats.RemoveAll(p => p.X + p.W < cutoff);
         _pits.RemoveAll(p => p.X + p.W < cutoff);
         _pickups.RemoveAll(p => p.X < cutoff);

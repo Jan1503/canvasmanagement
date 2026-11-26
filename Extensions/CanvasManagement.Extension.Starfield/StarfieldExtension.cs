@@ -7,18 +7,14 @@ namespace CanvasManagement.Extension.Starfield;
     "Classic 3D starfield effect with parallax scrolling stars",
     "Visual Effects",
     IconResourceName = "starfield.svg")]
-public class StarfieldExtension : IDisposable
+public class StarfieldExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
     private readonly Random _random = new();
     private readonly List<Star> _stars = new();
-    private Task? _animationTask;
-    private SKBitmap? _backBuffer;
-    private CancellationTokenSource? _cancellationTokenSource;
+    private readonly SKPaint _starPaint = new() { Style = SKPaintStyle.Fill };
 
-    internal StarfieldExtension(ICanvas canvas)
+    internal StarfieldExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Background Color", "Background color for the starfield",
@@ -40,165 +36,94 @@ public class StarfieldExtension : IDisposable
         DefaultValue = false)]
     public bool ColoredStars { get; set; } = false;
 
-    public string Name => "Starfield";
+    public override string Name => "Starfield";
 
-    public bool IsRunning { get; private set; }
+    protected override double FrameIntervalMs => 33;
 
-    public void Dispose()
+    protected override bool ClearOnStop => false;
+
+    /// <summary>Stars are added by the first frame (Star Count).</summary>
+    protected override void OnStart() => _stars.Clear();
+
+    protected override void OnStop()
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        _stars.Clear();
+        try { Canvas.Clear(); } catch { /* canvas already gone */ }
     }
 
-    public void Start()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        if (IsRunning) return;
+        var centerX = width / 2f;
+        var centerY = height / 2f;
 
-        IsRunning = true;
+        // Apply Star Count changes live.
+        while (_stars.Count < StarCount)
+            _stars.Add(new Star
+            {
+                X = _random.Next(Canvas.Width),
+                Y = _random.Next(Canvas.Height),
+                Z = _random.Next(1, 20),
+                Speed = SpeedRange(),
+                Hue = ColoredStars ? _random.Next(360) : 0
+            });
+        if (_stars.Count > StarCount)
+            _stars.RemoveRange(StarCount, _stars.Count - StarCount);
 
-        // Create back buffer
-        _backBuffer?.Dispose();
-        _backBuffer = new SKBitmap(new SKImageInfo(_canvas.Width, _canvas.Height,
-            SKColorType.Bgra8888, SKAlphaType.Premul));
+        // Clear with background color
+        canvas.Clear(BackgroundColor);
 
-        _cancellationTokenSource = new CancellationTokenSource();
-        var ct = _cancellationTokenSource.Token;
-
-        _animationTask = Task.Run(async () =>
+        foreach (var star in _stars)
         {
-            // Initialize stars
-            _stars.Clear();
-            var centerX = _canvas.Width / 2f;
-            var centerY = _canvas.Height / 2f;
+            // Update star position (moving outward from center)
+            var dx = star.X - centerX;
+            var dy = star.Y - centerY;
 
-            for (var i = 0; i < StarCount; i++)
-                _stars.Add(new Star
-                {
-                    X = _random.Next(_canvas.Width),
-                    Y = _random.Next(_canvas.Height),
-                    Z = _random.Next(1, 20),
-                    Speed = SpeedRange(),
-                    Hue = ColoredStars ? _random.Next(360) : 0
-                });
+            star.X += dx / star.Z * star.Speed;
+            star.Y += dy / star.Z * star.Speed;
+            star.Z -= 0.1f;
 
-            // One reused paint instead of allocating one per star per frame.
-            using var starPaint = new SKPaint { Style = SKPaintStyle.Fill };
-
-            try
+            // Reset star when it goes off screen or too close
+            if (star.X < 0 || star.X > Canvas.Width ||
+                star.Y < 0 || star.Y > Canvas.Height ||
+                star.Z < 1)
             {
-                while (!ct.IsCancellationRequested)
-                {
-                    if (_backBuffer == null) break;
-
-                    // Apply Star Count changes live.
-                    while (_stars.Count < StarCount)
-                        _stars.Add(new Star
-                        {
-                            X = _random.Next(_canvas.Width),
-                            Y = _random.Next(_canvas.Height),
-                            Z = _random.Next(1, 20),
-                            Speed = SpeedRange(),
-                            Hue = ColoredStars ? _random.Next(360) : 0
-                        });
-                    if (_stars.Count > StarCount)
-                        _stars.RemoveRange(StarCount, _stars.Count - StarCount);
-
-                    // Render to back buffer
-                    using var canvas = new SKCanvas(_backBuffer);
-
-                    // Clear with background color
-                    canvas.Clear(BackgroundColor);
-
-                    foreach (var star in _stars)
-                    {
-                        // Update star position (moving outward from center)
-                        var dx = star.X - centerX;
-                        var dy = star.Y - centerY;
-
-                        star.X += dx / star.Z * star.Speed;
-                        star.Y += dy / star.Z * star.Speed;
-                        star.Z -= 0.1f;
-
-                        // Reset star when it goes off screen or too close
-                        if (star.X < 0 || star.X > _canvas.Width ||
-                            star.Y < 0 || star.Y > _canvas.Height ||
-                            star.Z < 1)
-                        {
-                            star.X = centerX + _random.Next(-10, 10);
-                            star.Y = centerY + _random.Next(-10, 10);
-                            star.Z = 20;
-                            star.Speed = SpeedRange();
-                            if (ColoredStars)
-                                star.Hue = _random.Next(360);
-                        }
-
-                        // Draw star (size based on depth)
-                        var size = (int)(5 - star.Z / 4);
-                        if (size < 1) size = 1;
-
-                        SKColor color;
-                        if (ColoredStars)
-                        {
-                            var brightness = (byte)Math.Max(0, Math.Min(255, 255 - star.Z * 10));
-                            color = SKColor.FromHsl(star.Hue, 100, brightness / 255f * 50);
-                        }
-                        else
-                        {
-                            var brightness = (byte)Math.Max(0, Math.Min(255, 255 - star.Z * 10));
-                            color = new SKColor(brightness, brightness, brightness);
-                        }
-
-                        // Apply canvas opacity to star color
-                        color = new SKColor(color.Red, color.Green, color.Blue,
-                            (byte)(_canvas.Opacity * 255));
-
-                        starPaint.Color = color;
-                        canvas.DrawRect((int)star.X, (int)star.Y, size, size, starPaint);
-                    }
-
-                    canvas.Flush();// Atomic submission
-                    _canvas.SubmitCompletedFrame(_backBuffer);
-
-                    await Task.Delay(33, ct); // ~30 FPS
-                }
+                star.X = centerX + _random.Next(-10, 10);
+                star.Y = centerY + _random.Next(-10, 10);
+                star.Z = 20;
+                star.Speed = SpeedRange();
+                if (ColoredStars)
+                    star.Hue = _random.Next(360);
             }
-            catch (OperationCanceledException)
+
+            // Draw star (size based on depth)
+            var size = (int)(5 - star.Z / 4);
+            if (size < 1) size = 1;
+
+            SKColor color;
+            if (ColoredStars)
             {
-                // Expected when cancellation is requested
+                var brightness = (byte)Math.Max(0, Math.Min(255, 255 - star.Z * 10));
+                color = SKColor.FromHsl(star.Hue, 100, brightness / 255f * 50);
             }
-            finally
+            else
             {
-                _canvas.Clear();
-                _stars.Clear();
-                IsRunning = false;
+                var brightness = (byte)Math.Max(0, Math.Min(255, 255 - star.Z * 10));
+                color = new SKColor(brightness, brightness, brightness);
             }
-        }, ct);
+
+            // Apply canvas opacity to star color
+            color = new SKColor(color.Red, color.Green, color.Blue,
+                (byte)(Canvas.Opacity * 255));
+
+            _starPaint.Color = color;
+            canvas.DrawRect((int)star.X, (int)star.Y, size, size, _starPaint);
+        }
     }
 
-    public void Stop()
+    protected override void Dispose(bool disposing)
     {
-        if (!IsRunning) return;
-
-        try
-        {
-            _cancellationTokenSource?.Cancel();
-            _animationTask?.Wait(TimeSpan.FromSeconds(2));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Console.WriteLine($"Error stopping starfield: {ex.Message}");
-        }
-        finally
-        {
-            _cancellationTokenSource?.Dispose();
-            _cancellationTokenSource = null;
-            _animationTask = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            _canvas.Clear();
-            IsRunning = false;
-        }
+        base.Dispose(disposing);
+        if (disposing) _starPaint.Dispose();
     }
 
     /// <summary>Random speed in [MinSpeed, MaxSpeed] (inclusive) that is safe when the two are equal.</summary>

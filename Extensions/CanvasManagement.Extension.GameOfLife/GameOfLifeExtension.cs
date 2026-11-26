@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Canvas.Extension.GameOfLife;
 
@@ -9,22 +7,15 @@ namespace CanvasManagement.Canvas.Extension.GameOfLife;
     "Classic cellular automaton simulation with evolving patterns",
     "Games",
     IconResourceName = "gameoflife.svg")]
-public class GameOfLifeExtension : IDisposable
+public class GameOfLifeExtension : FrameExtension
 {
-    // OPTIMIZATION: Pre-generated random color palette
+    // Pre-generated random colour palette for "random cell color on restart".
     private static readonly SKColor[] _colorPalette;
-    private readonly SKBitmap _backBuffer;
-    private readonly Board _board;
-    private readonly ICanvas _canvas;
     private readonly Random _random = new();
-
-    private readonly SKBitmap _targetBitmap;
-    private bool _disposed;
-    private Timer? _timer;
+    private Board? _board;
 
     static GameOfLifeExtension()
     {
-        // OPTIMIZATION: Pre-generate random colors once
         var random = new Random();
         _colorPalette = new SKColor[100];
         var colorFields = typeof(SKColors).GetFields();
@@ -36,12 +27,8 @@ public class GameOfLifeExtension : IDisposable
         }
     }
 
-    internal GameOfLifeExtension(ICanvas canvas)
+    internal GameOfLifeExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
-        _targetBitmap = new SKBitmap(canvas.Width, canvas.Height);
-        _backBuffer = new SKBitmap(canvas.Width, canvas.Height);
-        _board = new Board(canvas.Width, canvas.Height);
     }
 
     [ExtensionParameter("Initial Density", "Initial population density (0.0 = empty, 1.0 = full)",
@@ -65,92 +52,49 @@ public class GameOfLifeExtension : IDisposable
         DefaultValue = true)]
     public bool AutoRestartRandomCellColor { get; set; } = true;
 
-    public string Name => "Conway's Game of Life";
+    public override string Name => "Conway's Game of Life";
 
-    public bool IsRunning { get; private set; }
+    protected override double FrameIntervalMs => UpdateSpeed;
 
-    public void Dispose()
-    {
-        if (_disposed) return;
+    protected override bool ClearOnStop => false;
 
-        Stop();
-        _targetBitmap?.Dispose();
-        _backBuffer?.Dispose();
-        _disposed = true;
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        if (IsRunning) return;
-
-        _board.Start(InitialDensity);
-
-        _timer?.Dispose();
-        _timer = new Timer();
-        _timer.Elapsed += TimerOnElapsed;
-        _timer.Interval = UpdateSpeed;
-        _timer.AutoReset = true;
-        _timer.Start();
-
-        IsRunning = true;
+    protected override void OnStart() =>
         Console.WriteLine($"Game of Life started - Density: {InitialDensity:P0}, Speed: {UpdateSpeed}ms");
+
+    protected override void OnStop() => Console.WriteLine("Game of Life stopped");
+
+    /// <summary>One cell per pixel: a new board for every canvas size.</summary>
+    protected override void OnResize(int width, int height)
+    {
+        _board = new Board(width, height);
+        _board.Start(InitialDensity);
     }
 
-    public void Stop()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        if (!IsRunning) return;
-
-        _timer?.Stop();
-        _timer?.Dispose();
-        _timer = null;
-        IsRunning = false;
-
-        Console.WriteLine("Game of Life stopped");
-    }
-
-    public void Clear()
-    {
-        _board.Clear();
-        _canvas.Clear(BackgroundColor);
-    }
-
-    // OPTIMIZATION: Use pre-generated color palette
-    private SKColor GetRandomColor()
-    {
-        return _colorPalette[_random.Next(_colorPalette.Length)];
-    }
-
-    private void TimerOnElapsed(object? sender, ElapsedEventArgs e)
-    {
-        if (!IsRunning) return;
+        if (_board == null || BackBuffer == null) return;
 
         _board.Advance();
+        BoardRenderer.DrawBoard(_board, BackBuffer, CellColor, BackgroundColor);
 
-        // Render to target bitmap (this is the game state)
-        Render.DrawBoard(_board, _targetBitmap, CellColor, BackgroundColor);
-
-        // Copy target bitmap to back buffer (already has background from Render.DrawBoard)
-        // The Render.DrawBoard method already handles background, so we can just copy
-        _targetBitmap.CopyTo(_backBuffer);// Use SubmitCompletedFrame for atomic, flicker-free rendering
-        _canvas.SubmitCompletedFrame(_backBuffer);
-
-        // OPTIMIZATION: Check for stuck patterns less frequently
-        if (AutoRestart && _board.Generations.Count > 20 && _board.CurrentGeneration.No % 20 == 0)
-            if (_board.Generations.TakeLast(20).DistinctBy(a => new { a.CellsAlive, a.CellsDead }).Count() <= 6)
-            {
-                Console.WriteLine("Pattern stuck - Restarting with new configuration");
-                Stop();
-                Clear();
-
-                if (AutoRestartRandomCellColor) CellColor = GetRandomColor();
-
-                Start();
-            }
+        // Every 20 generations: a pattern that only repeats a few states is stuck; start a new one.
+        if (AutoRestart && _board.Generations.Count > 20 && _board.CurrentGeneration.No % 20 == 0 &&
+            _board.Generations.TakeLast(20).DistinctBy(a => new { a.CellsAlive, a.CellsDead }).Count() <= 6)
+        {
+            Console.WriteLine("Pattern stuck - Restarting with new configuration");
+            if (AutoRestartRandomCellColor) CellColor = _colorPalette[_random.Next(_colorPalette.Length)];
+            _board.Clear();
+            _board.Start(InitialDensity);
+        }
     }
 
-    ~GameOfLifeExtension()
+    /// <summary>Empties the board.</summary>
+    public void Clear()
     {
-        Dispose();
+        lock (Sync)
+        {
+            _board?.Clear();
+            Canvas.Clear(BackgroundColor);
+        }
     }
 }

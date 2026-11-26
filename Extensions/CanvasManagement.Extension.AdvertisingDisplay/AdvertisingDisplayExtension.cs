@@ -1,9 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Text.RegularExpressions;
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.AdvertisingDisplay;
 
@@ -129,19 +127,13 @@ public enum TextEffect
     "borders and optional live news/stats feed. Fully runtime-configurable.",
     "Text & Display",
     IconResourceName = "advertising.svg")]
-public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
+public class AdvertisingDisplayExtension : FrameExtension
 {
     private static readonly char[] MessageSeparators = { '|', '\n' };
 
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _random = new();
-    private readonly float _scale;
+    private float _scale;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
-
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
-    private bool _disposed;
 
     // Animation
     private int _frame;
@@ -158,16 +150,14 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
     private readonly Dictionary<string, SKBitmap> _decoMasks = new();
 
     // Live data source
-    private HttpClient? _http;
-    private Timer? _dataTimer;
+    private System.Timers.Timer? _dataTimer;
     private volatile bool _fetching;
 
     private static string[] DefaultMessages =>
         new[] { "WELCOME!", "FRESH COFFEE - 2.50", "OPEN 7:00 - 19:00", "TRY OUR CAKES" };
 
-    internal AdvertisingDisplayExtension(ICanvas canvas)
+    internal AdvertisingDisplayExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
         _scale = DisplayScale.GetScale(canvas.Width, canvas.Height);
     }
 
@@ -378,77 +368,46 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
     // ICanvasExtension
     // ───────────────────────────────────────────────────────────────────────
 
-    public string Name => "Advertising Display";
-    public bool IsRunning { get; private set; }
+    public override string Name => "Advertising Display";
 
-    public void Start()
+    protected override double FrameIntervalMs => 33;
+
+    protected override bool ClearOnStop => false;
+
+    protected override void OnStart()
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(new SKImageInfo(_canvas.Width, _canvas.Height, SKColorType.Bgra8888,
-                SKAlphaType.Premul));
-
-            _frame = 0;
-            BuildLanes();
-            InitDecorations();
-            SpawnConfetti();
-
-            _timer = new Timer(33) { AutoReset = true }; // ~30 FPS
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-
-            IsRunning = true;
-
-            StartDataSource();
-            Console.WriteLine($"[ADVERT] Started ({_messages.Length} message(s), dir={Direction})");
-        }
+        _frame = 0;
+        StartDataSource();
+        Console.WriteLine($"[ADVERT] Started ({_messages.Length} message(s), dir={Direction})");
     }
 
-    public void Stop()
+    /// <summary>Lanes, decorations and confetti are laid out for the canvas size.</summary>
+    protected override void OnResize(int width, int height)
     {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-
-            _dataTimer?.Stop();
-            _dataTimer?.Dispose();
-            _dataTimer = null;
-
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-
-            foreach (var lane in _lanes) lane.Dispose();
-            _lanes.Clear();
-
-            _confetti.Clear();
-            _deco.Clear();
-            foreach (var m in _decoMasks.Values) m.Dispose();
-            _decoMasks.Clear();
-
-            IsRunning = false;
-
-            try { _canvas.Clear(); }
-            catch { /* ignore */ }
-
-            Console.WriteLine("[ADVERT] Stopped");
-        }
+        _scale = DisplayScale.GetScale(width, height);
+        BuildLanes();
+        InitDecorations();
+        SpawnConfetti();
     }
 
-    public void Dispose()
+    protected override void OnStop()
     {
-        if (_disposed) return;
-        Stop();
-        _http?.Dispose();
-        _http = null;
-        _disposed = true;
-        GC.SuppressFinalize(this);
+        _dataTimer?.Stop();
+        _dataTimer?.Dispose();
+        _dataTimer = null;
+
+        foreach (var lane in _lanes) lane.Dispose();
+        _lanes.Clear();
+
+        _confetti.Clear();
+        _deco.Clear();
+        foreach (var m in _decoMasks.Values) m.Dispose();
+        _decoMasks.Clear();
+
+        try { Canvas.Clear(); }
+        catch { /* canvas already gone */ }
+
+        Console.WriteLine("[ADVERT] Stopped");
     }
 
     // ───────────────────────────────────────────────────────────────────────
@@ -466,7 +425,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
     public void AddMessage(string message)
     {
         if (string.IsNullOrWhiteSpace(message)) return;
-        lock (_lock)
+        lock (Sync)
         {
             var list = new List<string>(_messages) { message.Trim() };
             _messages = list.ToArray();
@@ -477,7 +436,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
     [ExtensionMethod("Next Message", "Skip to the next message immediately", Category = "Playback", Order = 3)]
     public void NextMessage()
     {
-        lock (_lock)
+        lock (Sync)
         {
             var now = _clock.Elapsed.TotalMilliseconds;
             foreach (var lane in _lanes) lane.ForceNext(now);
@@ -494,73 +453,55 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
     // Render loop
     // ───────────────────────────────────────────────────────────────────────
 
-    private void OnTick(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        if (!IsRunning) return;
-
-        lock (_lock)
+        if (_rebuildLanes)
         {
-            if (_backBuffer == null) return;
-
-            if (_rebuildLanes)
-            {
-                BuildLanes();
-                _rebuildLanes = false;
-            }
-
-            var nowMs = _clock.Elapsed.TotalMilliseconds;
-
-            // In single-line mode (no Lines defined) the simple properties feed the one lane live so
-            // changing them in the GUI takes effect immediately without a full rebuild.
-            if (_lines.Count == 0 && _lanes.Count == 1)
-                RefreshLaneFromGlobals(_lanes[0]);
-
-            try
-            {
-                using var canvas = new SKCanvas(_backBuffer);
-                var w = _backBuffer.Width;
-                var h = _backBuffer.Height;
-                canvas.Clear(BackgroundColor);
-
-                DrawDecorations(canvas, w, h); // floating background graphics/emoji
-                DrawBorder(canvas, w, h);
-
-                // Stack the lanes into horizontal bands sized by their weight.
-                var totalWeight = 0f;
-                foreach (var l in _lanes) totalWeight += Math.Max(0.01f, l.Weight);
-                if (totalWeight <= 0f) totalWeight = 1f;
-
-                var advanced = false;
-                float yCursor = 0f;
-                for (var i = 0; i < _lanes.Count; i++)
-                {
-                    var lane = _lanes[i];
-                    var bandH = i == _lanes.Count - 1
-                        ? (int)Math.Round(h - yCursor)
-                        : (int)Math.Round(Math.Max(0.01f, lane.Weight) / totalWeight * h);
-                    if (bandH <= 0) continue;
-
-                    canvas.Save();
-                    canvas.Translate(0, (int)Math.Round(yCursor));
-                    canvas.ClipRect(new SKRect(0, 0, w, bandH));
-                    advanced |= lane.Render(canvas, w, bandH, _frame, nowMs, _scale);
-                    canvas.Restore();
-                    yCursor += bandH;
-                }
-
-                if (advanced) SpawnConfetti();
-                UpdateAndDrawConfetti(canvas, w, h); // on top of everything
-
-                canvas.Flush();
-                _canvas.SubmitCompletedFrame(_backBuffer);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ADVERT] Render error: {ex.Message}");
-            }
-
-            _frame++;
+            BuildLanes();
+            _rebuildLanes = false;
         }
+
+        var nowMs = _clock.Elapsed.TotalMilliseconds;
+
+        // In single-line mode (no Lines defined) the simple properties feed the one lane live so
+        // changing them in the GUI takes effect immediately without a full rebuild.
+        if (_lines.Count == 0 && _lanes.Count == 1)
+            RefreshLaneFromGlobals(_lanes[0]);
+
+        var w = width;
+        var h = height;
+        canvas.Clear(BackgroundColor);
+
+        DrawDecorations(canvas, w, h); // floating background graphics/emoji
+        DrawBorder(canvas, w, h);
+
+        // Stack the lanes into horizontal bands sized by their weight.
+        var totalWeight = 0f;
+        foreach (var l in _lanes) totalWeight += Math.Max(0.01f, l.Weight);
+        if (totalWeight <= 0f) totalWeight = 1f;
+
+        var advanced = false;
+        float yCursor = 0f;
+        for (var i = 0; i < _lanes.Count; i++)
+        {
+            var lane = _lanes[i];
+            var bandH = i == _lanes.Count - 1
+                ? (int)Math.Round(h - yCursor)
+                : (int)Math.Round(Math.Max(0.01f, lane.Weight) / totalWeight * h);
+            if (bandH <= 0) continue;
+
+            canvas.Save();
+            canvas.Translate(0, (int)Math.Round(yCursor));
+            canvas.ClipRect(new SKRect(0, 0, w, bandH));
+            advanced |= lane.Render(canvas, w, bandH, _frame, nowMs, _scale);
+            canvas.Restore();
+            yCursor += bandH;
+        }
+
+        if (advanced) SpawnConfetti();
+        UpdateAndDrawConfetti(canvas, w, h); // on top of everything
+
+        _frame++;
     }
 
     // ───────────────────────────────────────────────────────────────────────
@@ -590,7 +531,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
     /// <summary>A lane seeded from every global property (the single-line default).</summary>
     private MessageLane CreateLaneFromGlobals()
     {
-        return new MessageLane(_canvas, _random)
+        return new MessageLane(Canvas, _random)
         {
             Messages = _messages,
             Direction = Direction,
@@ -671,11 +612,11 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
 
     private void SpawnConfetti()
     {
-        if (!Confetti || _backBuffer == null) return;
+        if (!Confetti || BackBuffer == null) return;
 
-        var w = _backBuffer.Width;
-        var h = _backBuffer.Height;
-        var size = Math.Max(2, _canvas.ScaleSize(3));
+        var w = BackBuffer.Width;
+        var h = BackBuffer.Height;
+        var size = Math.Max(2, Canvas.ScaleSize(3));
         var count = Math.Clamp(w / 6, 20, 80);
 
         for (var i = 0; i < count; i++)
@@ -731,9 +672,9 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
 
     private void ReinitDecorations()
     {
-        lock (_lock)
+        lock (Sync)
         {
-            if (IsRunning && _backBuffer != null) InitDecorations();
+            if (IsRunning && BackBuffer != null) InitDecorations();
         }
     }
 
@@ -765,9 +706,9 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
         EffectSpeed = 0.5;
 
         _rebuildLanes = true;
-        lock (_lock)
+        lock (Sync)
         {
-            if (IsRunning && _backBuffer != null) InitDecorations();
+            if (IsRunning && BackBuffer != null) InitDecorations();
         }
     }
 
@@ -1018,9 +959,9 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
         }
 
         _rebuildLanes = true;
-        lock (_lock)
+        lock (Sync)
         {
-            if (IsRunning && _backBuffer != null) InitDecorations();
+            if (IsRunning && BackBuffer != null) InitDecorations();
         }
     }
 
@@ -1031,9 +972,9 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
         _decoMasks.Clear();
 
         var symbols = (Decorations ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (symbols.Length == 0 || DecorationCount <= 0 || _backBuffer == null) return;
+        if (symbols.Length == 0 || DecorationCount <= 0 || BackBuffer == null) return;
 
-        var size = Math.Max(6f, _canvas.Height * 0.35f);
+        var size = Math.Max(6f, Canvas.Height * 0.35f);
         foreach (var sym in symbols.Distinct())
         {
             try
@@ -1050,8 +991,8 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
         if (_decoMasks.Count == 0) return;
 
         var keys = _decoMasks.Keys.ToArray();
-        var w = _backBuffer.Width;
-        var h = _backBuffer.Height;
+        var w = BackBuffer.Width;
+        var h = BackBuffer.Height;
         for (var i = 0; i < DecorationCount; i++)
             _deco.Add(new DecoSprite
             {
@@ -1108,7 +1049,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
     {
         if (Border == BorderStyle.None) return;
 
-        var thickness = Math.Max(1, _canvas.ScaleSize(3));
+        var thickness = Math.Max(1, Canvas.ScaleSize(3));
         var baseHue = _frame * 3f % 360f;
 
         switch (Border)
@@ -1197,7 +1138,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
         var pulse = 0.5f + 0.5f * (float)Math.Sin(_frame * 0.1);
         var col = RainbowBorder ? SignageFx.Hue(baseHue) : BorderColor;
         var rect = new SKRect(thickness, thickness, w - thickness, h - thickness);
-        var r = Math.Max(1, _canvas.ScaleSize(4));
+        var r = Math.Max(1, Canvas.ScaleSize(4));
 
         using var glow = new SKPaint
         {
@@ -1223,7 +1164,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
     private void DrawSnakeBorder(SKCanvas canvas, int w, int h, int thickness, float baseHue)
     {
         var dot = Math.Max(1, thickness);
-        var spacing = Math.Max(dot + 1, _canvas.ScaleSize(5));
+        var spacing = Math.Max(dot + 1, Canvas.ScaleSize(5));
         var perimeter = BuildPerimeter(w, h, spacing, dot);
         if (perimeter.Count == 0) return;
 
@@ -1245,7 +1186,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
     private void DrawMarquee(SKCanvas canvas, int w, int h, int thickness, float baseHue)
     {
         var dot = Math.Max(1, thickness);
-        var spacing = Math.Max(dot + 1, _canvas.ScaleSize(8));
+        var spacing = Math.Max(dot + 1, Canvas.ScaleSize(8));
         var perimeter = BuildPerimeter(w, h, spacing, dot);
 
         using var paint = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = false };
@@ -1265,7 +1206,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
     private void DrawChase(SKCanvas canvas, int w, int h, int thickness, float baseHue)
     {
         var dot = Math.Max(1, thickness);
-        var spacing = Math.Max(dot + 1, _canvas.ScaleSize(6));
+        var spacing = Math.Max(dot + 1, Canvas.ScaleSize(6));
         var perimeter = BuildPerimeter(w, h, spacing, dot);
         if (perimeter.Count == 0) return;
 
@@ -1302,11 +1243,10 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
     {
         if (string.IsNullOrWhiteSpace(DataSourceUrl)) return;
 
-        _http ??= new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         _ = FetchDataAsync();
 
         _dataTimer?.Dispose();
-        _dataTimer = new Timer(Math.Max(30, DataRefreshSeconds) * 1000.0) { AutoReset = true };
+        _dataTimer = new System.Timers.Timer(Math.Max(30, DataRefreshSeconds) * 1000.0) { AutoReset = true };
         _dataTimer.Elapsed += (_, _) => _ = FetchDataAsync();
         _dataTimer.Start();
     }
@@ -1317,8 +1257,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
         _fetching = true;
         try
         {
-            _http ??= new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-            var content = await _http.GetStringAsync(DataSourceUrl);
+            var content = await ExtensionHttp.Client.GetStringAsync(DataSourceUrl);
 
             var items = DataFormat == DataSourceFormat.RssTitles
                 ? ParseRssTitles(content)
@@ -1326,7 +1265,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
 
             if (items.Count > 0)
             {
-                lock (_lock)
+                lock (Sync)
                 {
                     _messages = items.ToArray();
                 }
@@ -1395,7 +1334,7 @@ public class AdvertisingDisplayExtension : ICanvasExtension, IDisposable
             .Where(p => p.Length > 0)
             .ToArray();
 
-        lock (_lock)
+        lock (Sync)
         {
             _messages = parts.Length > 0 ? parts : DefaultMessages;
         }

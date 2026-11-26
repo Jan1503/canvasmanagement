@@ -18,8 +18,13 @@ public class Board
         Generations = new List<Generation>();
     }
 
-    public Generation CurrentGeneration => Generations[_currentGeneration - 1];
+    public Generation CurrentGeneration => Generations[^1];
+
+    /// <summary>The most recent generations (at most <see cref="HistoryLimit"/>), oldest first.</summary>
     public List<Generation> Generations { get; }
+
+    /// <summary>History kept for stuck-pattern detection; older generations are dropped (the board runs for days).</summary>
+    public const int HistoryLimit = 64;
 
     public void Start(double density)
     {
@@ -109,6 +114,7 @@ public class Board
         generation.CellsAlive = cellsAlive;
         generation.CellsDead = cellsDead;
         Generations.Add(generation);
+        if (Generations.Count > HistoryLimit) Generations.RemoveRange(0, Generations.Count - HistoryLimit);
         _currentGeneration++;
     }
 }

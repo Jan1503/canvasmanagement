@@ -191,25 +191,19 @@ public sealed class Lav1StreamPlayerExtension(ICanvas canvas) : ICanvasExtension
         {
             _udpTask?.Wait(TimeSpan.FromSeconds(1));
         }
-        catch
-        {
-        }
+        catch { /* best effort, nothing to recover */ }
 
         try
         {
             _videoSchedulerTask?.Wait(TimeSpan.FromSeconds(1));
         }
-        catch
-        {
-        }
+        catch { /* best effort, nothing to recover */ }
 
         try
         {
             _audioSchedulerTask?.Wait(TimeSpan.FromSeconds(1));
         }
-        catch
-        {
-        }
+        catch { /* best effort, nothing to recover */ }
 
         // Now safely cleanup resources
         _cts?.Dispose();
@@ -224,9 +218,7 @@ public sealed class Lav1StreamPlayerExtension(ICanvas canvas) : ICanvasExtension
             {
                 _audioPlayer?.Stop();
             }
-            catch
-            {
-            }
+            catch { /* best effort, nothing to recover */ }
 
             _audioPlayer?.Dispose(); // FIX: Explicitly dispose audio player
             _audioPlayer = null;
@@ -439,9 +431,7 @@ public sealed class Lav1StreamPlayerExtension(ICanvas canvas) : ICanvasExtension
             {
                 udp?.Close();
             }
-            catch
-            {
-            }
+            catch { /* best effort, nothing to recover */ }
 
             udp?.Dispose();
             ActualPort = 0;
@@ -464,9 +454,7 @@ public sealed class Lav1StreamPlayerExtension(ICanvas canvas) : ICanvasExtension
             {
                 _audioPlayer?.Stop();
             }
-            catch
-            {
-            }
+            catch { /* best effort, nothing to recover */ }
 
             _audioSampleRate = cfg.AudioSampleRate;
             _audioChannels = cfg.AudioChannels;

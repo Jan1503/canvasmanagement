@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.FlipClock;
 
@@ -9,46 +7,25 @@ namespace CanvasManagement.Extension.FlipClock;
     "Retro-style flip clock with animated number transitions",
     "Clocks",
     IconResourceName = "flipclock.svg")]
-public class FlipClockExtension : IDisposable
+public class FlipClockExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-
     // Track each digit separately for individual animations
     private readonly DigitState[] _digits = new DigitState[6]; // HH:MM:SS = 6 digits
-    private readonly object _renderLock = new();
 
-    // Double buffering to prevent flicker
-    private SKBitmap? _backBuffer;
-    private bool _disposed;
-    private Timer? _updateTimer;
-
-    internal FlipClockExtension(ICanvas canvas)
+    internal FlipClockExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
-
         // Initialize digit states
         for (var i = 0; i < 6; i++) _digits[i] = new DigitState();
     }
 
-    public bool IsRunning { get; private set; }
+    public override string Name => "Flip Clock";
 
-    public void Dispose()
+    protected override double FrameIntervalMs => 1000.0 / 60;
+
+    protected override bool ClearOnStop => false;
+
+    protected override void OnStart()
     {
-        if (_disposed) return;
-        Stop();
-        _backBuffer?.Dispose();
-        _disposed = true;
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        if (IsRunning) return;
-
-        // Create back buffer
-        _backBuffer?.Dispose();
-        _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-
         // Initialize time
         var now = DateTime.Now;
         var hours = TwentyFourHour ? now.Hour : now.Hour % 12 == 0 ? 12 : now.Hour % 12;
@@ -63,141 +40,83 @@ public class FlipClockExtension : IDisposable
         _digits[4].CurrentValue = seconds / 10;
         _digits[5].CurrentValue = seconds % 10;
 
-        _updateTimer = new Timer(16.67); // ~60 FPS
-        _updateTimer.Elapsed += OnUpdate;
-        _updateTimer.AutoReset = true;
-        _updateTimer.Start();
-
-        IsRunning = true;
         Console.WriteLine("Flip Clock started");
     }
 
-    public void Stop()
+    protected override void OnStop()
     {
-        if (!IsRunning) return;
+        try { Canvas.Clear(BackgroundColor); } catch { /* canvas already gone */ }
 
-        _updateTimer?.Stop();
-        _updateTimer?.Dispose();
-        _updateTimer = null;
-
-        _backBuffer?.Dispose();
-        _backBuffer = null;
-
-        try
-        {
-            _canvas.Clear(BackgroundColor);
-        }
-        catch
-        {
-        }
-
-        IsRunning = false;
         Console.WriteLine("Flip Clock stopped");
     }
 
-    private void OnUpdate(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        if (!IsRunning) return;
+        var now = DateTime.Now;
+        var hours = TwentyFourHour ? now.Hour : now.Hour % 12 == 0 ? 12 : now.Hour % 12;
+        var minutes = now.Minute;
+        var seconds = now.Second;
 
-        try
+        // Check each digit individually and start animation if changed
+        int[] currentValues =
         {
-            _updateTimer?.Stop();
+            hours / 10, hours % 10,
+            minutes / 10, minutes % 10,
+            seconds / 10, seconds % 10
+        };
 
-            var now = DateTime.Now;
-            var hours = TwentyFourHour ? now.Hour : now.Hour % 12 == 0 ? 12 : now.Hour % 12;
-            var minutes = now.Minute;
-            var seconds = now.Second;
-
-            // Check each digit individually and start animation if changed
-            int[] currentValues =
-            {
-                hours / 10, hours % 10,
-                minutes / 10, minutes % 10,
-                seconds / 10, seconds % 10
-            };
-
-            for (var i = 0; i < 6; i++)
-            {
-                if (_digits[i].CurrentValue != currentValues[i])
-                {
-                    _digits[i].PreviousValue = _digits[i].CurrentValue;
-                    _digits[i].CurrentValue = currentValues[i];
-                    _digits[i].FlipProgress = 0;
-                }
-
-                // Update animation progress
-                if (_digits[i].FlipProgress < 1)
-                    _digits[i].FlipProgress = Math.Min(1, _digits[i].FlipProgress + FlipSpeed / 500f);
-            }
-
-            Render();
-
-            if (IsRunning && _updateTimer != null) _updateTimer.Start();
-        }
-        catch (Exception ex)
+        for (var i = 0; i < 6; i++)
         {
-            Console.WriteLine($"Flip Clock update error: {ex.Message}");
-            try
+            if (_digits[i].CurrentValue != currentValues[i])
             {
-                _updateTimer?.Start();
+                _digits[i].PreviousValue = _digits[i].CurrentValue;
+                _digits[i].CurrentValue = currentValues[i];
+                _digits[i].FlipProgress = 0;
             }
-            catch
-            {
-                Stop();
-            }
+
+            // Update animation progress
+            if (_digits[i].FlipProgress < 1)
+                _digits[i].FlipProgress = Math.Min(1, _digits[i].FlipProgress + FlipSpeed / 500f);
         }
+
+        Draw(canvas);
     }
 
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        if (_backBuffer == null) return;
+        // Clear with background color
+        canvas.Clear(BackgroundColor);
 
-        lock (_renderLock)
+        // Calculate card dimensions
+        var maxCardWidth = ShowSeconds ? Canvas.Width / 8 : Canvas.Width / 6;
+        var maxCardHeight = (int)(Canvas.Height * 0.6f);
+
+        var cardWidth = Math.Min(maxCardWidth, maxCardHeight / 2);
+        var cardHeight = (int)(cardWidth * 1.6f);
+        var spacing = Math.Max(cardWidth / 8, 10);
+
+        // Calculate total width
+        var separatorWidth = ShowSeparators ? spacing * 2 : 0;
+        var numDigits = ShowSeconds ? 6 : 4;
+        var numSeparators = ShowSeconds ? 2 : 1;
+        var totalWidth = numDigits * cardWidth + (numDigits - 1) * spacing + numSeparators * separatorWidth;
+
+        var startX = (Canvas.Width - totalWidth) / 2;
+        var startY = (Canvas.Height - cardHeight) / 2;
+
+        var currentX = startX;
+
+        // Draw each digit
+        for (var i = 0; i < (ShowSeconds ? 6 : 4); i++)
         {
-            try
+            DrawFlipCard(canvas, _digits[i], currentX, startY, cardWidth, cardHeight);
+            currentX += cardWidth + spacing;
+
+            // Draw separators after 2nd and 4th digit
+            if (ShowSeparators && (i == 1 || i == 3))
             {
-                using var canvas = new SKCanvas(_backBuffer);
-                // Clear with background color
-                canvas.Clear(BackgroundColor);
-
-                // Calculate card dimensions
-                var maxCardWidth = ShowSeconds ? _canvas.Width / 8 : _canvas.Width / 6;
-                var maxCardHeight = (int)(_canvas.Height * 0.6f);
-
-                var cardWidth = Math.Min(maxCardWidth, maxCardHeight / 2);
-                var cardHeight = (int)(cardWidth * 1.6f);
-                var spacing = Math.Max(cardWidth / 8, 10);
-
-                // Calculate total width
-                var separatorWidth = ShowSeparators ? spacing * 2 : 0;
-                var numDigits = ShowSeconds ? 6 : 4;
-                var numSeparators = ShowSeconds ? 2 : 1;
-                var totalWidth = numDigits * cardWidth + (numDigits - 1) * spacing + numSeparators * separatorWidth;
-
-                var startX = (_canvas.Width - totalWidth) / 2;
-                var startY = (_canvas.Height - cardHeight) / 2;
-
-                var currentX = startX;
-
-                // Draw each digit
-                for (var i = 0; i < (ShowSeconds ? 6 : 4); i++)
-                {
-                    DrawFlipCard(canvas, _digits[i], currentX, startY, cardWidth, cardHeight);
-                    currentX += cardWidth + spacing;
-
-                    // Draw separators after 2nd and 4th digit
-                    if (ShowSeparators && (i == 1 || i == 3))
-                    {
-                        DrawSeparator(canvas, currentX + spacing / 2, startY, cardHeight);
-                        currentX += spacing * 2;
-                    }
-                }
-
-                canvas.Flush();_canvas.SubmitCompletedFrame(_backBuffer);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Render error: {ex.Message}");
+                DrawSeparator(canvas, currentX + spacing / 2, startY, cardHeight);
+                currentX += spacing * 2;
             }
         }
     }
@@ -305,7 +224,7 @@ public class FlipClockExtension : IDisposable
         var color = new SKColor(TextColor.Red, TextColor.Green, TextColor.Blue, alpha);
         var size = CanvasText.ResolveSize(FontSize, height * 0.62f);
         var text = digit.ToString();
-        CanvasText.Draw(canvas, _canvas, text, color, x + width / 2f, y + height * 0.72f, size,
+        CanvasText.Draw(canvas, Canvas, text, color, x + width / 2f, y + height * 0.72f, size,
             SKTextAlign.Center, UseBdfFont);
         canvas.Restore();
     }

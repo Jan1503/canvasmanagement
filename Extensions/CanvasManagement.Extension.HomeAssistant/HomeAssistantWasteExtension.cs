@@ -1,9 +1,7 @@
 using System.Globalization;
 using System.Reflection;
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.HomeAssistant;
 
@@ -22,13 +20,8 @@ public enum HaWasteColumns { NameThenDate, DateThenName }
     "Next bin pickups: one schedule entity (dates as attributes) or date sensors",
     "Information",
     IconResourceName = "home-assistant.svg")]
-public class HomeAssistantWasteExtension : ICanvasExtension, IDisposable
+public class HomeAssistantWasteExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
-
     private static readonly CultureInfo German = CreateGerman();
 
     private static CultureInfo CreateGerman()
@@ -37,9 +30,8 @@ public class HomeAssistantWasteExtension : ICanvasExtension, IDisposable
         catch { return CultureInfo.InvariantCulture; }
     }
 
-    internal HomeAssistantWasteExtension(ICanvas canvas)
+    internal HomeAssistantWasteExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Entities",
@@ -83,74 +75,27 @@ public class HomeAssistantWasteExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Background Color", "Background (alpha 0 for overlay)", DefaultValue = "#12110E", Order = 11)]
     public SKColor BackgroundColor { get; set; } = new(18, 17, 14);
 
-    public string Name => "HA Waste";
-    public bool IsRunning { get; private set; }
+    public override string Name => "HA Waste";
+    protected override double FrameIntervalMs => 1000;
 
-    public void Dispose()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        Draw(canvas);
     }
 
-    public void Start()
+    private void Draw(SKCanvas canvas)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(1000) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-            try { Render(); }
-            catch (Exception ex) { Console.WriteLine($"[HA Waste] render: {ex.Message}"); }
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try { Render(); }
-            catch (Exception ex) { Console.WriteLine($"[HA Waste] {ex.Message}"); }
-        }
-    }
-
-    private void Render()
-    {
-        var bb = _backBuffer;
-        if (bb == null) return;
-        using var c = new SKCanvas(bb);
+        var c = canvas;
         c.Clear(BackgroundColor);
 
-        float w = _canvas.Width, h = _canvas.Height;
+        float w = Canvas.Width, h = Canvas.Height;
         var items = Parse().OrderBy(i => i.When).Take(Math.Clamp(MaxRows, 1, 8)).ToList();
         if (items.Count == 0)
         {
             var msg = HomeAssistantBridge.Connected ? "No pickups" : "HA offline";
-            HaText.Draw(c, _canvas, msg, LabelColor, 4, 0, w - 8, h, Math.Max(10f, h * 0.28f),
+            HaText.Draw(c, Canvas, msg, LabelColor, 4, 0, w - 8, h, Math.Max(10f, h * 0.28f),
                 HaText.ToSk(Align), UseBdfFont, shrinkToWidth: false);
             c.Flush();
-            _canvas.SubmitCompletedFrame(bb);
             return;
         }
 
@@ -177,7 +122,7 @@ public class HomeAssistantWasteExtension : ICanvasExtension, IDisposable
             var dateText = FormatDate(it.When);
             if (!twoLine)
             {
-                HaText.Draw(c, _canvas, it.Label, LabelColor,
+                HaText.Draw(c, Canvas, it.Label, LabelColor,
                     x, y, textW, rowH, nameH, HaText.ToSk(Align), UseBdfFont, shrinkToWidth: false);
                 continue;
             }
@@ -193,14 +138,13 @@ public class HomeAssistantWasteExtension : ICanvasExtension, IDisposable
             var botSize = nameOnTop ? dateH : nameH;
             var align = HaText.ToSk(Align);
 
-            HaText.Draw(c, _canvas, top, topCol,
+            HaText.Draw(c, Canvas, top, topCol,
                 x, y, textW, topH, topSize, align, UseBdfFont, shrinkToWidth: false);
-            HaText.Draw(c, _canvas, bot, botCol,
+            HaText.Draw(c, Canvas, bot, botCol,
                 x, botY, textW, botH, botSize, align, UseBdfFont, shrinkToWidth: false);
         }
 
         c.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private List<(string Label, DateTime When, HaBinKind Kind)> Parse()

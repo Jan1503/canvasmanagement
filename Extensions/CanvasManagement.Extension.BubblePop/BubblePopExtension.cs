@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
 
@@ -16,7 +15,7 @@ namespace CanvasManagement.Extension.BubblePop;
     "Bubble shooter — Left/Right aim, Space or A shoot, Down or B swap, or autopilot",
     "Games",
     IconResourceName = "bubble-pop.svg")]
-public class BubblePopExtension : ICanvasExtension, IDisposable
+public class BubblePopExtension : GameExtension
 {
     private static readonly SKColor[] Palette =
     {
@@ -29,14 +28,8 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
         new(255, 255, 255)
     };
 
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _random = new();
-    private readonly Stopwatch _watch = new();
     private readonly GameFx _fx = new();
-    private ExtensionLoop? _loop;
-    private SKBitmap? _backBuffer;
-    private double _last;
 
     // Layout (pixels).
     private int _d, _rowH, _cols, _rows, _fieldX, _fieldW, _top, _deadY, _launchX, _launchY;
@@ -65,7 +58,7 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
     private bool _aiSwap;
     private float _aiWait;
 
-    internal BubblePopExtension(ICanvas canvas) => _canvas = canvas;
+    internal BubblePopExtension(ICanvas canvas) : base(canvas, GameSong.Arcade) { }
 
     [ExtensionParameter("Game Speed", "Shot speed (higher is faster)", DefaultValue = 22, MinValue = 14, MaxValue = 50,
         Order = 1)]
@@ -88,66 +81,29 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Auto Pilot", "AI aims until you press a key in Studio", DefaultValue = true, Order = 6)]
     public bool AutoPilot { get; set; } = true;
 
-    private GameSound? _snd;
-    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Arcade);
+    public override string Name => "Bubble Pop";
 
-    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
-    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
+    protected override double FrameIntervalMs => 1000.0 / 60;
 
-    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
-    public bool Music { get => _sound.Music; set => _sound.Music = value; }
-
-    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
-        MaxValue = 100, Order = 22)]
-    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
-
-    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
-        MaxValue = 100, Order = 23)]
-    public int MusicVolume
+    protected override void OnStart()
     {
-        get => (int)MathF.Round(_sound.MusicVolume * 100);
-        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
+        _human = false;
+        _score = 0;
+        _level = 1;
+        NewBoard();
     }
 
-    public string Name => "Bubble Pop";
-    public bool IsRunning { get; private set; }
-
-    public void Dispose()
+    /// <summary>The well is laid out for the canvas size; a new size starts a new board.</summary>
+    protected override void OnResize(int width, int height)
     {
-        Stop();
-        GC.SuppressFinalize(this);
+        ClearBubbleImages();
+        NewBoard();
     }
 
-    public void Start()
+    protected override void OnStop()
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            IsRunning = true;
-            _human = false;
-            _score = 0;
-            _level = 1;
-            NewBoard();
-            _watch.Restart();
-            _last = 0;
-            _loop = new ExtensionLoop(60, Tick);
-            _loop.Start();
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _loop?.Dispose();
-            _loop = null;
-            _sound.Stop();
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); } catch { /* canvas gone */ }
-        }
+        base.OnStop();
+        ClearBubbleImages();
     }
 
     // ------------------------------------------------------------------ controls
@@ -201,8 +157,8 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
 
     private void NewBoard()
     {
-        var w = _canvas.Width;
-        var h = _canvas.Height;
+        var w = Canvas.Width;
+        var h = Canvas.Height;
         _d = Math.Clamp(h / 11, 7, 21) | 1; // odd, so a bubble has a centre pixel
         _rowH = (int)MathF.Round(_d * 0.87f);
         var fieldMax = Math.Min(w - 8, (int)(h * 1.3f));
@@ -271,28 +227,14 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
 
     // ------------------------------------------------------------------ loop
 
-    private Task Tick(CancellationToken ct)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
-        {
-            if (!IsRunning) return Task.CompletedTask;
-            var now = _watch.Elapsed.TotalSeconds;
-            var dt = (float)Math.Clamp(now - _last, 0.001, 0.05);
-            _last = now;
-            try
-            {
-                Update(dt);
-                _fx.Update(dt);
-                Render();
-                _sound.Duck(_over > 0 ? 0.35f : 1f);
-                _sound.Update();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[BubblePop] {ex.Message}");
-            }
-        }
-        return Task.CompletedTask;
+        dt = Math.Clamp(dt, 0.001f, 0.05f);
+        Update(dt);
+        _fx.Update(dt);
+        Draw(canvas, width, height);
+        Audio.Duck(_over > 0 ? 0.35f : 1f);
+        Audio.Update();
     }
 
     private void Update(float dt)
@@ -328,7 +270,7 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
     private void DoSwap()
     {
         (_loaded, _next) = (_next, _loaded);
-        _sound.Play(GameSfx.Select, 0.4f);
+        Audio.Play(GameSfx.Select, 0.4f);
     }
 
     private void Shoot()
@@ -344,7 +286,7 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
         _next = PickColor();
         _flying = true;
         _swing = 1;
-        _sound.Play(GameSfx.Shoot, 0.4f, 0, 1.4f);
+        Audio.Play(GameSfx.Shoot, 0.4f, 0, 1.4f);
         _fx.Spray(_launchX + MathF.Cos(_ang) * _d, _launchY + MathF.Sin(_ang) * _d, _ang, 0.5f, Palette[_shotColor], 6, 1.5f, 0.3f, 0, true);
     }
 
@@ -375,7 +317,7 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
 
     private void Bank()
     {
-        _sound.Play(GameSfx.Bounce, 0.3f);
+        Audio.Play(GameSfx.Bounce, 0.3f);
         _fx.Spray(_shotX, _shotY, _shotVx > 0 ? 0 : MathF.PI, 0.8f, SKColors.White, 4, 1f, 0.25f, 0, true);
     }
 
@@ -434,15 +376,15 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
             var pts = group.Count * 10 + dropped * 20 * Math.Max(1, dropped / 3);
             _score += pts;
             _fx.Pop($"+{pts}", x, y, dropped > 0 ? new SKColor(255, 230, 120) : SKColors.White);
-            _sound.Play(GameSfx.Pop, 0.8f, Pan(x), 1f + Math.Min(group.Count + dropped, 12) * 0.04f);
-            if (dropped > 0) _sound.Play(GameSfx.Coin, 0.5f, Pan(x), 0.9f);
+            Audio.Play(GameSfx.Pop, 0.8f, Pan(x), 1f + Math.Min(group.Count + dropped, 12) * 0.04f);
+            if (dropped > 0) Audio.Play(GameSfx.Coin, 0.5f, Pan(x), 0.9f);
             if (group.Count + dropped >= 8) _fx.Shake(3);
             _misses = 0;
         }
         else
         {
             _combo = 0;
-            _sound.Play(GameSfx.Thud, 0.4f, Pan(x));
+            Audio.Play(GameSfx.Thud, 0.4f, Pan(x));
             if (++_misses >= _dropEvery)
             {
                 _misses = 0;
@@ -455,10 +397,10 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
         {
             _level++;
             _score += 500;
-            _sound.Play(GameSfx.LevelUp, 0.7f);
-            _fx.Confetti(_launchX, _canvas.Height / 2f, 70, 3.5f);
+            Audio.Play(GameSfx.LevelUp, 0.7f);
+            _fx.Confetti(_launchX, Canvas.Height / 2f, 70, 3.5f);
             _fx.Flash(new SKColor(255, 240, 160), 0.5f);
-            _fx.Pop($"LEVEL {_level}", _launchX, _canvas.Height / 2f, new SKColor(255, 240, 120));
+            _fx.Pop($"LEVEL {_level}", _launchX, Canvas.Height / 2f, new SKColor(255, 240, 120));
             var keep = _score;
             NewBoard();
             _score = keep;
@@ -472,7 +414,7 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
         _aiAng = float.NaN;
     }
 
-    private float Pan(float x) => Math.Clamp((x / _canvas.Width) * 2 - 1, -1, 1);
+    private float Pan(float x) => Math.Clamp((x / Canvas.Width) * 2 - 1, -1, 1);
 
     private bool ColorPresent(int color)
     {
@@ -562,7 +504,7 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
             _grid[c, 0] = 1 + _random.Next(_colors);
         _ceilingFlash = 1;
         _fx.Shake(2);
-        _sound.Play(GameSfx.Drop, 0.6f, 0, 0.7f);
+        Audio.Play(GameSfx.Drop, 0.6f, 0, 0.7f);
         if (PastLine()) GameOver();
     }
 
@@ -583,7 +525,7 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
         if (_over > 0) return;
         _over = 0.001f;
         _flying = false;
-        _sound.Play(GameSfx.GameOver, 0.7f);
+        Audio.Play(GameSfx.GameOver, 0.7f);
         _fx.Flash(new SKColor(255, 60, 80), 0.6f);
         _fx.Shake(5);
     }
@@ -691,18 +633,8 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
 
     // ------------------------------------------------------------------ drawing
 
-    private void Render()
+    private void Draw(SKCanvas canvas, int w, int h)
     {
-        var w = _canvas.Width;
-        var h = _canvas.Height;
-        if (_backBuffer == null || _backBuffer.Width != w || _backBuffer.Height != h)
-        {
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(new SKImageInfo(w, h, SKColorType.Bgra8888, SKAlphaType.Premul));
-            NewBoard();
-        }
-
-        using var canvas = new SKCanvas(_backBuffer);
         using var paint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
         GameFx.VerticalGradient(canvas, w, h, new SKColor(30, 12, 64), new SKColor(6, 12, 40));
         // Background bubbles drifting up outside the well.
@@ -792,9 +724,7 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
             Text(canvas, "GAME OVER", _launchX, h * 0.45f, size, new SKColor(255, 90, 110));
         }
 
-        _fx.DrawOverlay(canvas, _canvas, w, h, Math.Max(7f, h * 0.07f));
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(_backBuffer);
+        _fx.DrawOverlay(canvas, Canvas, w, h, Math.Max(7f, h * 0.07f));
     }
 
     /// <summary>0 when the lowest bubble is far from the line, 1 when it is a row away.</summary>
@@ -814,8 +744,8 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
 
     private void Text(SKCanvas c, string s, float x, float y, float size, SKColor color)
     {
-        CanvasText.Draw(c, _canvas, s, new SKColor(0, 0, 0, 170), x + 1, y + 1, size, SKTextAlign.Center, UseBdfFont);
-        CanvasText.Draw(c, _canvas, s, color, x, y, size, SKTextAlign.Center, UseBdfFont);
+        CanvasText.Draw(c, Canvas, s, new SKColor(0, 0, 0, 170), x + 1, y + 1, size, SKTextAlign.Center, UseBdfFont);
+        CanvasText.Draw(c, Canvas, s, color, x, y, size, SKTextAlign.Center, UseBdfFont);
     }
 
     private void DrawLauncher(SKCanvas canvas, SKPaint paint)
@@ -858,21 +788,36 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
         if (!_flying && _over <= 0) Bubble(canvas, paint, cx, cy - 1, Palette[_loaded]);
 
         // The dino operator, left of the launcher, cheering after a big pop.
-        var dpx = Math.Max(1, _canvas.Height / 128);
+        var dpx = Math.Max(1, Canvas.Height / 128);
         var dw = Dino[0].Length * dpx;
         var dh = Dino.Length * dpx;
         var hop = _combo > 1 && (int)(_fx.Time * 6) % 2 == 0 ? 2 : 0;
-        PixelArt.Blit(canvas, (int)(_fx.Time * 4) % 2 == 0 ? Dino : DinoB, cx - _d * 1.5f - dw, _canvas.Height - dh - hop, ChDino, dpx);
+        PixelArt.Blit(canvas, (int)(_fx.Time * 4) % 2 == 0 ? Dino : DinoB, cx - _d * 1.5f - dw, Canvas.Height - dh - hop, ChDino, dpx);
     }
+
+    /// <summary>Shaded bubble images by (diameter, colour); a frame draws ~150 bubbles, each one call.</summary>
+    private readonly Dictionary<(int D, SKColor Col), SKImage> _bubbleImages = new();
 
     private void Bubble(SKCanvas canvas, SKPaint paint, float x, float y, SKColor col)
     {
-        var cx = (int)MathF.Round(x);
-        var cy = (int)MathF.Round(y);
+        var img = BubbleImage(col);
+        var r = _d / 2;
+        canvas.DrawImage(img, (int)MathF.Round(x) - r, (int)MathF.Round(y) - r);
+    }
+
+    private SKImage BubbleImage(SKColor col)
+    {
+        if (_bubbleImages.TryGetValue((_d, col), out var img)) return img;
+        // Game over fades every bubble through grey, so the set can grow; start over when it gets big.
+        if (_bubbleImages.Count >= 96) ClearBubbleImages();
+
         // Round at small sizes: a row-by-row disc (r² + r keeps the edge from going spiky), shaded from a
         // bright top-left to a darker rim at the bottom right, with a shine.
         var r = _d / 2;
+        var size = 2 * r + 1;
         var rr = r * r + r;
+        using var bmp = new SKBitmap(new SKImageInfo(size, size, SKColorType.Bgra8888, SKAlphaType.Premul));
+        bmp.Erase(SKColors.Transparent);
         for (var yy = -r; yy <= r; yy++)
         for (var xx = -r; xx <= r; xx++)
         {
@@ -880,12 +825,23 @@ public class BubblePopExtension : ICanvasExtension, IDisposable
             if (dd > rr) continue;
             var light = 1.05f - (xx + yy) / (2.2f * r) * 0.35f - dd / (float)rr * 0.25f;
             var edge = dd > (r - 1) * (r - 1) + (r - 1) && xx + yy > 0;
-            paint.Color = edge ? GameFx.Shade(col, 0.5f) : GameFx.Shade(col, light);
-            canvas.DrawRect(cx + xx, cy + yy, 1, 1, paint);
+            bmp.SetPixel(xx + r, yy + r, edge ? GameFx.Shade(col, 0.5f) : GameFx.Shade(col, light));
         }
-        paint.Color = new SKColor(255, 255, 255, 230);
-        var sh = Math.Max(1, r / 3);
-        canvas.DrawRect(cx - r / 2, cy - r / 2, sh, sh, paint);
+        using (var c = new SKCanvas(bmp))
+        using (var shine = new SKPaint { Color = new SKColor(255, 255, 255, 230) })
+        {
+            var sh = Math.Max(1, r / 3);
+            c.DrawRect(r - r / 2, r - r / 2, sh, sh, shine);
+        }
+        img = SKImage.FromBitmap(bmp);
+        _bubbleImages[(_d, col)] = img;
+        return img;
+    }
+
+    private void ClearBubbleImages()
+    {
+        foreach (var i in _bubbleImages.Values) i.Dispose();
+        _bubbleImages.Clear();
     }
 
     // d outline, g body, l belly, w/k eye, o snout, y horn, b boot

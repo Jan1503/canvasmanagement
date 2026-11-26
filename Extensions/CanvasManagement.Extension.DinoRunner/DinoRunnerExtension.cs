@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.DinoRunner;
 
@@ -13,7 +11,7 @@ namespace CanvasManagement.Extension.DinoRunner;
     "Endless runner — autopilot, or jump with Space and duck with Down in Studio",
     "Games",
     IconResourceName = "dino-runner.svg")]
-public class DinoRunnerExtension : ICanvasExtension, IDisposable
+public class DinoRunnerExtension : GameExtension
 {
     // 1 = pixel on. Sprites are authored at 1x and scaled by _px.
     private static readonly string[] DinoRunA =
@@ -203,14 +201,10 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         ".............."
     };
 
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _random = new();
     private readonly List<Obstacle> _obstacles = new();
     private readonly List<Cloud> _clouds = new();
 
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private float _scale = 1f;
     private int _px = 2;
     private int _frame;
@@ -232,9 +226,8 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
     private bool _human;
     private bool _wantDuck;
 
-    internal DinoRunnerExtension(ICanvas canvas)
+    internal DinoRunnerExtension(ICanvas canvas) : base(canvas, GameSong.Adventure)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Game Speed", "Frame interval in milliseconds (lower = faster)", DefaultValue = 28,
@@ -266,82 +259,26 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         DefaultValue = true, Order = 8)]
     public bool ModernLook { get; set; } = true;
 
-    private GameSound? _snd;
-    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Adventure);
+    public override string Name => "Dino Runner";
+    protected override double FrameIntervalMs => GameSpeed;
 
-    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
-    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
-
-    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
-    public bool Music { get => _sound.Music; set => _sound.Music = value; }
-
-    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
-        MaxValue = 100, Order = 22)]
-    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
-
-    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
-        MaxValue = 100, Order = 23)]
-    public int MusicVolume
+    protected override void OnStart()
     {
-        get => (int)MathF.Round(_sound.MusicVolume * 100);
-        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
-    }
-
-    public string Name => "Dino Runner";
-    public bool IsRunning { get; private set; }
-
-    public void Dispose()
-    {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
-            _px = ModernLook
-                ? PixelArt.Scale(_canvas.Height)
-                : Math.Max(1, (int)Math.Round(_canvas.Height / 56f));
-            _human = false;
-            _wantDuck = false;
-            Reset();
-
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(GameSpeed) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _sound.Stop();
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
+        _scale = DisplayScale.GetScale(Canvas.Width, Canvas.Height);
+        _px = ModernLook
+            ? PixelArt.Scale(Canvas.Height)
+            : Math.Max(1, (int)Math.Round(Canvas.Height / 56f));
+        _human = false;
+        _wantDuck = false;
+        Reset();
     }
 
     private void Reset()
     {
         _px = ModernLook
-            ? PixelArt.Scale(_canvas.Height)
-            : Math.Max(1, (int)Math.Round(_canvas.Height / 56f));
-        _groundY = _canvas.Height * 0.78f;
+            ? PixelArt.Scale(Canvas.Height)
+            : Math.Max(1, (int)Math.Round(Canvas.Height / 56f));
+        _groundY = Canvas.Height * 0.78f;
         if (ModernLook)
         {
             _dinoW = ModernDinoA[0].Length * _px;
@@ -354,7 +291,7 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
             _standH = 14 * _px;
             _duckH = 10 * _px;
         }
-        _dinoX = _canvas.Width * 0.12f;
+        _dinoX = Canvas.Width * 0.12f;
         _dinoY = _groundY - _standH;
         _dinoVy = 0;
         _gravity = Math.Max(0.35f, 0.5f * _px);
@@ -362,13 +299,13 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         _ducking = false;
         _speed = Math.Max(2f, 2.2f * _px);
         // First obstacle waits until there is a full jump+recover gap, so we never open with a cactus pair.
-        _spawnTimer = Math.Max(MinObstacleGap(), _canvas.Width * 0.85f);
+        _spawnTimer = Math.Max(MinObstacleGap(), Canvas.Width * 0.85f);
         _obstacles.Clear();
         _clouds.Clear();
         for (var i = 0; i < 3; i++)
             _clouds.Add(new Cloud
             {
-                X = _random.Next(_canvas.Width),
+                X = _random.Next(Canvas.Width),
                 Y = 6 + _random.Next(Math.Max(8, (int)(_groundY * 0.35f))),
                 W = 10 + _random.Next(14)
             });
@@ -376,43 +313,30 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         _crashTimer = 0;
     }
 
-    private void OnTick(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
+        if (_crashTimer > 0)
         {
-            if (!IsRunning || _backBuffer == null) return;
-            try
-            {
-                if (_timer != null && Math.Abs(_timer.Interval - GameSpeed) > 0.5) _timer.Interval = GameSpeed;
-
-                if (_crashTimer > 0)
-                {
-                    _crashTimer--;
-                    if (_crashTimer == 0) Reset();
-                }
-                else
-                {
-                    Update();
-                }
-
-                Render();
-                _sound.Duck(_crashTimer > 0 ? 0.35f : 1f);
-                _sound.Update();
-                _frame++;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[DinoRunner] {ex.Message}");
-            }
+            _crashTimer--;
+            if (_crashTimer == 0) Reset();
         }
+        else
+        {
+            Update();
+        }
+
+        Draw(canvas);
+        Audio.Duck(_crashTimer > 0 ? 0.35f : 1f);
+        Audio.Update();
+        _frame++;
     }
 
     private void Update()
     {
         _score++;
-        if (_score % 100 == 0) _sound.Play(GameSfx.Score, 0.5f);
+        if (_score % 100 == 0) Audio.Play(GameSfx.Score, 0.5f);
         _best = Math.Max(_best, _score);
-        _speed = Math.Min(_canvas.Width * 0.055f,
+        _speed = Math.Min(Canvas.Width * 0.055f,
             (2.2f + Difficulty * 0.35f) * _px + _score * 0.0012f * _px);
 
         _spawnTimer -= _speed;
@@ -421,7 +345,7 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
             if (HasRoomToSpawn())
             {
                 SpawnObstacle();
-                _spawnTimer = MinObstacleGap() + _canvas.Width * (0.12f + (float)_random.NextDouble() * 0.22f);
+                _spawnTimer = MinObstacleGap() + Canvas.Width * (0.12f + (float)_random.NextDouble() * 0.22f);
             }
             else
             {
@@ -443,7 +367,7 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
             c.X -= _speed * 0.25f;
             if (c.X + c.W < 0)
             {
-                c.X = _canvas.Width + _random.Next(40);
+                c.X = Canvas.Width + _random.Next(40);
                 c.Y = 6 + _random.Next(Math.Max(8, (int)(_groundY * 0.35f)));
             }
 
@@ -462,8 +386,8 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
             if (Hits(_dinoY, CurrentH(), o.X, o))
             {
                 _crashTimer = 40;
-                _sound.Play(GameSfx.Hit, 0.7f);
-                _sound.Play(GameSfx.GameOver, 0.6f);
+                Audio.Play(GameSfx.Hit, 0.7f);
+                Audio.Play(GameSfx.GameOver, 0.6f);
                 break;
             }
         }
@@ -488,7 +412,7 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         var right = 0f;
         foreach (var o in _obstacles)
             right = Math.Max(right, o.X + o.W);
-        return _canvas.Width - right >= MinObstacleGap();
+        return Canvas.Width - right >= MinObstacleGap();
     }
 
     private void SpawnObstacle()
@@ -503,7 +427,7 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
             var y = high
                 ? _groundY - _standH - h - 2 * _px
                 : _groundY - _standH - h + 2 * _px;
-            _obstacles.Add(new Obstacle { X = _canvas.Width, Y = y, W = w, H = h, Kind = high ? Kind.BirdHigh : Kind.BirdLow });
+            _obstacles.Add(new Obstacle { X = Canvas.Width, Y = y, W = w, H = h, Kind = high ? Kind.BirdHigh : Kind.BirdLow });
         }
         else
         {
@@ -511,7 +435,7 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
             var spr = ModernLook ? (big ? ModernCactusBig : ModernCactusSmall) : (big ? CactusBig : CactusSmall);
             var w = spr[0].Length * _px;
             var h = spr.Length * _px;
-            _obstacles.Add(new Obstacle { X = _canvas.Width, Y = _groundY - h, W = w, H = h, Kind = big ? Kind.CactusBig : Kind.CactusSmall });
+            _obstacles.Add(new Obstacle { X = Canvas.Width, Y = _groundY - h, W = w, H = h, Kind = big ? Kind.CactusBig : Kind.CactusSmall });
         }
     }
 
@@ -631,7 +555,7 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
             _ducking = false;
             _wantDuck = false;
             _dinoVy = _jumpV;
-            _sound.Play(GameSfx.Jump, 0.5f);
+            Audio.Play(GameSfx.Jump, 0.5f);
         }
     }
 
@@ -639,7 +563,7 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Space|Up", Order = 1)]
     public void Jump()
     {
-        lock (_lock)
+        lock (Sync)
         {
             _human = true;
             if (_crashTimer > 0)
@@ -656,7 +580,7 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Down", Order = 2)]
     public void Duck()
     {
-        lock (_lock)
+        lock (Sync)
         {
             _human = true;
             _wantDuck = true;
@@ -667,25 +591,21 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Down:up", Order = 3)]
     public void Stand()
     {
-        lock (_lock) _wantDuck = false;
+        lock (Sync) _wantDuck = false;
     }
 
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        if (ModernLook) RenderModern();
-        else RenderClassic();
+        if (ModernLook) RenderModern(canvas);
+        else RenderClassic(canvas);
     }
 
-    private void RenderClassic()
+    private void RenderClassic(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
-
         var bg = NightMode ? new SKColor(18, 18, 28) : new SKColor(247, 247, 247);
         var fg = NightMode ? new SKColor(235, 235, 240) : new SKColor(53, 53, 53);
         var dim = NightMode ? new SKColor(90, 90, 110) : new SKColor(180, 180, 180);
 
-        using var canvas = new SKCanvas(bb);
         canvas.Clear(bg);
         using var paint = new SKPaint { Color = fg, Style = SKPaintStyle.Fill, IsAntialias = false };
 
@@ -697,10 +617,10 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         }
 
         paint.Color = fg;
-        canvas.DrawRect(0, _groundY, _canvas.Width, Math.Max(1, _px), paint);
+        canvas.DrawRect(0, _groundY, Canvas.Width, Math.Max(1, _px), paint);
         var dash = 8 * _px;
         var scroll = (int)(_frame * _speed) % (dash * 2);
-        for (var x = -scroll; x < _canvas.Width; x += dash * 2)
+        for (var x = -scroll; x < Canvas.Width; x += dash * 2)
             canvas.DrawRect(x, _groundY + 2 * _px, dash / 2, Math.Max(1, _px), paint);
 
         var dino = _ducking ? DinoDuck : (_frame / 4 % 2 == 0 ? DinoRunA : DinoRunB);
@@ -724,19 +644,16 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         if (ShowScore)
         {
             var size = CanvasText.ResolveSize(FontSize, Math.Max(8f, 10f * _px));
-            CanvasText.Draw(canvas, _canvas, $"HI {_best:00000}  {_score:00000}", fg,
-                _canvas.Width - 4, Math.Max(10f, 11f * _px), size, SKTextAlign.Right, UseBdfFont);
+            CanvasText.Draw(canvas, Canvas, $"HI {_best:00000}  {_score:00000}", fg,
+                Canvas.Width - 4, Math.Max(10f, 11f * _px), size, SKTextAlign.Right, UseBdfFont);
         }
 
         if (_crashTimer > 0)
         {
-            var size = CanvasText.ResolveSize(FontSize, Math.Max(10f, _canvas.Height * 0.12f));
-            CanvasText.Draw(canvas, _canvas, "G A M E  O V E R", fg,
-                _canvas.Width / 2f, _canvas.Height / 2f, size, SKTextAlign.Center, UseBdfFont);
+            var size = CanvasText.ResolveSize(FontSize, Math.Max(10f, Canvas.Height * 0.12f));
+            CanvasText.Draw(canvas, Canvas, "G A M E  O V E R", fg,
+                Canvas.Width / 2f, Canvas.Height / 2f, size, SKTextAlign.Center, UseBdfFont);
         }
-
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private readonly GameFx _fx = new();
@@ -751,19 +668,16 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
     ///     mesas and a row of cactus silhouettes scroll at their own speeds, the ground has pebbles, dust kicks up
     ///     from the feet, a jump and a landing puff, every hundred points sparkle, and a crash shakes and flashes.
     /// </summary>
-    private void RenderModern()
+    private void RenderModern(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
         var now = _clock.Elapsed.TotalSeconds;
         var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
         _lastRender = now;
         _fx.Update(dt);
         if (_crashTimer == 0) _scroll += _speed;
 
-        using var canvas = new SKCanvas(bb);
-        var w = _canvas.Width;
-        var h = _canvas.Height;
+        var w = Canvas.Width;
+        var h = Canvas.Height;
         var gy = (int)_groundY;
 
         // Sky by score: morning, sunset, night, again every 1500 points.
@@ -875,22 +789,20 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         if (ShowScore)
         {
             var size = CanvasText.ResolveSize(FontSize, Math.Max(8f, 10f * _px));
-            CanvasText.Draw(canvas, _canvas, $"HI {_best:00000}  {_score:00000}", new SKColor(0, 0, 0, 140),
+            CanvasText.Draw(canvas, Canvas, $"HI {_best:00000}  {_score:00000}", new SKColor(0, 0, 0, 140),
                 w - 3, Math.Max(10f, 11f * _px) + 1, size, SKTextAlign.Right, UseBdfFont);
-            CanvasText.Draw(canvas, _canvas, $"HI {_best:00000}  {_score:00000}", SKColors.White,
+            CanvasText.Draw(canvas, Canvas, $"HI {_best:00000}  {_score:00000}", SKColors.White,
                 w - 4, Math.Max(10f, 11f * _px), size, SKTextAlign.Right, UseBdfFont);
         }
 
         if (_crashTimer > 0)
         {
             var size = CanvasText.ResolveSize(FontSize, Math.Max(10f, h * 0.12f));
-            CanvasText.Draw(canvas, _canvas, "G A M E  O V E R", new SKColor(0, 0, 0, 160), w / 2f + 1, h / 2f + 1, size, SKTextAlign.Center, UseBdfFont);
-            CanvasText.Draw(canvas, _canvas, "G A M E  O V E R", SKColors.White, w / 2f, h / 2f, size, SKTextAlign.Center, UseBdfFont);
+            CanvasText.Draw(canvas, Canvas, "G A M E  O V E R", new SKColor(0, 0, 0, 160), w / 2f + 1, h / 2f + 1, size, SKTextAlign.Center, UseBdfFont);
+            CanvasText.Draw(canvas, Canvas, "G A M E  O V E R", SKColors.White, w / 2f, h / 2f, size, SKTextAlign.Center, UseBdfFont);
         }
 
-        _fx.DrawOverlay(canvas, _canvas, w, h);
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
+        _fx.DrawOverlay(canvas, Canvas, w, h);
     }
 
     /// <summary>A strip of flat-topped mesas, scrolling at <paramref name="speed"/> of the ground speed.</summary>
@@ -939,15 +851,11 @@ public class DinoRunnerExtension : ICanvasExtension, IDisposable
         _ => SKColors.Transparent
     };
 
+    /// <summary>A one-colour sprite ('1' = lit) in the paint's colour, cached as an image by PixelArt.</summary>
     private void DrawSprite(SKCanvas canvas, string[] rows, float x, float y, SKPaint paint)
     {
-        for (var ry = 0; ry < rows.Length; ry++)
-        {
-            var row = rows[ry];
-            for (var rx = 0; rx < row.Length; rx++)
-                if (row[rx] == '1')
-                    canvas.DrawRect(x + rx * _px, y + ry * _px, _px, _px, paint);
-        }
+        var col = paint.Color;
+        PixelArt.Blit(canvas, rows, x, y, ch => ch == '1' ? col : SKColors.Transparent, _px);
     }
 
     private enum Kind { CactusSmall, CactusBig, BirdLow, BirdHigh }

@@ -12,18 +12,14 @@ namespace CanvasManagement.Extension.Quake3Screensaver;
     "Iconic Quake 3 Arena style screensaver with rotating 3D logo, particles, and scrolling text",
     "Screensavers",
     IconResourceName = "quake3.svg")]
-public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
+public class Quake3ScreensaverExtension : FrameExtension
 {
     private const string FontName = "q3arena";
-    
-    private readonly ICanvas _canvas;
+
     private readonly Logo3DRenderer _logoRenderer;
     private readonly ParticleSystem _particles;
     private readonly Random _random = new();
-    
-    private Task? _animationTask;
-    private SKBitmap? _backBuffer;
-    private CancellationTokenSource? _cts;
+
     
     private int _currentQuoteIndex;
     private float _textOpacity = 1.0f;
@@ -46,14 +42,12 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
         "MATCH POINT"
     };
 
-    internal Quake3ScreensaverExtension(ICanvas canvas)
+    internal Quake3ScreensaverExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas ?? throw new ArgumentNullException(nameof(canvas));
-        
         // Initialize components - constructors are designed not to throw
         _logoRenderer = new Logo3DRenderer();
         _particles = new ParticleSystem();
-        
+
         // Don't register font in constructor - defer to Start()
     }
 
@@ -167,15 +161,18 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
 
     #region ICanvasExtension Implementation
 
-    public string Name => "Quake 3 Screensaver";
+    public override string Name => "Quake 3 Screensaver";
     public string Description => "Iconic Q3A style screensaver";
-    public bool IsRunning { get; private set; }
 
-    public void Start()
+    protected override double FrameIntervalMs => 33;
+
+    protected override bool ClearOnStop => false;
+
+    private int _frameCount;
+    private DateTime _lastQuoteChange;
+
+    protected override void OnStart()
     {
-        if (IsRunning) return;
-        IsRunning = true;
-
         // Lazy initialization on first Start()
         try
         {
@@ -187,84 +184,25 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
             Console.WriteLine($"[Q3Screensaver] Lazy init error: {ex.Message}");
         }
 
-        // Initialize back buffer
-        _backBuffer?.Dispose();
-        _backBuffer = new SKBitmap(new SKImageInfo(_canvas.Width, _canvas.Height,
-            SKColorType.Bgra8888, SKAlphaType.Premul));
-
-        // Initialize particle system
-        _particles?.Initialize(_canvas.Width, _canvas.Height);
-
-        // Apply initial color scheme
         ApplyColorScheme();
-
-        _cts = new CancellationTokenSource();
-        var ct = _cts.Token;
-
-        _animationTask = Task.Run(async () =>
-        {
-            var frameCount = 0;
-            var lastQuoteChange = DateTime.Now;
-
-            try
-            {
-                while (!ct.IsCancellationRequested)
-                {
-                    if (_backBuffer == null) break;
-
-                    // Update animations
-                    _logoRenderer?.Update();
-                    _particles?.Update();
-
-                    // Update text
-                    UpdateText(ref lastQuoteChange);
-
-                    // Render frame
-                    RenderFrame(frameCount);
-
-                    frameCount++;
-                    await Task.Delay(33, ct); // ~30 FPS
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Q3Screensaver] Animation error: {ex.Message}");
-            }
-            finally
-            {
-                _canvas.Clear();
-                IsRunning = false;
-            }
-        }, ct);
+        _frameCount = 0;
+        _lastQuoteChange = DateTime.Now;
     }
 
-    public void Stop()
-    {
-        if (!IsRunning) return;
+    protected override void OnResize(int width, int height) => _particles?.Initialize(width, height);
 
-        try
-        {
-            _cts?.Cancel();
-            _animationTask?.Wait(TimeSpan.FromSeconds(2));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Console.WriteLine($"[Q3Screensaver] Error stopping: {ex.Message}");
-        }
-        finally
-        {
-            _cts?.Dispose();
-            _cts = null;
-            _animationTask = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            _canvas.Clear();
-            IsRunning = false;
-        }
+    protected override void OnStop()
+    {
+        try { Canvas.Clear(); } catch { /* canvas already gone */ }
+    }
+
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
+    {
+        _logoRenderer?.Update();
+        _particles?.Update();
+        UpdateText(ref _lastQuoteChange);
+        RenderFrame(canvas, _frameCount);
+        _frameCount++;
     }
 
     #endregion
@@ -314,7 +252,7 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
         _currentQuoteIndex = 0;
         _textOpacity = 1.0f;
         _textFadeDirection = -1;
-        _particles?.Initialize(_canvas.Width, _canvas.Height);
+        _particles?.Initialize(Canvas.Width, Canvas.Height);
     }
 
     [ExtensionMethod("Get Current Quote", "Returns the currently displayed quote",
@@ -349,7 +287,7 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
                     {
                         stream.CopyTo(fileStream);
                     }
-                    
+
                     if (!BdfFontRegistry.IsFontRegistered(FontName))
                     {
                         BdfFontRegistry.RegisterFont(FontName, tempPath);
@@ -368,7 +306,7 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
     private void ApplyColorScheme()
     {
         if (_logoRenderer == null || _particles == null) return;
-        
+
         switch (_colorScheme)
         {
             case ColorScheme.Classic:
@@ -378,28 +316,28 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
                 _particles.PrimaryColor = new SKColor(180, 0, 0);
                 _particles.SecondaryColor = new SKColor(120, 0, 0);
                 break;
-                
+
             case ColorScheme.Blue:
                 _logoRenderer.PrimaryColor = new SKColor(0, 150, 255);   // Blue
                 _logoRenderer.SecondaryColor = new SKColor(100, 200, 255); // Light blue
                 _particles.PrimaryColor = new SKColor(0, 100, 200);
                 _particles.SecondaryColor = new SKColor(0, 50, 150);
                 break;
-                
+
             case ColorScheme.Green:
                 _logoRenderer.PrimaryColor = new SKColor(0, 255, 100);   // Green
                 _logoRenderer.SecondaryColor = new SKColor(150, 255, 150); // Light green
                 _particles.PrimaryColor = new SKColor(0, 200, 50);
                 _particles.SecondaryColor = new SKColor(0, 150, 30);
                 break;
-                
+
             case ColorScheme.Orange:
                 _logoRenderer.PrimaryColor = new SKColor(255, 120, 0);   // Orange
                 _logoRenderer.SecondaryColor = new SKColor(255, 200, 50); // Yellow
                 _particles.PrimaryColor = new SKColor(255, 80, 0);
                 _particles.SecondaryColor = new SKColor(255, 40, 0);
                 break;
-                
+
             case ColorScheme.Purple:
                 _logoRenderer.PrimaryColor = new SKColor(180, 50, 255);  // Purple
                 _logoRenderer.SecondaryColor = new SKColor(220, 150, 255); // Light purple
@@ -414,13 +352,13 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
         if (!ShowText) return;
 
         var elapsed = (DateTime.Now - lastQuoteChange).TotalSeconds;
-        
+
         // Fade in/out logic
         if (elapsed > TextDisplayTime - 0.5f && _textFadeDirection < 0)
         {
             _textFadeDirection = 1; // Start fading out
         }
-        
+
         if (_textFadeDirection > 0)
         {
             _textOpacity -= 0.05f;
@@ -443,15 +381,11 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
         }
     }
 
-    private void RenderFrame(int frameCount)
+    private void RenderFrame(SKCanvas canvas, int frameCount)
     {
-        if (_backBuffer == null) return;
-
-        using var canvas = new SKCanvas(_backBuffer);
-
         // Clear with dark background
         canvas.Clear(new SKColor(10, 5, 15)); // Very dark purple-ish black
-        
+
         // Draw gradient background
         DrawBackground(canvas);
 
@@ -467,26 +401,26 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
         // of the display, while never exceeding the user's configured scale.
         var symbolSrcWidth = symbolBounds?.Width ?? 100f;
         var textSrcWidth = textBounds?.Width ?? 150f;
-        var effectiveSymbolScale = Math.Min(SymbolScale, _canvas.Width * 0.7f / Math.Max(1f, symbolSrcWidth));
-        var effectiveTextScale = Math.Min(TextScale, _canvas.Width * 0.9f / Math.Max(1f, textSrcWidth));
+        var effectiveSymbolScale = Math.Min(SymbolScale, Canvas.Width * 0.7f / Math.Max(1f, symbolSrcWidth));
+        var effectiveTextScale = Math.Min(TextScale, Canvas.Width * 0.9f / Math.Max(1f, textSrcWidth));
 
         var symbolHeight = (symbolBounds?.Height ?? 60) * effectiveSymbolScale;
         var textHeight = (textBounds?.Height ?? 30) * effectiveTextScale;
-        var spacing = _canvas.Height * 0.05f; // 5% spacing between symbol and text
-        
+        var spacing = Canvas.Height * 0.05f; // 5% spacing between symbol and text
+
         // Total content height
         var totalHeight = symbolHeight + spacing + textHeight;
-        
+
         // Center the combined content vertically (slightly above center for aesthetic)
-        var contentStartY = (_canvas.Height - totalHeight) / 2 - _canvas.Height * 0.05f;
-        
+        var contentStartY = (Canvas.Height - totalHeight) / 2 - Canvas.Height * 0.05f;
+
         // Draw 3D rotating logo symbol
         var symbolY = (int)(contentStartY + symbolHeight / 2);
-        _logoRenderer?.RenderSymbol(canvas, _canvas.Width / 2, symbolY, effectiveSymbolScale);
+        _logoRenderer?.RenderSymbol(canvas, Canvas.Width / 2, symbolY, effectiveSymbolScale);
 
         // Draw static "QUAKE III ARENA" text from original SVG (below symbol)
         var textY = (int)(contentStartY + symbolHeight + spacing + textHeight / 2);
-        _logoRenderer?.RenderText(canvas, _canvas.Width / 2, textY, effectiveTextScale);
+        _logoRenderer?.RenderText(canvas, Canvas.Width / 2, textY, effectiveTextScale);
 
         // Draw scrolling quotes at the bottom
         if (ShowText)
@@ -496,10 +430,6 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
 
         // Draw scanline effect (subtle)
         DrawScanlines(canvas, frameCount);
-
-        // Submit frame
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(_backBuffer);
     }
 
     private void DrawBackground(SKCanvas canvas)
@@ -511,21 +441,21 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
     {
         var text = string.IsNullOrEmpty(CustomText) ? _quotes[_currentQuoteIndex] : CustomText;
         if (string.IsNullOrEmpty(text)) return;
-        
+
         // Calculate text position (bottom third of screen)
-        var textY = (int)(_canvas.Height * 0.75f);
+        var textY = (int)(Canvas.Height * 0.75f);
 
         // Get current color based on scheme
         var textColor = _logoRenderer?.PrimaryColor ?? new SKColor(255, 0, 0);
-        var alpha = (byte)(_textOpacity * _canvas.Opacity * 255);
+        var alpha = (byte)(_textOpacity * Canvas.Opacity * 255);
         textColor = new SKColor(textColor.Red, textColor.Green, textColor.Blue, alpha);
 
         try
         {
-            var size = CanvasText.ResolveSize(FontSize, Math.Max(5f, _canvas.ScaleSizeF(10)));
-            var textWidth = CanvasText.Measure(_canvas, text, size, UseBdfFont);
-            var textX = (_canvas.Width - textWidth) / 2;
-            CanvasText.Draw(canvas, _canvas, text, textColor, textX, textY, size, SKTextAlign.Left, UseBdfFont);
+            var size = CanvasText.ResolveSize(FontSize, Math.Max(5f, Canvas.ScaleSizeF(10)));
+            var textWidth = CanvasText.Measure(Canvas, text, size, UseBdfFont);
+            var textX = (Canvas.Width - textWidth) / 2;
+            CanvasText.Draw(canvas, Canvas, text, textColor, textX, textY, size, SKTextAlign.Left, UseBdfFont);
         }
         catch (Exception ex)
         {
@@ -542,17 +472,16 @@ public class Quake3ScreensaverExtension : ICanvasExtension, IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        for (int y = 0; y < _canvas.Height; y += 3)
+        for (int y = 0; y < Canvas.Height; y += 3)
         {
-            canvas.DrawRect(0, y, _canvas.Width, 1, scanPaint);
+            canvas.DrawRect(0, y, Canvas.Width, 1, scanPaint);
         }
     }
 
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        Stop();
-        _logoRenderer?.Dispose();
-        GC.SuppressFinalize(this);
+        base.Dispose(disposing);
+        if (disposing) _logoRenderer?.Dispose();
     }
 
     #endregion

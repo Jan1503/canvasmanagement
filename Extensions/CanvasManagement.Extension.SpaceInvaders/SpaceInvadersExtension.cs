@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.SpaceInvaders;
 
@@ -14,7 +12,7 @@ namespace CanvasManagement.Extension.SpaceInvaders;
     "Space Invaders — autopilot, or play with arrows / Space in Studio",
     "Games",
     IconResourceName = "space-invaders.svg")]
-public class SpaceInvadersExtension : ICanvasExtension, IDisposable
+public class SpaceInvadersExtension : GameExtension
 {
     private static readonly string[] InvaderA =
     {
@@ -48,14 +46,10 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         "11111111111"
     };
 
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _random = new();
     private readonly List<Bomb> _bombs = new();
     private readonly List<Shield> _shields = new();
 
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private int _frame;
 
     // Layout (pixels)
@@ -89,9 +83,8 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
     private bool _leftHeld;
     private bool _rightHeld;
 
-    internal SpaceInvadersExtension(ICanvas canvas)
+    internal SpaceInvadersExtension(ICanvas canvas) : base(canvas, GameSong.Space)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Game Speed", "Frame interval in milliseconds (lower = faster)", DefaultValue = 33,
@@ -128,83 +121,27 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Wave", "Current wave", ReadOnly = true, Order = 12)]
     public int Wave { get; private set; }
 
-    private GameSound? _snd;
-    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Space);
+    public override string Name => "Space Invaders";
+    protected override double FrameIntervalMs => GameSpeed;
 
-    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
-    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
-
-    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
-    public bool Music { get => _sound.Music; set => _sound.Music = value; }
-
-    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
-        MaxValue = 100, Order = 22)]
-    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
-
-    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
-        MaxValue = 100, Order = 23)]
-    public int MusicVolume
+    protected override void OnStart()
     {
-        get => (int)MathF.Round(_sound.MusicVolume * 100);
-        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
-    }
+        _human = false;
+        _leftHeld = false;
+        _rightHeld = false;
+        Layout();
+        NewGame();
 
-    public string Name => "Space Invaders";
-    public bool IsRunning { get; private set; }
-
-    public void Dispose()
-    {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _human = false;
-            _leftHeld = false;
-            _rightHeld = false;
-            Layout();
-            NewGame();
-
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-
-            _timer = new Timer(GameSpeed) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-            Console.WriteLine($"[SpaceInvaders] Started {_cols}x{_rows} invaders, px {_px}");
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _sound.Stop();
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
+        Console.WriteLine($"[SpaceInvaders] Started {_cols}x{_rows} invaders, px {_px}");
     }
 
     // ── Setup ───────────────────────────────────────────────────────────────
 
     private void Layout()
     {
-        var scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
-        var w = _canvas.Width;
-        var h = _canvas.Height;
+        var scale = DisplayScale.GetScale(Canvas.Width, Canvas.Height);
+        var w = Canvas.Width;
+        var h = Canvas.Height;
 
         _px = Math.Max(1, (int)Math.Round(scale * 2));
         _invW = 11 * _px;
@@ -241,8 +178,8 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
             _alive[c, r] = true;
 
         var totalW = _cols * _cellW;
-        _formX = (_canvas.Width - totalW) / 2f;
-        _formY = _canvas.Height * 0.12f + Math.Min(Wave - 1, 4) * _cellH * 0.5f;
+        _formX = (Canvas.Width - totalW) / 2f;
+        _formY = Canvas.Height * 0.12f + Math.Min(Wave - 1, 4) * _cellH * 0.5f;
         _dir = 1;
         _stepTimer = 0;
         _frameB = false;
@@ -252,7 +189,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         _ufo = null;
         _ufoTimer = _random.Next(300, 700);
 
-        _shipX = (_canvas.Width - _shipW) / 2f;
+        _shipX = (Canvas.Width - _shipW) / 2f;
         _respawnTimer = 0;
 
         BuildShields();
@@ -270,7 +207,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
 
         for (var i = 0; i < count; i++)
         {
-            var x = (int)((i + 0.5) / count * _canvas.Width - sw / 2.0);
+            var x = (int)((i + 0.5) / count * Canvas.Width - sw / 2.0);
             var blocks = new bool[8, 6];
             for (var bx = 0; bx < 8; bx++)
             for (var by = 0; by < 6; by++)
@@ -281,34 +218,21 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
 
     // ── Loop ────────────────────────────────────────────────────────────────
 
-    private void OnTick(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
+        if (_gameOverTimer > 0)
         {
-            if (!IsRunning || _backBuffer == null) return;
-            try
-            {
-                if (_timer != null && Math.Abs(_timer.Interval - GameSpeed) > 0.5) _timer.Interval = GameSpeed;
-
-                if (_gameOverTimer > 0)
-                {
-                    _gameOverTimer--;
-                    if (_gameOverTimer == 0) NewGame();
-                }
-                else
-                {
-                    Update();
-                }
-
-                Render();
-                _sound.Update();
-                _frame++;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[SpaceInvaders] {ex.Message}");
-            }
+            _gameOverTimer--;
+            if (_gameOverTimer == 0) NewGame();
         }
+        else
+        {
+            Update();
+        }
+
+        Draw(canvas);
+        Audio.Update();
+        _frame++;
     }
 
     private void Update()
@@ -333,10 +257,10 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         if (AliveCount() == 0)
         {
             Wave++;
-            _sound.Play(GameSfx.LevelUp, 0.7f);
+            Audio.Play(GameSfx.LevelUp, 0.7f);
             _fx.Flash(new SKColor(120, 200, 255), 0.4f);
-            _fx.Confetti(_canvas.Width / 2f, _canvas.Height * 0.4f, 50, 3f);
-            _fx.Pop($"WAVE {Wave}", _canvas.Width / 2f, _canvas.Height * 0.45f, new SKColor(120, 220, 255));
+            _fx.Confetti(Canvas.Width / 2f, Canvas.Height * 0.4f, 50, 3f);
+            _fx.Pop($"WAVE {Wave}", Canvas.Width / 2f, Canvas.Height * 0.45f, new SKColor(120, 220, 255));
             StartWave();
         }
     }
@@ -355,7 +279,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         GetFormationBounds(out var minX, out var maxX, out var maxY);
         var step = _px * 2;
 
-        if (_dir > 0 && maxX + step > _canvas.Width - _px || _dir < 0 && minX - step < _px)
+        if (_dir > 0 && maxX + step > Canvas.Width - _px || _dir < 0 && minX - step < _px)
         {
             _dir = -_dir;
             _formY += _invH * 0.5f;
@@ -369,8 +293,8 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         if (maxY >= _shipY - _invH * 0.5f)
         {
             LoseLife();
-            _formY = _canvas.Height * 0.12f;
-            _formX = (_canvas.Width - _cols * _cellW) / 2f;
+            _formY = Canvas.Height * 0.12f;
+            _formX = (Canvas.Width - _cols * _cellW) / 2f;
         }
 
         // Occasionally drop a bomb from the lowest invader of a random column.
@@ -383,7 +307,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
                 {
                     var (ix, iy) = InvaderPos(c, r);
                     _bombs.Add(new Bomb { X = ix + _invW / 2f, Y = iy + _invH });
-                    _sound.Play(GameSfx.Drop, 0.25f, 0, 1.6f, 120);
+                    Audio.Play(GameSfx.Drop, 0.25f, 0, 1.6f, 120);
                     break;
                 }
         }
@@ -402,7 +326,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
             Score += bonus;
             _fx.Burst(_ufo.X + _invW / 2f, _invH * 0.6f, new SKColor(255, 80, 200), 30, 3f, 0.9f, 0.03f);
             _fx.Pop(bonus.ToString(), _ufo.X + _invW / 2f, _invH * 1.6f, new SKColor(255, 160, 230));
-            _sound.Play(GameSfx.Score, 0.7f);
+            Audio.Play(GameSfx.Score, 0.7f);
             _ufo = null;
             _bulletActive = false;
             return;
@@ -419,7 +343,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
                 _alive[c, r] = false;
                 Score += (_rows - r) * 10;
                 FxAlien(ix, iy, r);
-                _sound.Play(GameSfx.Explode, 0.45f, (_bulletX / _canvas.Width) * 2 - 1, 1.6f);
+                Audio.Play(GameSfx.Explode, 0.45f, (_bulletX / Canvas.Width) * 2 - 1, 1.6f);
                 _bulletActive = false;
                 return;
             }
@@ -436,7 +360,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
             b.Y += _bombSpeed + Difficulty * 0.15f;
             _bombs[i] = b;
 
-            if (b.Y > _canvas.Height) { _bombs.RemoveAt(i); continue; }
+            if (b.Y > Canvas.Height) { _bombs.RemoveAt(i); continue; }
             if (HitShield((int)b.X, (int)b.Y)) { _bombs.RemoveAt(i); continue; }
 
             // Ship hit
@@ -455,7 +379,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
             if (--_ufoTimer <= 0)
             {
                 var fromLeft = _random.Next(2) == 0;
-                _ufo = new Ufo { X = fromLeft ? -_invW : _canvas.Width, Dir = fromLeft ? 1 : -1 };
+                _ufo = new Ufo { X = fromLeft ? -_invW : Canvas.Width, Dir = fromLeft ? 1 : -1 };
                 _ufoTimer = _random.Next(400, 900);
             }
 
@@ -463,7 +387,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         }
 
         _ufo.X += _ufo.Dir * Math.Max(1f, _px * 0.8f);
-        if (_ufo.X < -_invW * 2 || _ufo.X > _canvas.Width + _invW) _ufo = null;
+        if (_ufo.X < -_invW * 2 || _ufo.X > Canvas.Width + _invW) _ufo = null;
     }
 
     // ── AI cannon ─────────────────────────────────────────────────────────────
@@ -486,7 +410,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
             {
                 closestThreat = frames;
                 var roomLeft = _shipX;
-                var roomRight = _canvas.Width - (_shipX + _shipW);
+                var roomRight = Canvas.Width - (_shipX + _shipW);
                 dodge = roomLeft >= roomRight ? -1 : 1;
                 if (b.X < shipCenter && roomRight > _shipW * 0.3f) dodge = 1;
                 if (b.X > shipCenter && roomLeft > _shipW * 0.3f) dodge = -1;
@@ -513,7 +437,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         if (_ufo != null)
         {
             var ufoX = _ufo.X + _invW / 2f;
-            if (ufoX > _px && ufoX < _canvas.Width - _px)
+            if (ufoX > _px && ufoX < Canvas.Width - _px)
                 return ufoX;
         }
 
@@ -529,7 +453,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
             var (ix, iy) = InvaderPos(c, front);
             var cx = ix + _invW / 2f;
             // Prefer the lowest (nearest) invaders, then the closest column.
-            var score = (_rows - 1 - front) * _canvas.Width + Math.Abs(cx - shipCenter);
+            var score = (_rows - 1 - front) * Canvas.Width + Math.Abs(cx - shipCenter);
             if (score < bestScore)
             {
                 bestScore = score;
@@ -550,13 +474,13 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
 
     private void MoveShip(int dir)
     {
-        _shipX = Math.Clamp(_shipX + dir * _shipSpeed, 0, _canvas.Width - _shipW);
+        _shipX = Math.Clamp(_shipX + dir * _shipSpeed, 0, Canvas.Width - _shipW);
     }
 
     private void Fire()
     {
         _bulletActive = true;
-        _sound.Play(GameSfx.Shoot, 0.4f, (_shipX / _canvas.Width) * 2 - 1);
+        Audio.Play(GameSfx.Shoot, 0.4f, (_shipX / Canvas.Width) * 2 - 1);
         _bulletX = _shipX + _shipW / 2f;
         _bulletY = _shipY;
     }
@@ -565,35 +489,35 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Left|A", Order = 1)]
     public void MoveLeft()
     {
-        lock (_lock) { _human = true; _leftHeld = true; }
+        lock (Sync) { _human = true; _leftHeld = true; }
     }
 
     [ExtensionMethod("Move Right", "Hold right — takes over from autopilot",
         Category = "Controls", KeyboardShortcut = "Right|D", Order = 2)]
     public void MoveRight()
     {
-        lock (_lock) { _human = true; _rightHeld = true; }
+        lock (Sync) { _human = true; _rightHeld = true; }
     }
 
     [ExtensionMethod("Release Left", "Release left",
         Category = "Controls", KeyboardShortcut = "Left:up|A:up", Order = 3)]
     public void ReleaseLeft()
     {
-        lock (_lock) _leftHeld = false;
+        lock (Sync) _leftHeld = false;
     }
 
     [ExtensionMethod("Release Right", "Release right",
         Category = "Controls", KeyboardShortcut = "Right:up|D:up", Order = 4)]
     public void ReleaseRight()
     {
-        lock (_lock) _rightHeld = false;
+        lock (Sync) _rightHeld = false;
     }
 
     [ExtensionMethod("Shoot", "Fire — takes over from autopilot",
         Category = "Controls", KeyboardShortcut = "Space|Up", Order = 5)]
     public void Shoot()
     {
-        lock (_lock)
+        lock (Sync)
         {
             _human = true;
             if (!_bulletActive && _respawnTimer == 0) Fire();
@@ -604,12 +528,12 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
     {
         FxShip();
         Lives--;
-        _sound.Play(GameSfx.Explode, 0.8f);
-        if (Lives <= 0) _sound.Play(GameSfx.GameOver, 0.6f);
+        Audio.Play(GameSfx.Explode, 0.8f);
+        if (Lives <= 0) Audio.Play(GameSfx.GameOver, 0.6f);
         _bombs.Clear();
         _bulletActive = false;
         _respawnTimer = 40;
-        _shipX = (_canvas.Width - _shipW) / 2f;
+        _shipX = (Canvas.Width - _shipW) / 2f;
         if (Lives <= 0) _gameOverTimer = 90;
     }
 
@@ -735,19 +659,15 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
     ///     colour, a cannon with an engine glow, glowing shots with a trail, debris when shields are hit, alien
     ///     explosions, a shaking, flashing screen when the cannon is hit.
     /// </summary>
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
-
         var now = _clock.Elapsed.TotalSeconds;
         var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
         _lastRender = now;
         _fx.Update(dt);
 
-        var w = _canvas.Width;
-        var h = _canvas.Height;
-        using var canvas = new SKCanvas(bb);
+        var w = Canvas.Width;
+        var h = Canvas.Height;
         using var paint = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = false };
 
         if (BackgroundColor == SKColors.Black)
@@ -842,10 +762,7 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         _fx.EndShake(canvas);
 
         if (ShowHud) DrawHud(canvas);
-        _fx.DrawOverlay(canvas, _canvas, w, h, Math.Max(7f, h * 0.07f));
-
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
+        _fx.DrawOverlay(canvas, Canvas, w, h, Math.Max(7f, h * 0.07f));
     }
 
     private void FxAlien(float x, float y, int row)
@@ -863,33 +780,29 @@ public class SpaceInvadersExtension : ICanvasExtension, IDisposable
         _fx.Shake(6);
     }
 
+    /// <summary>A one-colour sprite ('1' = lit) in the paint's colour, cached as an image by PixelArt.</summary>
     private void DrawSprite(SKCanvas canvas, string[] rows, float x, float y, SKPaint paint)
     {
-        for (var ry = 0; ry < rows.Length; ry++)
-        {
-            var row = rows[ry];
-            for (var rx = 0; rx < row.Length; rx++)
-                if (row[rx] == '1')
-                    canvas.DrawRect(x + rx * _px, y + ry * _px, _px, _px, paint);
-        }
+        var col = paint.Color;
+        PixelArt.Blit(canvas, rows, x, y, ch => ch == '1' ? col : SKColors.Transparent, _px);
     }
 
     private void DrawHud(SKCanvas canvas)
     {
-        var size = CanvasText.ResolveSize(FontSize, Math.Max(8f, Math.Min(14f, _canvas.Height * 0.09f)));
-        CanvasText.Draw(canvas, _canvas, $"SCORE {Score}", SKColors.White, 3, size, size, SKTextAlign.Left,
+        var size = CanvasText.ResolveSize(FontSize, Math.Max(8f, Math.Min(14f, Canvas.Height * 0.09f)));
+        CanvasText.Draw(canvas, Canvas, $"SCORE {Score}", SKColors.White, 3, size, size, SKTextAlign.Left,
             UseBdfFont);
 
         if (_gameOverTimer > 0)
         {
-            CanvasText.Draw(canvas, _canvas, "GAME OVER", SKColors.Red, _canvas.Width / 2f, _canvas.Height / 2f,
-                CanvasText.ResolveSize(FontSize, Math.Max(14f, _canvas.Height * 0.16f)), SKTextAlign.Center, UseBdfFont);
+            CanvasText.Draw(canvas, Canvas, "GAME OVER", SKColors.Red, Canvas.Width / 2f, Canvas.Height / 2f,
+                CanvasText.ResolveSize(FontSize, Math.Max(14f, Canvas.Height * 0.16f)), SKTextAlign.Center, UseBdfFont);
         }
 
         // Lives as little cannons.
         using var lp = new SKPaint { Color = new SKColor(120, 255, 140), IsAntialias = false };
         for (var i = 0; i < Lives; i++)
-            DrawSprite(canvas, Cannon, _canvas.Width - (i + 1) * (_shipW + _px * 2), 2, lp);
+            DrawSprite(canvas, Cannon, Canvas.Width - (i + 1) * (_shipW + _px * 2), 2, lp);
     }
 
     private struct Bomb

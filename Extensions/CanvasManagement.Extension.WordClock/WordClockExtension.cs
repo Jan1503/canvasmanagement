@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.WordClock;
 
@@ -9,11 +7,8 @@ namespace CanvasManagement.Extension.WordClock;
     "Display time in German words - \"ES IST ZEHN UHR\"",
     "Clocks",
     IconResourceName = "wordclock.svg")]
-public class WordClockExtension : IDisposable
+public class WordClockExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _renderLock = new();
-
     // German word clock matrix (11x10)
     private readonly string[] _wordGrid = new[]
     {
@@ -31,209 +26,137 @@ public class WordClockExtension : IDisposable
         "BSECHSFMUHR"
     };
 
-    // Double buffering to prevent flicker
-    private SKBitmap? _backBuffer;
-    private bool _disposed;
-    private Timer? _updateTimer;
-
-    internal WordClockExtension(ICanvas canvas)
+    internal WordClockExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
-    public bool IsRunning { get; private set; }
+    public override string Name => "Word Clock (German)";
 
-    public void Dispose()
+    protected override double FrameIntervalMs => 1000;
+
+    protected override bool ClearOnStop => false;
+
+    protected override void OnStart()
     {
-        if (_disposed) return;
-        Stop();
-        _backBuffer?.Dispose();
-        _disposed = true;
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        if (IsRunning) return;
-
-        // Create back buffer
-        _backBuffer?.Dispose();
-        _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-
-        _updateTimer = new Timer(1000); // Update every second
-        _updateTimer.Elapsed += OnUpdate;
-        _updateTimer.AutoReset = true;
-        _updateTimer.Start();
-
-        IsRunning = true;
         Console.WriteLine("Word Clock started");
     }
 
-    public void Stop()
+    protected override void OnStop()
     {
-        if (!IsRunning) return;
+        try { Canvas.Clear(BackgroundColor); } catch { /* canvas already gone */ }
 
-        _updateTimer?.Stop();
-        _updateTimer?.Dispose();
-        _updateTimer = null;
-
-        _backBuffer?.Dispose();
-        _backBuffer = null;
-
-        try
-        {
-            _canvas.Clear(BackgroundColor);
-        }
-        catch
-        {
-        }
-
-        IsRunning = false;
         Console.WriteLine("Word Clock stopped");
     }
 
-    private void OnUpdate(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        if (!IsRunning) return;
-
-        try
-        {
-            _updateTimer?.Stop();
-            Render();
-            if (IsRunning && _updateTimer != null) _updateTimer.Start();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Word Clock update error: {ex.Message}");
-            try
-            {
-                _updateTimer?.Start();
-            }
-            catch
-            {
-                Stop();
-            }
-        }
+        Draw(canvas);
     }
 
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        lock (_renderLock)
+        // Render to back buffer
+
+        // Clear with background color (supports transparency)
+        if (BackgroundColor.Alpha == 0)
         {
-            try
-            {
-                if (_backBuffer == null) return;
-
-                // Render to back buffer
-                using var canvas = new SKCanvas(_backBuffer);
-
-                // Clear with background color (supports transparency)
-                if (BackgroundColor.Alpha == 0)
-                {
-                    canvas.Clear(SKColors.Transparent);
-                }
-                else if (BackgroundColor.Alpha == 255)
-                {
-                    canvas.Clear(BackgroundColor);
-                }
-                else
-                {
-                    canvas.Clear(SKColors.Transparent);
-                    using var bgPaint = new SKPaint { Color = BackgroundColor, Style = SKPaintStyle.Fill };
-                    canvas.DrawRect(0, 0, _canvas.Width, _canvas.Height, bgPaint);
-                }
-
-                var now = DateTime.Now;
-                var activeWords = GetActiveWords(now);
-
-                // Determine layout
-                int cols, rows;
-                var isLandscape = DetermineLayout(out cols, out rows);
-
-                // Calculate optimal letter size if auto
-                var actualLetterSize = LetterSize;
-                var spacing = LetterSpacing;
-                if (actualLetterSize == 0)
-                {
-                    // Auto-fit to canvas. Padding and inter-letter spacing shrink on small panels
-                    // so the entire word grid fits at native resolution.
-                    var pad = Math.Min(_canvas.Width, _canvas.Height) / 10;
-                    spacing = Math.Max(0, Math.Min(LetterSpacing,
-                        Math.Min(_canvas.Width / cols, _canvas.Height / rows) / 4));
-
-                    var maxWidth = _canvas.Width - pad;
-                    var maxHeight = _canvas.Height - pad;
-
-                    var sizeByWidth = maxWidth / cols - spacing;
-                    var sizeByHeight = maxHeight / rows - spacing;
-
-                    actualLetterSize = Math.Min(sizeByWidth, sizeByHeight);
-                    actualLetterSize = Math.Max(3, Math.Min(100, actualLetterSize)); // Clamp 3-100
-                }
-
-                // Calculate grid dimensions
-                var cellSize = actualLetterSize + spacing;
-                var gridWidth = cols * cellSize - spacing;
-                var gridHeight = rows * cellSize - spacing;
-                var startX = (_canvas.Width - gridWidth) / 2;
-                var startY = (_canvas.Height - gridHeight) / 2;
-
-                // Draw grid background
-                if (ShowGrid)
-                {
-                    using var gridPaint = new SKPaint
-                    {
-                        Color = new SKColor(20, 20, 20),
-                        Style = SKPaintStyle.Fill
-                    };
-                    var inset = _canvas.ScaleSize(10);
-                    canvas.DrawRect(startX - inset, startY - inset, gridWidth + inset * 2, gridHeight + inset * 2,
-                        gridPaint);
-                }
-
-                // Draw letters
-                for (var row = 0; row < rows; row++)
-                for (var col = 0; col < cols; col++)
-                {
-                    var letter = GetLetterAt(row, col, isLandscape);
-                    var isActive = IsLetterActive(row, col, activeWords, isLandscape);
-
-                    var x = startX + col * cellSize + actualLetterSize / 2;
-                    var y = startY + row * cellSize + actualLetterSize;
-
-                    if (isActive && GlowEffect && actualLetterSize >= 8 && !UseBdfFont)
-                    {
-                        using var glowPaint = new SKPaint
-                        {
-                            Color = new SKColor(
-                                ActiveColor.Red,
-                                ActiveColor.Green,
-                                ActiveColor.Blue,
-                                80),
-                            IsAntialias = true,
-                            MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, Math.Max(1f, actualLetterSize / 4f))
-                        };
-                        using var font = new SKFont
-                        {
-                            Size = actualLetterSize,
-                            Typeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold)
-                        };
-                        canvas.DrawText(letter.ToString(), x, y, SKTextAlign.Center, font, glowPaint);
-                    }
-
-                    var color = isActive ? ActiveColor : InactiveColor;
-                    CanvasText.Draw(canvas, _canvas, letter.ToString(), color, x, y, actualLetterSize,
-                        SKTextAlign.Center, UseBdfFont);
-                }
-
-                canvas.Flush();// Atomic submission
-                _canvas.SubmitCompletedFrame(_backBuffer);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Render error: {ex.Message}");
-            }
+            canvas.Clear(SKColors.Transparent);
         }
+        else if (BackgroundColor.Alpha == 255)
+        {
+            canvas.Clear(BackgroundColor);
+        }
+        else
+        {
+            canvas.Clear(SKColors.Transparent);
+            using var bgPaint = new SKPaint { Color = BackgroundColor, Style = SKPaintStyle.Fill };
+            canvas.DrawRect(0, 0, Canvas.Width, Canvas.Height, bgPaint);
+        }
+
+        var now = DateTime.Now;
+        var activeWords = GetActiveWords(now);
+
+        // Determine layout
+        int cols, rows;
+        var isLandscape = DetermineLayout(out cols, out rows);
+
+        // Calculate optimal letter size if auto
+        var actualLetterSize = LetterSize;
+        var spacing = LetterSpacing;
+        if (actualLetterSize == 0)
+        {
+            // Auto-fit to canvas. Padding and inter-letter spacing shrink on small panels
+            // so the entire word grid fits at native resolution.
+            var pad = Math.Min(Canvas.Width, Canvas.Height) / 10;
+            spacing = Math.Max(0, Math.Min(LetterSpacing,
+                Math.Min(Canvas.Width / cols, Canvas.Height / rows) / 4));
+
+            var maxWidth = Canvas.Width - pad;
+            var maxHeight = Canvas.Height - pad;
+
+            var sizeByWidth = maxWidth / cols - spacing;
+            var sizeByHeight = maxHeight / rows - spacing;
+
+            actualLetterSize = Math.Min(sizeByWidth, sizeByHeight);
+            actualLetterSize = Math.Max(3, Math.Min(100, actualLetterSize)); // Clamp 3-100
+        }
+
+        // Calculate grid dimensions
+        var cellSize = actualLetterSize + spacing;
+        var gridWidth = cols * cellSize - spacing;
+        var gridHeight = rows * cellSize - spacing;
+        var startX = (Canvas.Width - gridWidth) / 2;
+        var startY = (Canvas.Height - gridHeight) / 2;
+
+        // Draw grid background
+        if (ShowGrid)
+        {
+            using var gridPaint = new SKPaint
+            {
+                Color = new SKColor(20, 20, 20),
+                Style = SKPaintStyle.Fill
+            };
+            var inset = Canvas.ScaleSize(10);
+            canvas.DrawRect(startX - inset, startY - inset, gridWidth + inset * 2, gridHeight + inset * 2,
+                gridPaint);
+        }
+
+        // Draw letters
+        for (var row = 0; row < rows; row++)
+        for (var col = 0; col < cols; col++)
+        {
+            var letter = GetLetterAt(row, col, isLandscape);
+            var isActive = IsLetterActive(row, col, activeWords, isLandscape);
+
+            var x = startX + col * cellSize + actualLetterSize / 2;
+            var y = startY + row * cellSize + actualLetterSize;
+
+            if (isActive && GlowEffect && actualLetterSize >= 8 && !UseBdfFont)
+            {
+                using var glowPaint = new SKPaint
+                {
+                    Color = new SKColor(
+                        ActiveColor.Red,
+                        ActiveColor.Green,
+                        ActiveColor.Blue,
+                        80),
+                    IsAntialias = true,
+                    MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, Math.Max(1f, actualLetterSize / 4f))
+                };
+                using var font = new SKFont
+                {
+                    Size = actualLetterSize,
+                    Typeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold)
+                };
+                canvas.DrawText(letter.ToString(), x, y, SKTextAlign.Center, font, glowPaint);
+            }
+
+            var color = isActive ? ActiveColor : InactiveColor;
+            CanvasText.Draw(canvas, Canvas, letter.ToString(), color, x, y, actualLetterSize,
+                SKTextAlign.Center, UseBdfFont);
+        }
+
+        canvas.Flush();// Atomic submission
     }
 
     private bool DetermineLayout(out int cols, out int rows)
@@ -243,7 +166,7 @@ public class WordClockExtension : IDisposable
         switch (LayoutMode)
         {
             case 0: // Auto
-                isLandscape = _canvas.Width > _canvas.Height;
+                isLandscape = Canvas.Width > Canvas.Height;
                 break;
             case 1: // Portrait
                 isLandscape = false;

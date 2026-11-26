@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.BinaryClock;
 
@@ -9,222 +7,148 @@ namespace CanvasManagement.Extension.BinaryClock;
     "Display time in binary format with customizable LED style",
     "Clocks",
     IconResourceName = "binaryclock.svg")]
-public class BinaryClockExtension : IDisposable
+public class BinaryClockExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _renderLock = new();
-    private SKBitmap? _backBuffer;
-    private bool _disposed;
-    private Timer? _updateTimer;
-
-    internal BinaryClockExtension(ICanvas canvas)
+    internal BinaryClockExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
-
         // Auto-fit the LED grid to the panel (defaults are sized for 384x192).
         var s = DisplayScale.GetScale(canvas.Width, canvas.Height);
         LEDSize = Math.Max(3, (int)Math.Round(20 * s));
         LEDSpacing = Math.Max(1, (int)Math.Round(5 * s));
     }
 
-    public bool IsRunning { get; private set; }
+    public override string Name => "Binary Clock";
 
-    public void Dispose()
+    protected override double FrameIntervalMs => 100;
+
+    protected override bool ClearOnStop => false;
+
+    protected override void OnStart()
     {
-        if (_disposed) return;
-        Stop();
-        _backBuffer?.Dispose();
-        _disposed = true;
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        if (IsRunning) return;
-
-        _backBuffer?.Dispose();
-        _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-
-        _updateTimer = new Timer(100); // Update 10 times per second
-        _updateTimer.Elapsed += OnUpdate;
-        _updateTimer.AutoReset = true;
-        _updateTimer.Start();
-
-        IsRunning = true;
         Console.WriteLine("Binary Clock started");
     }
 
-    public void Stop()
+    protected override void OnStop()
     {
-        if (!IsRunning) return;
+        try { Canvas.Clear(BackgroundColor); } catch { /* canvas already gone */ }
 
-        _updateTimer?.Stop();
-        _updateTimer?.Dispose();
-        _updateTimer = null;
-
-        _backBuffer?.Dispose();
-        _backBuffer = null;
-
-        try
-        {
-            _canvas.Clear(BackgroundColor);
-        }
-        catch
-        {
-        }
-
-        IsRunning = false;
         Console.WriteLine("Binary Clock stopped");
     }
 
-    private void OnUpdate(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        if (!IsRunning) return;
-
-        try
-        {
-            _updateTimer?.Stop();
-            Render();
-            if (IsRunning && _updateTimer != null) _updateTimer.Start();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Binary Clock update error: {ex.Message}");
-            try
-            {
-                _updateTimer?.Start();
-            }
-            catch
-            {
-                Stop();
-            }
-        }
+        Draw(canvas);
     }
 
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        if (_backBuffer == null) return;
+        // Clear with background color
+        canvas.Clear(BackgroundColor);
 
-        lock (_renderLock)
+        var now = DateTime.Now;
+        var hours = TwentyFourHour ? now.Hour : now.Hour % 12 == 0 ? 12 : now.Hour % 12;
+        var minutes = now.Minute;
+        var seconds = now.Second;
+
+        // Calculate dimensions
+        var columns = ShowSeconds ? 6 : 4;
+        var rows = 4;
+
+        var totalWidth = columns * (LEDSize + LEDSpacing) - LEDSpacing;
+        var totalHeight = rows * (LEDSize + LEDSpacing) - LEDSpacing;
+
+        var startX = (Canvas.Width - totalWidth) / 2;
+        var startY = (Canvas.Height - totalHeight) / 2;
+
+        var labelOffset = 0;
+        if (ShowLabels)
         {
-            try
+            labelOffset = Canvas.ScaleSize(25);
+            startY += labelOffset / 2;
+        }
+
+        // Draw labels - properly centered above each column
+        if (ShowLabels)
+        {
+            var labelSize = CanvasText.ResolveSize(FontSize > 0 ? Math.Max(6, (int)(FontSize * 0.65f)) : 0,
+                Canvas.ScaleSizeF(12));
+            var labelY = startY - Canvas.ScaleSize(10);
+            var colWidth = LEDSize + LEDSpacing;
+            var grey = SKColors.Gray;
+            CanvasText.Draw(canvas, Canvas, "H", grey, startX + LEDSize / 2, labelY, labelSize,
+                SKTextAlign.Center, UseBdfFont);
+            CanvasText.Draw(canvas, Canvas, "H", grey, startX + colWidth + LEDSize / 2, labelY, labelSize,
+                SKTextAlign.Center, UseBdfFont);
+            CanvasText.Draw(canvas, Canvas, "M", grey, startX + colWidth * 2 + LEDSize / 2, labelY, labelSize,
+                SKTextAlign.Center, UseBdfFont);
+            CanvasText.Draw(canvas, Canvas, "M", grey, startX + colWidth * 3 + LEDSize / 2, labelY, labelSize,
+                SKTextAlign.Center, UseBdfFont);
+            if (ShowSeconds)
             {
-                using var canvas = new SKCanvas(_backBuffer);
-
-                // Clear with background color
-                canvas.Clear(BackgroundColor);
-
-                var now = DateTime.Now;
-                var hours = TwentyFourHour ? now.Hour : now.Hour % 12 == 0 ? 12 : now.Hour % 12;
-                var minutes = now.Minute;
-                var seconds = now.Second;
-
-                // Calculate dimensions
-                var columns = ShowSeconds ? 6 : 4;
-                var rows = 4;
-
-                var totalWidth = columns * (LEDSize + LEDSpacing) - LEDSpacing;
-                var totalHeight = rows * (LEDSize + LEDSpacing) - LEDSpacing;
-
-                var startX = (_canvas.Width - totalWidth) / 2;
-                var startY = (_canvas.Height - totalHeight) / 2;
-
-                var labelOffset = 0;
-                if (ShowLabels)
-                {
-                    labelOffset = _canvas.ScaleSize(25);
-                    startY += labelOffset / 2;
-                }
-
-                // Draw labels - properly centered above each column
-                if (ShowLabels)
-                {
-                    var labelSize = CanvasText.ResolveSize(FontSize > 0 ? Math.Max(6, (int)(FontSize * 0.65f)) : 0,
-                        _canvas.ScaleSizeF(12));
-                    var labelY = startY - _canvas.ScaleSize(10);
-                    var colWidth = LEDSize + LEDSpacing;
-                    var grey = SKColors.Gray;
-                    CanvasText.Draw(canvas, _canvas, "H", grey, startX + LEDSize / 2, labelY, labelSize,
-                        SKTextAlign.Center, UseBdfFont);
-                    CanvasText.Draw(canvas, _canvas, "H", grey, startX + colWidth + LEDSize / 2, labelY, labelSize,
-                        SKTextAlign.Center, UseBdfFont);
-                    CanvasText.Draw(canvas, _canvas, "M", grey, startX + colWidth * 2 + LEDSize / 2, labelY, labelSize,
-                        SKTextAlign.Center, UseBdfFont);
-                    CanvasText.Draw(canvas, _canvas, "M", grey, startX + colWidth * 3 + LEDSize / 2, labelY, labelSize,
-                        SKTextAlign.Center, UseBdfFont);
-                    if (ShowSeconds)
-                    {
-                        CanvasText.Draw(canvas, _canvas, "S", grey, startX + colWidth * 4 + LEDSize / 2, labelY,
-                            labelSize, SKTextAlign.Center, UseBdfFont);
-                        CanvasText.Draw(canvas, _canvas, "S", grey, startX + colWidth * 5 + LEDSize / 2, labelY,
-                            labelSize, SKTextAlign.Center, UseBdfFont);
-                    }
-                }
-
-                // Draw binary time
-                DrawBinaryDigit(canvas, hours / 10, startX, startY, 0);
-                DrawBinaryDigit(canvas, hours % 10, startX, startY, 1);
-                DrawBinaryDigit(canvas, minutes / 10, startX, startY, 2);
-                DrawBinaryDigit(canvas, minutes % 10, startX, startY, 3);
-
-                if (ShowSeconds)
-                {
-                    DrawBinaryDigit(canvas, seconds / 10, startX, startY, 4);
-                    DrawBinaryDigit(canvas, seconds % 10, startX, startY, 5);
-                }
-
-                // Draw colon separators
-                if (ShowColons)
-                {
-                    var colonY = startY + totalHeight / 2;
-                    var colWidth = LEDSize + LEDSpacing;
-
-                    using var colonPaint = new SKPaint
-                    {
-                        Color = LEDOnColor,
-                        Style = SKPaintStyle.Fill,
-                        IsAntialias = true
-                    };
-
-                    var dotR = Math.Max(1, _canvas.ScaleSize(3));
-
-                    // First colon (between HH and MM)
-                    var colon1X = startX + colWidth * 2 - LEDSpacing / 2;
-                    canvas.DrawCircle(colon1X, colonY - LEDSize / 2, dotR, colonPaint);
-                    canvas.DrawCircle(colon1X, colonY + LEDSize / 2, dotR, colonPaint);
-
-                    // Second colon (between MM and SS)
-                    if (ShowSeconds)
-                    {
-                        var colon2X = startX + colWidth * 4 - LEDSpacing / 2;
-                        canvas.DrawCircle(colon2X, colonY - LEDSize / 2, dotR, colonPaint);
-                        canvas.DrawCircle(colon2X, colonY + LEDSize / 2, dotR, colonPaint);
-                    }
-                }
-
-                // Draw digital time text - properly centered
-                if (ShowTimeText)
-                {
-                    var timeText = ShowSeconds
-                        ? $"{hours:D2}:{minutes:D2}:{seconds:D2}"
-                        : $"{hours:D2}:{minutes:D2}";
-
-                    if (!TwentyFourHour) timeText += now.Hour >= 12 ? " PM" : " AM";
-
-                    var timeSize = CanvasText.ResolveSize(FontSize, _canvas.ScaleSizeF(20));
-                    var textY = startY + totalHeight + _canvas.ScaleSize(35);
-                    CanvasText.Draw(canvas, _canvas, timeText, SKColors.White, _canvas.Width / 2, textY, timeSize,
-                        SKTextAlign.Center, UseBdfFont);
-                }
-
-                canvas.Flush();// Blit to canvas
-                _canvas.SubmitCompletedFrame(_backBuffer);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Render error: {ex.Message}");
+                CanvasText.Draw(canvas, Canvas, "S", grey, startX + colWidth * 4 + LEDSize / 2, labelY,
+                    labelSize, SKTextAlign.Center, UseBdfFont);
+                CanvasText.Draw(canvas, Canvas, "S", grey, startX + colWidth * 5 + LEDSize / 2, labelY,
+                    labelSize, SKTextAlign.Center, UseBdfFont);
             }
         }
+
+        // Draw binary time
+        DrawBinaryDigit(canvas, hours / 10, startX, startY, 0);
+        DrawBinaryDigit(canvas, hours % 10, startX, startY, 1);
+        DrawBinaryDigit(canvas, minutes / 10, startX, startY, 2);
+        DrawBinaryDigit(canvas, minutes % 10, startX, startY, 3);
+
+        if (ShowSeconds)
+        {
+            DrawBinaryDigit(canvas, seconds / 10, startX, startY, 4);
+            DrawBinaryDigit(canvas, seconds % 10, startX, startY, 5);
+        }
+
+        // Draw colon separators
+        if (ShowColons)
+        {
+            var colonY = startY + totalHeight / 2;
+            var colWidth = LEDSize + LEDSpacing;
+
+            using var colonPaint = new SKPaint
+            {
+                Color = LEDOnColor,
+                Style = SKPaintStyle.Fill,
+                IsAntialias = true
+            };
+
+            var dotR = Math.Max(1, Canvas.ScaleSize(3));
+
+            // First colon (between HH and MM)
+            var colon1X = startX + colWidth * 2 - LEDSpacing / 2;
+            canvas.DrawCircle(colon1X, colonY - LEDSize / 2, dotR, colonPaint);
+            canvas.DrawCircle(colon1X, colonY + LEDSize / 2, dotR, colonPaint);
+
+            // Second colon (between MM and SS)
+            if (ShowSeconds)
+            {
+                var colon2X = startX + colWidth * 4 - LEDSpacing / 2;
+                canvas.DrawCircle(colon2X, colonY - LEDSize / 2, dotR, colonPaint);
+                canvas.DrawCircle(colon2X, colonY + LEDSize / 2, dotR, colonPaint);
+            }
+        }
+
+        // Draw digital time text - properly centered
+        if (ShowTimeText)
+        {
+            var timeText = ShowSeconds
+                ? $"{hours:D2}:{minutes:D2}:{seconds:D2}"
+                : $"{hours:D2}:{minutes:D2}";
+
+            if (!TwentyFourHour) timeText += now.Hour >= 12 ? " PM" : " AM";
+
+            var timeSize = CanvasText.ResolveSize(FontSize, Canvas.ScaleSizeF(20));
+            var textY = startY + totalHeight + Canvas.ScaleSize(35);
+            CanvasText.Draw(canvas, Canvas, timeText, SKColors.White, Canvas.Width / 2, textY, timeSize,
+                SKTextAlign.Center, UseBdfFont);
+        }
+
+        canvas.Flush();// Blit to canvas
     }
 
     private void DrawBinaryDigit(SKCanvas canvas, int digit, int baseX, int baseY, int column)

@@ -603,7 +603,7 @@ public sealed class YouTubePlayerExtension : ICanvasExtension, IDisposable
                     _ffmpegProcess.WaitForExit(1000);
                 }
             }
-            catch { }
+            catch { /* best effort, nothing to recover */ }
 
             _ffmpegProcess.Dispose();
             _ffmpegProcess = null;

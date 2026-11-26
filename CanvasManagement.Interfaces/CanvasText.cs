@@ -28,19 +28,17 @@ public static class CanvasText
 
         if (useBdf)
         {
-            if (!TryRenderBdf(host, text, color, size, maxWidth, out var bmp, out var dw, out var dh))
-                return;
-            using (bmp)
+            var glyphs = Cached(host, text, color, size);
+            if (glyphs == null) return;
+            var (dw, dh) = DestSize(glyphs.Width, glyphs.Height, size, maxWidth);
+            var left = align switch
             {
-                var left = align switch
-                {
-                    SKTextAlign.Center => x - dw / 2f,
-                    SKTextAlign.Right => x - dw,
-                    _ => x
-                };
-                Blit(c, bmp, left, y - dh, dw, dh);
-            }
-
+                SKTextAlign.Center => x - dw / 2f,
+                SKTextAlign.Right => x - dw,
+                _ => x
+            };
+            c.DrawImage(glyphs.Image, new SKRect(0, 0, glyphs.Width, glyphs.Height),
+                new SKRect(left, y - dh, left + dw, y), Nearest);
             return;
         }
 
@@ -61,10 +59,8 @@ public static class CanvasText
         if (string.IsNullOrEmpty(text) || size <= 0) return 0;
         if (useBdf)
         {
-            if (!TryRenderBdf(host, text, SKColors.White, size, 0, out var bmp, out var dw, out _))
-                return 0;
-            bmp.Dispose();
-            return dw;
+            var glyphs = Cached(host, text, SKColors.White, size);
+            return glyphs == null ? 0 : DestSize(glyphs.Width, glyphs.Height, size, 0).w;
         }
 
         using var font = new SKFont { Size = size, Subpixel = true };
@@ -89,32 +85,77 @@ public static class CanvasText
             Nearest);
     }
 
-    public static (float w, float h) DestSize(SKBitmap bmp, float targetH, float maxW = 0)
+    public static (float w, float h) DestSize(SKBitmap bmp, float targetH, float maxW = 0) =>
+        DestSize(bmp.Width, bmp.Height, targetH, maxW);
+
+    private static (float w, float h) DestSize(int width, int height, float targetH, float maxW)
     {
-        var scale = PixelScale(bmp.Height, targetH);
-        var dw = bmp.Width * scale;
-        var dh = bmp.Height * scale;
+        var scale = PixelScale(height, targetH);
+        var dw = width * scale;
+        var dh = height * scale;
         if (maxW > 0 && dw > maxW)
         {
-            scale = Math.Max(1, (int)Math.Floor(maxW / bmp.Width));
-            dw = bmp.Width * scale;
-            dh = bmp.Height * scale;
+            scale = Math.Max(1, (int)Math.Floor(maxW / width));
+            dw = width * scale;
+            dh = height * scale;
         }
 
         return (dw, dh);
     }
 
-    private static bool TryRenderBdf(ICanvas host, string text, SKColor color, float size, float maxWidth,
-        out SKBitmap bmp, out float dw, out float dh)
+    // ------------------------------------------------------------------ rendered-text cache
+    // A HUD draws the same few strings every frame and a ticker one very long one. Rendering BDF glyphs
+    // into a fresh bitmap each time was the single biggest cost (the news ticker spent ~280 ms per frame
+    // on it). Rendered strings are kept as immutable images, shared by all canvases and threads.
+
+    private sealed class Glyphs(SKImage image)
     {
-        bmp = null!;
-        dw = dh = 0;
-        var fontName = host.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(size)));
-        var rendered = host.RenderBdfTextToBitmap(text, color, fontName);
-        if (rendered is not { Width: > 0, Height: > 0 }) return false;
-        (dw, dh) = DestSize(rendered, size, maxWidth);
-        bmp = rendered;
-        return true;
+        public readonly SKImage Image = image;
+        public int Width => Image.Width;
+        public int Height => Image.Height;
+        public LinkedListNode<(string Font, string Text, uint Color)>? Node;
+    }
+
+    private const int CacheEntries = 512;
+    private const long CachePixels = 8_000_000;
+    private static readonly object CacheGate = new();
+    private static readonly Dictionary<(string Font, string Text, uint Color), Glyphs> Cache = new();
+    private static readonly LinkedList<(string Font, string Text, uint Color)> Recent = new();
+    private static long _cachedPixels;
+
+    private static Glyphs? Cached(ICanvas host, string text, SKColor color, float size)
+    {
+        var fontName = host.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(size))) ?? "";
+        var key = (fontName, text, (uint)color);
+        lock (CacheGate)
+        {
+            if (Cache.TryGetValue(key, out var hit))
+            {
+                Recent.Remove(hit.Node!);
+                Recent.AddFirst(hit.Node!);
+                return hit;
+            }
+        }
+
+        using var rendered = host.RenderBdfTextToBitmap(text, color, fontName.Length > 0 ? fontName : null);
+        if (rendered is not { Width: > 0, Height: > 0 }) return null;
+        var glyphs = new Glyphs(SKImage.FromBitmap(rendered));
+        lock (CacheGate)
+        {
+            if (Cache.TryGetValue(key, out var raced)) return raced;
+            glyphs.Node = Recent.AddFirst(key);
+            Cache[key] = glyphs;
+            _cachedPixels += (long)glyphs.Width * glyphs.Height;
+            // Drop the least recently used. Images are not disposed here: another thread may be drawing one;
+            // the finalizer frees it once nothing references it.
+            while (Recent.Count > CacheEntries || _cachedPixels > CachePixels && Recent.Count > 1)
+            {
+                var old = Recent.Last!.Value;
+                Recent.RemoveLast();
+                if (Cache.Remove(old, out var gone)) _cachedPixels -= (long)gone.Width * gone.Height;
+            }
+        }
+        return glyphs;
     }
 
     /// <summary>

@@ -12,51 +12,39 @@ public static class PixelArt
     public static int Scale(int canvasHeight) =>
         Math.Max(1, (int)Math.Round(canvasHeight / 128f));
 
+    /// <summary>
+    ///     Draws a character sprite: each character is one <paramref name="px"/>×<paramref name="px"/> block in
+    ///     the colour <paramref name="palette"/> gives it (transparent = not drawn). The coloured sprite is
+    ///     cached as an image, so this is one draw call however big the sprite is.
+    /// </summary>
     public static void Blit(SKCanvas canvas, string[] rows, float x, float y,
         Func<char, SKColor> palette, int px = 1, bool flipX = false)
     {
         if (rows.Length == 0 || px < 1) return;
-        using var paint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
-        var rw = rows[0].Length;
-        for (var ry = 0; ry < rows.Length; ry++)
-        {
-            var row = rows[ry];
-            for (var rx = 0; rx < row.Length; rx++)
-            {
-                paint.Color = palette(row[rx]);
-                if (paint.Color.Alpha == 0) continue;
-                var cx = flipX ? x + (rw - 1 - rx) * px : x + rx * px;
-                canvas.DrawRect(cx, y + ry * px, px, px, paint);
-            }
-        }
+        var img = PixelSprites.Sprite(rows, palette, flipX);
+        if (img == null) return;
+        canvas.DrawImage(img, SKRect.Create(x, y, img.Width * px, img.Height * px), Nearest);
     }
 
     public static void Dot(SKCanvas canvas, SKPaint paint, int x, int y, int px = 1) =>
         canvas.DrawRect(x, y, px, px, paint);
 
-    /// <summary>Filled disc, integer radius, 1:1 pixels.</summary>
+    /// <summary>Filled disc, integer radius, 1:1 pixels, in the paint's colour and blend mode.</summary>
     public static void Disc(SKCanvas canvas, SKPaint paint, int cx, int cy, int r)
     {
-        var r2 = r * r;
-        for (var y = -r; y <= r; y++)
-        for (var x = -r; x <= r; x++)
-            if (x * x + y * y <= r2)
-                canvas.DrawRect(cx + x, cy + y, 1, 1, paint);
+        if (r < 0) return;
+        canvas.DrawImage(PixelSprites.Disc(r), cx - r, cy - r, Nearest, paint);
     }
 
     /// <summary>1px ring. Inner disc is not filled.</summary>
     public static void Ring(SKCanvas canvas, SKPaint paint, int cx, int cy, int r)
     {
-        var r2 = r * r;
-        var i2 = (r - 1) * (r - 1);
-        for (var y = -r; y <= r; y++)
-        for (var x = -r; x <= r; x++)
-        {
-            var d = x * x + y * y;
-            if (d <= r2 && d > i2)
-                canvas.DrawRect(cx + x, cy + y, 1, 1, paint);
-        }
+        if (r < 1) return;
+        canvas.DrawImage(PixelSprites.Ring(r), cx - r, cy - r, Nearest, paint);
     }
+
+    /// <summary>Pixel-exact sampling: LED pixels are never smoothed.</summary>
+    internal static readonly SKSamplingOptions Nearest = new(SKFilterMode.Nearest, SKMipmapMode.None);
 
     public static SKColor Hsv(int h, float s, float v)
     {

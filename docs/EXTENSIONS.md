@@ -12,8 +12,6 @@ Create `Extensions/CanvasManagement.Extension.MyThing/` and add it to `CanvasMan
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="SkiaSharp" />
@@ -27,7 +25,7 @@ Create `Extensions/CanvasManagement.Extension.MyThing/` and add it to `CanvasMan
 </Project>
 ```
 
-SkiaSharp version comes from the solution’s `Directory.Packages.props` (**3.116.1**). Do not add your own version.
+SkiaSharp version comes from the solution’s `Directory.Packages.props` (**3.116.1**). Do not add your own version. Language version, nullable and implicit usings come from `Directory.Build.props`; Release builds treat warnings as errors.
 
 `deploy.ps1` publishes every `Extensions/**/*.csproj` automatically. You do **not** need a project reference from verpixeld.
 
@@ -52,6 +50,8 @@ So the constructor **must** be exactly `(ICanvas canvas)`. `internal` is fine (a
 
 ## 3. Class skeleton
 
+Derive from `FrameExtension`. It implements `ICanvasExtension` and `IDisposable`, runs the frame loop, owns the back buffer (recreated when the canvas is resized), measures frame times, and stops cleanly: after `Stop()` returns no frame is drawn or submitted any more.
+
 ```csharp
 using CanvasManagement.Interfaces;
 using SkiaSharp;
@@ -62,63 +62,52 @@ namespace CanvasManagement.Extension.MyThing;
     "Short description shown in the extension picker",
     "Visual Effects",                          // category in the UI
     IconResourceName = "my-thing.svg")]        // filename only
-public sealed class MyThingExtension : ICanvasExtension, IDisposable
+public sealed class MyThingExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private ExtensionLoop? _loop;
-    private SKBitmap? _backBuffer;
+    private readonly SKPaint _paint = new() { IsAntialias = false };
+    private float _x;
 
-    internal MyThingExtension(ICanvas canvas) => _canvas = canvas;
+    internal MyThingExtension(ICanvas canvas) : base(canvas) { }
 
-    public string Name => "My Thing";
-    public bool IsRunning { get; private set; }
+    public override string Name => "My Thing";
 
-    [ExtensionParameter("Speed", "Animation speed", DefaultValue = 1.0, MinValue = 0.1, MaxValue = 5.0)]
-    public double Speed { get; set; } = 1.0;
+    [ExtensionParameter("Speed", "Pixels per second", DefaultValue = 40, MinValue = 1, MaxValue = 200)]
+    public int Speed { get; set; } = 40;
 
-    public void Start()
+    // 30 fps; read before every frame, so it may come from a parameter.
+    protected override double FrameIntervalMs => 1000.0 / 30;
+
+    protected override void OnStart() => _x = 0;            // reset state for a new run
+
+    protected override void OnResize(int width, int height) { /* lay out for the new size */ }
+
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        if (IsRunning) return;
-        IsRunning = true;
-        _backBuffer = new SKBitmap(new SKImageInfo(_canvas.Width, _canvas.Height,
-            SKColorType.Bgra8888, SKAlphaType.Premul));
-        _loop = new ExtensionLoop(20, ct =>
-        {
-            using (var sk = new SKCanvas(_backBuffer))
-            {
-                sk.Clear(SKColors.Black);
-                // draw into _backBuffer — read _canvas.Width / Height every frame
-            }
-            _canvas.SubmitCompletedFrame(_backBuffer);
-            return Task.CompletedTask;
-        });
-        _loop.Start();
+        canvas.Clear(SKColors.Black);                         // the buffer keeps the last frame otherwise
+        _x = (_x + Speed * dt) % width;
+        _paint.Color = SKColors.Orange;
+        canvas.DrawRect(_x, height / 2f, 4, 4, _paint);
     }
 
-    public void Stop()
+    protected override void Dispose(bool disposing)
     {
-        if (!IsRunning) return;
-        _loop?.Dispose();
-        _loop = null;
-        _backBuffer?.Dispose();
-        _backBuffer = null;
-        _canvas.Clear();
-        IsRunning = false;
+        base.Dispose(disposing);
+        if (disposing) _paint.Dispose();
     }
-
-    public void Dispose() => Stop();
 }
 ```
 
-### Double-buffer (required for animation)
+- `Render`, `OnStart`, `OnStop` and `OnResize` all run under the `Sync` lock. Methods called from outside (key input, `[ExtensionMethod]`s) take `lock (Sync)` before they change state.
+- An exception in `Render` skips that frame and is logged as `[Name] Render error: …` (at most every 10 s); the loop keeps going.
+- `BackBuffer` gives direct pixel access during `Render` (e.g. a cellular automaton writing a pixel span).
+- `Time` is the seconds since `Start()`. `ClearOnStop` (default true) clears the canvas to black on stop; override it to clear to your own background.
+- Do not draw pixel by pixel with `DrawRect`: use `PixelArt.Blit` for character sprites, `PixelArt.Disc/Ring`, `GameFx.GlowDisc` — they draw cached images. Keep `SKPaint`s as fields instead of creating them every frame.
 
-The compositor may read the canvas bitmap while you draw. **Never** draw onto `_canvas` from a background thread pixel-by-pixel.
+Only an extension that cannot draw on a schedule (a video decoder, a network stream) implements `ICanvasExtension` itself and submits frames from its own pipeline with `SubmitCompletedFrame`.
 
-1. Allocate an `SKBitmap` the size of `_canvas` (`Bgra8888` + `Premul`).
-2. Draw into that bitmap.
-3. Call `_canvas.SubmitCompletedFrame(bitmap)` — that copies the finished frame under the canvas lock.
+### Double-buffer
 
-If the user resizes the canvas in the layer editor, `_canvas.Width` / `Height` change. Recreate the back buffer when they differ.
+The compositor may read the canvas bitmap while you draw. **Never** draw onto the `ICanvas` from a background thread pixel by pixel. `FrameExtension` draws into its own buffer and hands each finished frame over with `SubmitCompletedFrame`, which copies it under the canvas lock.
 
 ### Transparent overlay canvases
 

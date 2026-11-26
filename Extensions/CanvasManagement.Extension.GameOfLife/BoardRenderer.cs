@@ -2,7 +2,7 @@
 
 namespace CanvasManagement.Canvas.Extension.GameOfLife;
 
-public static class Render
+public static class BoardRenderer
 {
     /// <summary>
     ///     Draw entire board (global mode)

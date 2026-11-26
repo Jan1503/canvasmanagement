@@ -80,7 +80,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
 
     private readonly ICanvas _parentCanvas;
     private readonly SemaphoreSlim _pauseSemaphore = new(1, 1);
-    private SKBitmap? _backBuffer;
+    private readonly CanvasFrame _frame;
     private SKColor _backgroundColor = SKColors.Black;
     private IList<string> _bitmapPaths = new List<string>();
     private CancellationTokenSource? _cts;
@@ -93,6 +93,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
     internal SlideShowPlayerExtension(ICanvas canvas)
     {
         _parentCanvas = canvas;
+        _frame = new CanvasFrame(canvas);
 
         // Set default image directory
         var defaultPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Images", "Slideshow");
@@ -173,11 +174,6 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
 
         IsPaused = false;
 
-        // Create back buffer
-        _backBuffer?.Dispose();
-        _backBuffer = new SKBitmap(new SKImageInfo(_parentCanvas.Width, _parentCanvas.Height,
-            SKColorType.Bgra8888, SKAlphaType.Premul));
-
         _cts = new CancellationTokenSource();
         _playbackTask = StartAsync(_cts.Token);
 
@@ -218,9 +214,6 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
         IsRunning = false;
         IsPaused = false;
 
-        _backBuffer?.Dispose();
-        _backBuffer = null;
-
         _parentCanvas.Clear(SKColors.Transparent);
         Console.WriteLine("Slideshow stopped");
     }
@@ -231,7 +224,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
 
         Stop();
         _pauseSemaphore?.Dispose();
-        _backBuffer?.Dispose();
+        _frame.Dispose();
         _disposed = true;
         GC.SuppressFinalize(this);
     }
@@ -266,40 +259,6 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
         }
     }
 
-    // Helper method to draw with background and atomic submission
-    private void DrawWithBackground(Action<ICanvas> drawAction)
-    {
-        if (_backBuffer == null) return;
-
-        using var canvas = new SKCanvas(_backBuffer);
-
-        // Clear with background color (supports transparency)
-        if (_backgroundColor.Alpha == 0)
-        {
-            canvas.Clear(SKColors.Transparent);
-        }
-        else if (_backgroundColor.Alpha == 255)
-        {
-            canvas.Clear(_backgroundColor);
-        }
-        else
-        {
-            canvas.Clear(SKColors.Transparent);
-            using var bgPaint = new SKPaint { Color = _backgroundColor, Style = SKPaintStyle.Fill };
-            canvas.DrawRect(0, 0, _parentCanvas.Width, _parentCanvas.Height, bgPaint);
-        }
-
-        canvas.Flush();
-
-        // Transitions draw directly to canvas - just ensure background is clear first
-        if (_backgroundColor.Alpha > 0)
-            _parentCanvas.Clear(_backgroundColor);
-        else
-            _parentCanvas.Clear(SKColors.Transparent);
-
-        // Let the draw action proceed
-        drawAction(_parentCanvas);
-    }
 
     private void LoadImagesFromDirectory()
     {
@@ -430,11 +389,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
 
             foreach (var bitmapPath in imagesToDisplay)
             {
-                if (ct.IsCancellationRequested)
-                {
-                    _parentCanvas.Clear(SKColors.Transparent);
-                    break;
-                }
+                if (ct.IsCancellationRequested) break;
 
                 // Check for pause state before processing
                 await WaitIfPausedAsync(ct);
@@ -467,7 +422,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                 if (firstRun)
                 {
                     await WaitIfPausedAsync(ct);
-                    _parentCanvas.DrawBitmap(currentBitmap, 0, 0);
+                    _frame.Clear(_backgroundColor);
+                    _frame.DrawBitmap(currentBitmap, 0, 0, fitToCanvas: true);
                     firstRun = false;
                 }
                 else
@@ -475,6 +431,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                     await AnimateTransitionAsync(currentBitmap, transitionDirection, ct);
                 }
 
+                _frame.Present();
                 await Task.Delay(Delay, ct);
             }
         }
@@ -503,7 +460,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                     for (var x = _parentCanvas.Width; x >= 0; x -= 2)
                     {
                         await WaitIfPausedAsync(ct);
-                        _parentCanvas.DrawBitmap(newBitmap, x, 0, fitToCanvas: true);
+                        _frame.DrawBitmap(newBitmap, x, 0, fitToCanvas: true);
+                        _frame.Present();
                         await Task.Delay(TransitionSpeed, ct);
                     }
 
@@ -513,7 +471,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                     for (var x = -_parentCanvas.Width; x <= 0; x += 2)
                     {
                         await WaitIfPausedAsync(ct);
-                        _parentCanvas.DrawBitmap(newBitmap, x, 0, fitToCanvas: true);
+                        _frame.DrawBitmap(newBitmap, x, 0, fitToCanvas: true);
+                        _frame.Present();
                         await Task.Delay(TransitionSpeed, ct);
                     }
 
@@ -523,7 +482,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                     for (var y = -_parentCanvas.Height; y <= 0; y += 2)
                     {
                         await WaitIfPausedAsync(ct);
-                        _parentCanvas.DrawBitmap(newBitmap, 0, y, fitToCanvas: true);
+                        _frame.DrawBitmap(newBitmap, 0, y, fitToCanvas: true);
+                        _frame.Present();
                         await Task.Delay(TransitionSpeed, ct);
                     }
 
@@ -533,7 +493,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                     for (var y = _parentCanvas.Height; y >= 0; y -= 2)
                     {
                         await WaitIfPausedAsync(ct);
-                        _parentCanvas.DrawBitmap(newBitmap, 0, y, fitToCanvas: true);
+                        _frame.DrawBitmap(newBitmap, 0, y, fitToCanvas: true);
+                        _frame.Present();
                         await Task.Delay(TransitionSpeed, ct);
                     }
 
@@ -544,7 +505,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                     for (var x = -_parentCanvas.Width; x <= 0; x += 2)
                     {
                         await WaitIfPausedAsync(ct);
-                        _parentCanvas.DrawBitmap(newBitmap, x, x / 2, fitToCanvas: true);
+                        _frame.DrawBitmap(newBitmap, x, x / 2, fitToCanvas: true);
+                        _frame.Present();
                         await Task.Delay(TransitionSpeed, ct);
                     }
 
@@ -554,7 +516,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                     for (var y = -_parentCanvas.Height; y <= 0; y += 2)
                     {
                         await WaitIfPausedAsync(ct);
-                        _parentCanvas.DrawBitmap(newBitmap, 2 * y * -1, y, fitToCanvas: true);
+                        _frame.DrawBitmap(newBitmap, 2 * y * -1, y, fitToCanvas: true);
+                        _frame.Present();
                         await Task.Delay(TransitionSpeed, ct);
                     }
 
@@ -564,7 +527,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                     for (var y = _parentCanvas.Height; y >= 0; y -= 2)
                     {
                         await WaitIfPausedAsync(ct);
-                        _parentCanvas.DrawBitmap(newBitmap, 2 * y * -1, y, fitToCanvas: true);
+                        _frame.DrawBitmap(newBitmap, 2 * y * -1, y, fitToCanvas: true);
+                        _frame.Present();
                         await Task.Delay(TransitionSpeed, ct);
                     }
 
@@ -574,7 +538,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                     for (var x = _parentCanvas.Width; x >= 0; x -= 2)
                     {
                         await WaitIfPausedAsync(ct);
-                        _parentCanvas.DrawBitmap(newBitmap, x, x / 2, fitToCanvas: true);
+                        _frame.DrawBitmap(newBitmap, x, x / 2, fitToCanvas: true);
+                        _frame.Present();
                         await Task.Delay(TransitionSpeed, ct);
                     }
 
@@ -726,7 +691,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
             }
 
             // Ensure final position is exactly at (0,0)
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
         }
         catch (OperationCanceledException)
         {
@@ -737,7 +702,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
             // Try to restore display even after crash
             try
             {
-                _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+                _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
             }
             catch
             {
@@ -761,22 +726,24 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                 await WaitIfPausedAsync(ct);
                 var alpha = (byte)(255 * i / steps);
                 var color = new SKColor(fadeColor.Red, fadeColor.Green, fadeColor.Blue, alpha);
-                _parentCanvas.DrawRect(0, 0, _parentCanvas.Width, _parentCanvas.Height, color, SKPaintStyle.Fill);
+                _frame.DrawRect(0, 0, _parentCanvas.Width, _parentCanvas.Height, color, SKPaintStyle.Fill);
+                _frame.Present();
                 await Task.Delay(TransitionSpeed, ct);
             }
 
         // Draw new image
-        _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+        _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
         // Fade in from color (if not transparent)
         if (fadeColor != SKColors.Transparent)
             for (var i = steps; i >= 0; i--)
             {
                 await WaitIfPausedAsync(ct);
-                _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+                _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
                 var alpha = (byte)(255 * i / steps);
                 var color = new SKColor(fadeColor.Red, fadeColor.Green, fadeColor.Blue, alpha);
-                _parentCanvas.DrawRect(0, 0, _parentCanvas.Width, _parentCanvas.Height, color, SKPaintStyle.Fill);
+                _frame.DrawRect(0, 0, _parentCanvas.Width, _parentCanvas.Height, color, SKPaintStyle.Fill);
+                _frame.Present();
                 await Task.Delay(TransitionSpeed, ct);
             }
     }
@@ -799,10 +766,11 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                 var offsetX = (int)(centerX - centerX * scale);
                 var offsetY = (int)(centerY - centerY * scale);
 
-                _parentCanvas.Clear(SKColors.Black);
+                _frame.Clear(SKColors.Black);
 
                 // Use correct overload: DrawBitmap(bitmap, x, y, rotateDegrees, scale, fitToCanvas)
-                _parentCanvas.DrawBitmap(newBitmap, offsetX, offsetY, angle, scale);
+                _frame.DrawBitmap(newBitmap, offsetX, offsetY, angle, scale);
+                _frame.Present();
                 await Task.Delay(TransitionSpeed, ct);
             }
         }
@@ -813,7 +781,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
         finally
         {
             // Always ensure image is displayed at end
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
         }
     }
 
@@ -827,58 +795,59 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
             var progress = (float)i / steps;
 
             // Draw new image
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
             // Draw black wipe overlay
             switch (wipeDir)
             {
                 case WipeDirection.Left:
                     var widthLeft = (int)(_parentCanvas.Width * (1 - progress));
-                    _parentCanvas.DrawRect(0, 0, widthLeft, _parentCanvas.Height, SKColors.Black, SKPaintStyle.Fill);
+                    _frame.DrawRect(0, 0, widthLeft, _parentCanvas.Height, SKColors.Black, SKPaintStyle.Fill);
                     break;
 
                 case WipeDirection.Right:
                     var xRight = (int)(_parentCanvas.Width * progress);
-                    _parentCanvas.DrawRect(xRight, 0, _parentCanvas.Width - xRight, _parentCanvas.Height,
+                    _frame.DrawRect(xRight, 0, _parentCanvas.Width - xRight, _parentCanvas.Height,
                         SKColors.Black, SKPaintStyle.Fill);
                     break;
 
                 case WipeDirection.Up:
                     var heightUp = (int)(_parentCanvas.Height * (1 - progress));
-                    _parentCanvas.DrawRect(0, 0, _parentCanvas.Width, heightUp, SKColors.Black, SKPaintStyle.Fill);
+                    _frame.DrawRect(0, 0, _parentCanvas.Width, heightUp, SKColors.Black, SKPaintStyle.Fill);
                     break;
 
                 case WipeDirection.Down:
                     var yDown = (int)(_parentCanvas.Height * progress);
-                    _parentCanvas.DrawRect(0, yDown, _parentCanvas.Width, _parentCanvas.Height - yDown, SKColors.Black,
+                    _frame.DrawRect(0, yDown, _parentCanvas.Width, _parentCanvas.Height - yDown, SKColors.Black,
                         SKPaintStyle.Fill);
                     break;
 
                 case WipeDirection.Center:
                     var widthCenter = (int)(_parentCanvas.Width * (1 - progress) / 2);
                     var heightCenter = (int)(_parentCanvas.Height * (1 - progress) / 2);
-                    _parentCanvas.DrawRect(0, 0, widthCenter, _parentCanvas.Height, SKColors.Black, SKPaintStyle.Fill);
-                    _parentCanvas.DrawRect(_parentCanvas.Width - widthCenter, 0, widthCenter, _parentCanvas.Height,
+                    _frame.DrawRect(0, 0, widthCenter, _parentCanvas.Height, SKColors.Black, SKPaintStyle.Fill);
+                    _frame.DrawRect(_parentCanvas.Width - widthCenter, 0, widthCenter, _parentCanvas.Height,
                         SKColors.Black, SKPaintStyle.Fill);
-                    _parentCanvas.DrawRect(widthCenter, 0, _parentCanvas.Width - 2 * widthCenter, heightCenter,
+                    _frame.DrawRect(widthCenter, 0, _parentCanvas.Width - 2 * widthCenter, heightCenter,
                         SKColors.Black, SKPaintStyle.Fill);
-                    _parentCanvas.DrawRect(widthCenter, _parentCanvas.Height - heightCenter,
+                    _frame.DrawRect(widthCenter, _parentCanvas.Height - heightCenter,
                         _parentCanvas.Width - 2 * widthCenter, heightCenter, SKColors.Black, SKPaintStyle.Fill);
                     break;
 
                 case WipeDirection.Edges:
                     var widthEdges = (int)(_parentCanvas.Width * progress / 2);
                     var heightEdges = (int)(_parentCanvas.Height * progress / 2);
-                    _parentCanvas.DrawRect(0, 0, widthEdges, _parentCanvas.Height, SKColors.Black, SKPaintStyle.Fill);
-                    _parentCanvas.DrawRect(_parentCanvas.Width - widthEdges, 0, widthEdges, _parentCanvas.Height,
+                    _frame.DrawRect(0, 0, widthEdges, _parentCanvas.Height, SKColors.Black, SKPaintStyle.Fill);
+                    _frame.DrawRect(_parentCanvas.Width - widthEdges, 0, widthEdges, _parentCanvas.Height,
                         SKColors.Black, SKPaintStyle.Fill);
-                    _parentCanvas.DrawRect(widthEdges, 0, _parentCanvas.Width - 2 * widthEdges, heightEdges,
+                    _frame.DrawRect(widthEdges, 0, _parentCanvas.Width - 2 * widthEdges, heightEdges,
                         SKColors.Black, SKPaintStyle.Fill);
-                    _parentCanvas.DrawRect(widthEdges, _parentCanvas.Height - heightEdges,
+                    _frame.DrawRect(widthEdges, _parentCanvas.Height - heightEdges,
                         _parentCanvas.Width - 2 * widthEdges, heightEdges, SKColors.Black, SKPaintStyle.Fill);
                     break;
             }
 
+            _frame.Present();
             await Task.Delay(TransitionSpeed, ct);
         }
     }
@@ -895,7 +864,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                 for (var x = _parentCanvas.Width; x >= 0; x -= 2)
                 {
                     await WaitIfPausedAsync(ct);
-                    _parentCanvas.DrawBitmap(newBitmap, x, 0, fitToCanvas: true);
+                    _frame.DrawBitmap(newBitmap, x, 0, fitToCanvas: true);
+                    _frame.Present();
                     await Task.Delay(TransitionSpeed, ct);
                 }
 
@@ -905,7 +875,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                 for (var x = -_parentCanvas.Width; x <= 0; x += 2)
                 {
                     await WaitIfPausedAsync(ct);
-                    _parentCanvas.DrawBitmap(newBitmap, x, 0, fitToCanvas: true);
+                    _frame.DrawBitmap(newBitmap, x, 0, fitToCanvas: true);
+                    _frame.Present();
                     await Task.Delay(TransitionSpeed, ct);
                 }
 
@@ -915,7 +886,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                 for (var y = _parentCanvas.Height; y >= 0; y -= 2)
                 {
                     await WaitIfPausedAsync(ct);
-                    _parentCanvas.DrawBitmap(newBitmap, 0, y, fitToCanvas: true);
+                    _frame.DrawBitmap(newBitmap, 0, y, fitToCanvas: true);
+                    _frame.Present();
                     await Task.Delay(TransitionSpeed, ct);
                 }
 
@@ -925,7 +897,8 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                 for (var y = -_parentCanvas.Height; y <= 0; y += 2)
                 {
                     await WaitIfPausedAsync(ct);
-                    _parentCanvas.DrawBitmap(newBitmap, 0, y, fitToCanvas: true);
+                    _frame.DrawBitmap(newBitmap, 0, y, fitToCanvas: true);
+                    _frame.Present();
                     await Task.Delay(TransitionSpeed, ct);
                 }
 
@@ -936,7 +909,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
     private async Task RevealTransition(SKBitmap newBitmap, RevealDirection revealDir, CancellationToken ct)
     {
         // Draw new image first
-        _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+        _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
         var steps = 40;
         for (var i = steps; i >= 0; i--)
@@ -949,31 +922,32 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
             {
                 case RevealDirection.Left:
                     var widthLeft = (int)(_parentCanvas.Width * (1 - progress));
-                    _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
-                    _parentCanvas.DrawRect(0, 0, widthLeft, _parentCanvas.Height, SKColors.Black, SKPaintStyle.Fill);
+                    _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+                    _frame.DrawRect(0, 0, widthLeft, _parentCanvas.Height, SKColors.Black, SKPaintStyle.Fill);
                     break;
 
                 case RevealDirection.Right:
                     var xRight = (int)(_parentCanvas.Width * progress);
-                    _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
-                    _parentCanvas.DrawRect(xRight, 0, _parentCanvas.Width - xRight, _parentCanvas.Height,
+                    _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+                    _frame.DrawRect(xRight, 0, _parentCanvas.Width - xRight, _parentCanvas.Height,
                         SKColors.Black, SKPaintStyle.Fill);
                     break;
 
                 case RevealDirection.Up:
                     var heightUp = (int)(_parentCanvas.Height * (1 - progress));
-                    _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
-                    _parentCanvas.DrawRect(0, 0, _parentCanvas.Width, heightUp, SKColors.Black, SKPaintStyle.Fill);
+                    _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+                    _frame.DrawRect(0, 0, _parentCanvas.Width, heightUp, SKColors.Black, SKPaintStyle.Fill);
                     break;
 
                 case RevealDirection.Down:
                     var yDown = (int)(_parentCanvas.Height * progress);
-                    _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
-                    _parentCanvas.DrawRect(0, yDown, _parentCanvas.Width, _parentCanvas.Height - yDown, SKColors.Black,
+                    _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+                    _frame.DrawRect(0, yDown, _parentCanvas.Width, _parentCanvas.Height - yDown, SKColors.Black,
                         SKPaintStyle.Fill);
                     break;
             }
 
+            _frame.Present();
             await Task.Delay(TransitionSpeed, ct);
         }
     }
@@ -989,16 +963,17 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
             await WaitIfPausedAsync(ct);
             var revealHeight = (int)(blindHeight * i / (float)steps);
 
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
             // Draw black bars
             for (var blind = 0; blind < blindCount; blind++)
             {
                 var y = blind * blindHeight;
                 var heightToHide = blindHeight - revealHeight;
-                _parentCanvas.DrawRect(0, y, _parentCanvas.Width, heightToHide, SKColors.Black, SKPaintStyle.Fill);
+                _frame.DrawRect(0, y, _parentCanvas.Width, heightToHide, SKColors.Black, SKPaintStyle.Fill);
             }
 
+            _frame.Present();
             await Task.Delay(TransitionSpeed, ct);
         }
     }
@@ -1021,7 +996,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
         checks = checks.OrderBy(c => rng.Next()).ToList();
 
         // Draw new image
-        _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+        _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
         // Reveal in random order
         var checksPerFrame = Math.Max(1, totalChecks / 30);
@@ -1030,15 +1005,16 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
             await WaitIfPausedAsync(ct);
 
             // Black out already-revealed checks
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
             for (var j = i + checksPerFrame; j < checks.Count; j++)
             {
                 var (x, y) = checks[j];
-                _parentCanvas.DrawRect(x * checkSize, y * checkSize, checkSize, checkSize, SKColors.Black,
+                _frame.DrawRect(x * checkSize, y * checkSize, checkSize, checkSize, SKColors.Black,
                     SKPaintStyle.Fill);
             }
 
+            _frame.Present();
             await Task.Delay(TransitionSpeed, ct);
         }
     }
@@ -1050,7 +1026,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
         var pixelsPerStep = _parentCanvas.Width * _parentCanvas.Height / steps;
 
         // Draw new image
-        _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+        _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
         // Create random pixel positions
         var pixels = new List<(int x, int y)>();
@@ -1063,19 +1039,20 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
         for (var step = steps; step >= 0; step--)
         {
             await WaitIfPausedAsync(ct);
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
             // Draw black pixels
             var pixelsToBlack = step * pixels.Count / steps;
             for (var i = 0; i < pixelsToBlack; i++)
             {
                 var (x, y) = pixels[i];
-                _parentCanvas.SetPixel(x, y, SKColors.Black);
-                _parentCanvas.SetPixel(x + 1, y, SKColors.Black);
-                _parentCanvas.SetPixel(x, y + 1, SKColors.Black);
-                _parentCanvas.SetPixel(x + 1, y + 1, SKColors.Black);
+                _frame.SetPixel(x, y, SKColors.Black);
+                _frame.SetPixel(x + 1, y, SKColors.Black);
+                _frame.SetPixel(x, y + 1, SKColors.Black);
+                _frame.SetPixel(x + 1, y + 1, SKColors.Black);
             }
 
+            _frame.Present();
             await Task.Delay(TransitionSpeed, ct);
         }
     }
@@ -1094,11 +1071,11 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
 
                 if (blockSize == 1)
                 {
-                    _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+                    _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
                 }
                 else
                 {
-                    _parentCanvas.Clear(SKColors.Black);
+                    _frame.Clear(SKColors.Black);
 
                     for (var y = 0; y < _parentCanvas.Height; y += blockSize)
                     for (var x = 0; x < _parentCanvas.Width; x += blockSize)
@@ -1110,10 +1087,11 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
 
                         var width = Math.Min(blockSize, _parentCanvas.Width - x);
                         var height = Math.Min(blockSize, _parentCanvas.Height - y);
-                        _parentCanvas.DrawRect(x, y, width, height, color, SKPaintStyle.Fill);
+                        _frame.DrawRect(x, y, width, height, color, SKPaintStyle.Fill);
                     }
                 }
 
+                _frame.Present();
                 await Task.Delay(TransitionSpeed * 2, ct);
             }
         }
@@ -1124,7 +1102,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
         finally
         {
             // Always ensure image is displayed at end
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
         }
     }
 
@@ -1135,18 +1113,19 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
         var maxRadius = Math.Sqrt(centerX * centerX + centerY * centerY);
         var steps = 50;
 
-        _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+        _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
         for (var step = steps; step >= 0; step--)
         {
             await WaitIfPausedAsync(ct);
             var radius = (float)(maxRadius * step / steps);
 
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
             // Draw spiral mask (simplified - draw expanding circle)
-            if (step > 0) _parentCanvas.DrawCircle(centerX, centerY, radius, SKColors.Black);
+            if (step > 0) _frame.DrawCircle(centerX, centerY, radius, SKColors.Black);
 
+            _frame.Present();
             await Task.Delay(TransitionSpeed, ct);
         }
     }
@@ -1166,23 +1145,24 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                 var progress = (float)step / steps;
                 var radius = expand ? maxRadius * progress : maxRadius * (1 - progress);
 
-                _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+                _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
                 if (expand)
                 {
                     // Circle expands, black outside
-                    _parentCanvas.DrawCircle(centerX, centerY, radius, SKColors.Black);
+                    _frame.DrawCircle(centerX, centerY, radius, SKColors.Black);
                 }
                 else
                 {
                     // Circle contracts, black inside - draw full black then draw image in circle
-                    _parentCanvas.Clear(SKColors.Black);
+                    _frame.Clear(SKColors.Black);
                     // Drawing image only in circle would require clipping - skip for simplicity
                     // Just do a simple circular wipe instead
                     for (var r = maxRadius; r >= radius; r -= 2)
-                        _parentCanvas.DrawCircle(centerX, centerY, r, SKColors.Black);
+                        _frame.DrawCircle(centerX, centerY, r, SKColors.Black);
                 }
 
+                _frame.Present();
                 await Task.Delay(TransitionSpeed, ct);
             }
         }
@@ -1193,7 +1173,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
         finally
         {
             // Always ensure image is displayed at end
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
         }
     }
 
@@ -1210,16 +1190,17 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
             var progress = (float)step / steps;
             var dist = (int)(maxDist * progress);
 
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
             // Draw diamond mask (black outside diamond)
             for (var y = 0; y < _parentCanvas.Height; y++)
             for (var x = 0; x < _parentCanvas.Width; x += 4) // Sample every 4 pixels for performance
             {
                 var manhattanDist = Math.Abs(x - centerX) + Math.Abs(y - centerY);
-                if (manhattanDist > dist) _parentCanvas.DrawRect(x, y, 4, 1, SKColors.Black, SKPaintStyle.Fill);
+                if (manhattanDist > dist) _frame.DrawRect(x, y, 4, 1, SKColors.Black, SKPaintStyle.Fill);
             }
 
+            _frame.Present();
             await Task.Delay(TransitionSpeed, ct);
         }
     }
@@ -1243,10 +1224,11 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                 var offsetX = (int)(centerX - centerX * scale);
                 var offsetY = (int)(centerY - centerY * scale);
 
-                _parentCanvas.Clear(SKColors.Black);
+                _frame.Clear(SKColors.Black);
 
                 // Use correct overload: DrawBitmap(bitmap, x, y, rotateDegrees, scale, fitToCanvas)
-                _parentCanvas.DrawBitmap(newBitmap, offsetX, offsetY, angle, scale);
+                _frame.DrawBitmap(newBitmap, offsetX, offsetY, angle, scale);
+                _frame.Present();
                 await Task.Delay(TransitionSpeed, ct);
             }
         }
@@ -1257,7 +1239,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
         finally
         {
             // Always ensure image is displayed at end
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
         }
     }
 
@@ -1284,12 +1266,13 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                 var width = (int)(_parentCanvas.Width * scaleX);
                 var offsetX = (_parentCanvas.Width - width) / 2;
 
-                _parentCanvas.Clear(SKColors.Black);
+                _frame.Clear(SKColors.Black);
 
                 if (width > 0)
                     // Draw scaled image
-                    _parentCanvas.DrawBitmap(newBitmap, offsetX, 0, width, _parentCanvas.Height);
+                    _frame.DrawBitmap(newBitmap, offsetX, 0, width, _parentCanvas.Height);
 
+                _frame.Present();
                 await Task.Delay(TransitionSpeed, ct);
             }
         }
@@ -1300,7 +1283,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
         finally
         {
             // Always ensure image is displayed at end
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
         }
     }
 
@@ -1313,7 +1296,7 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
             await WaitIfPausedAsync(ct);
             var progress = (float)i / steps;
 
-            _parentCanvas.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
+            _frame.DrawBitmap(newBitmap, 0, 0, fitToCanvas: true);
 
             if (vertical)
             {
@@ -1321,9 +1304,9 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                 var blackWidth = (int)(halfWidth * (1 - progress));
 
                 // Black bars moving from center to edges
-                _parentCanvas.DrawRect(halfWidth - blackWidth, 0, blackWidth, _parentCanvas.Height, SKColors.Black,
+                _frame.DrawRect(halfWidth - blackWidth, 0, blackWidth, _parentCanvas.Height, SKColors.Black,
                     SKPaintStyle.Fill);
-                _parentCanvas.DrawRect(halfWidth, 0, blackWidth, _parentCanvas.Height, SKColors.Black,
+                _frame.DrawRect(halfWidth, 0, blackWidth, _parentCanvas.Height, SKColors.Black,
                     SKPaintStyle.Fill);
             }
             else
@@ -1332,12 +1315,13 @@ public class SlideShowPlayerExtension : ICanvasExtension, IDisposable
                 var blackHeight = (int)(halfHeight * (1 - progress));
 
                 // Black bars moving from center to edges
-                _parentCanvas.DrawRect(0, halfHeight - blackHeight, _parentCanvas.Width, blackHeight, SKColors.Black,
+                _frame.DrawRect(0, halfHeight - blackHeight, _parentCanvas.Width, blackHeight, SKColors.Black,
                     SKPaintStyle.Fill);
-                _parentCanvas.DrawRect(0, halfHeight, _parentCanvas.Width, blackHeight, SKColors.Black,
+                _frame.DrawRect(0, halfHeight, _parentCanvas.Width, blackHeight, SKColors.Black,
                     SKPaintStyle.Fill);
             }
 
+            _frame.Present();
             await Task.Delay(TransitionSpeed, ct);
         }
     }

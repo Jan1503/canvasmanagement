@@ -105,9 +105,7 @@ internal sealed class AlsaPcmPlayer(string deviceName, uint latencyUs) : IDispos
                         {
                             AlsaNative.snd_pcm_drop(_pcm);
                         }
-                        catch
-                        {
-                        }
+                        catch { /* best effort, nothing to recover */ }
 
                         AlsaNative.snd_pcm_prepare(_pcm);
                         return;
@@ -133,9 +131,7 @@ internal sealed class AlsaPcmPlayer(string deviceName, uint latencyUs) : IDispos
                     {
                         AlsaNative.snd_pcm_drop(_pcm);
                     }
-                    catch
-                    {
-                    }
+                    catch { /* best effort, nothing to recover */ }
 
                     AlsaNative.snd_pcm_close(_pcm);
                 }

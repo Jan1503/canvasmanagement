@@ -7,11 +7,11 @@ namespace BenchmarkSuite1;
 [MemoryDiagnoser]
 public class CanvasRenderingBenchmark
 {
-    private CanvasManager _canvasManager;
-    private Canvas _canvas1;
-    private Canvas _canvas2;
-    private Canvas _canvas3;
-    private SKBitmap _testBitmap;
+    private CanvasManager _canvasManager = null!;
+    private Canvas _canvas1 = null!;
+    private Canvas _canvas2 = null!;
+    private Canvas _canvas3 = null!;
+    private SKBitmap _testBitmap = null!;
 
     [GlobalSetup]
     public void Setup()

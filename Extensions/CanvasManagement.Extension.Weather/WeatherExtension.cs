@@ -1,10 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
-using System.Timers;
 using CanvasManagement.BdfFontManager;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.Weather;
 
@@ -16,22 +14,16 @@ namespace CanvasManagement.Extension.Weather;
     "Live weather & forecast (Open-Meteo, no API key required)",
     "Information",
     IconResourceName = "weather.svg")]
-public class WeatherExtension : ICanvasExtension, IDisposable
+public class WeatherExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
-    private HttpClient? _http;
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private float _scale = 1f;
     private volatile bool _fetching;
     private DateTime _lastFetch = DateTime.MinValue;
     private WeatherData? _data;
     private string _status = "Loading…";
 
-    internal WeatherExtension(ICanvas canvas)
+    internal WeatherExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Location", "City or place — use the search button", DefaultValue = "Berlin", Order = 1)]
@@ -64,67 +56,23 @@ public class WeatherExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Background Color", "Background colour", DefaultValue = "#0A1A2F", Order = 7)]
     public SKColor BackgroundColor { get; set; } = new(10, 26, 47);
 
-    public string Name => "Weather";
-    public bool IsRunning { get; private set; }
+    public override string Name => "Weather";
+    protected override double FrameIntervalMs => 1000;
 
-    public void Dispose()
+    protected override void OnStart()
     {
-        Stop();
-        _http?.Dispose();
-        _http = null;
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        _scale = DisplayScale.GetScale(Canvas.Width, Canvas.Height);
+
+        _lastFetch = DateTime.MinValue;
+        _ = FetchAsync();
     }
 
-    public void Start()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
-            _http ??= new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-
-            _lastFetch = DateTime.MinValue;
-            _ = FetchAsync();
-
-            _timer = new Timer(1000) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        if (!IsRunning) return;
-
         if ((DateTime.UtcNow - _lastFetch).TotalMinutes >= Math.Max(5, RefreshMinutes))
             _ = FetchAsync();
 
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try { Render(); }
-            catch (Exception ex) { Console.WriteLine($"[Weather] render: {ex.Message}"); }
-        }
+        Draw(canvas);
     }
 
     [ExtensionMethod("Update Now", "Fetch the weather for the current coordinates immediately",
@@ -141,8 +89,6 @@ public class WeatherExtension : ICanvasExtension, IDisposable
         _fetching = true;
         try
         {
-            _http ??= new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-
             var lat = ParseCoord(Latitude, 52.52);
             var lon = ParseCoord(Longitude, 13.405);
             var url =
@@ -152,14 +98,14 @@ public class WeatherExtension : ICanvasExtension, IDisposable
                 "temperature_2m_min&timezone=auto&forecast_days=4" +
                 (Fahrenheit ? "&temperature_unit=fahrenheit" : "");
 
-            var json = await _http.GetStringAsync(url);
+            var json = await ExtensionHttp.Client.GetStringAsync(url);
             var data = Parse(json);
-            lock (_lock) { _data = data; _status = ""; }
+            lock (Sync) { _data = data; _status = ""; }
             _lastFetch = DateTime.UtcNow;
         }
         catch (Exception ex)
         {
-            lock (_lock) _status = "Weather unavailable";
+            lock (Sync) _status = "Weather unavailable";
             Console.WriteLine($"[Weather] fetch failed: {ex.Message}");
             _lastFetch = DateTime.UtcNow.AddMinutes(-Math.Max(5, RefreshMinutes) + 1); // retry in ~1 min
         }
@@ -208,28 +154,22 @@ public class WeatherExtension : ICanvasExtension, IDisposable
 
     // ── Render ──────────────────────────────────────────────────────────────
 
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
-
-        using var canvas = new SKCanvas(bb);
         canvas.Clear(BackgroundColor);
 
         WeatherData? data;
         string status;
-        lock (_lock) { data = _data; status = _status; }
+        lock (Sync) { data = _data; status = _status; }
 
-        var w = _canvas.Width;
-        var h = _canvas.Height;
+        var w = Canvas.Width;
+        var h = Canvas.Height;
 
         if (data == null)
         {
             using var f = new SKFont { Size = Math.Max(9f, 12f * _scale) };
             using var p = new SKPaint { Color = SKColors.White, IsAntialias = false };
             canvas.DrawText(status, w / 2f, h / 2f, SKTextAlign.Center, f, p);
-            canvas.Flush();
-            _canvas.SubmitCompletedFrame(bb);
             return;
         }
 
@@ -282,9 +222,6 @@ public class WeatherExtension : ICanvasExtension, IDisposable
                     topH + forecastH - fH * 0.35f, fH, new SKColor(160, 185, 220), SKTextAlign.Center, colW - 2);
             }
         }
-
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     /// <summary>Draws text either with the system font (auto-fit) or the crisp BDF bitmap font.</summary>
@@ -294,7 +231,7 @@ public class WeatherExtension : ICanvasExtension, IDisposable
         if (string.IsNullOrEmpty(text)) return;
 
         var size = applyFontSize ? CanvasText.ResolveSize(FontSize, targetH) : targetH;
-        CanvasText.Draw(canvas, _canvas, text, color, anchorX, baselineY, size, align, UseBdfFont, maxW);
+        CanvasText.Draw(canvas, Canvas, text, color, anchorX, baselineY, size, align, UseBdfFont, maxW);
     }
 
     private static string ConditionText(int code)

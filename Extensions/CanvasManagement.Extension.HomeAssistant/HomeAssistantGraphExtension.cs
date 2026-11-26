@@ -1,9 +1,7 @@
 using System.Globalization;
-using System.Timers;
 using CanvasManagement.BdfFontManager;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.HomeAssistant;
 
@@ -15,17 +13,12 @@ namespace CanvasManagement.Extension.HomeAssistant;
     "Home Assistant history graph for a numeric entity (temperature, power, ...)",
     "Information",
     IconResourceName = "home-assistant.svg")]
-public class HomeAssistantGraphExtension : ICanvasExtension, IDisposable
+public class HomeAssistantGraphExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
-    private SKBitmap? _backBuffer;
     private float _scale = 1f;
-    private Timer? _timer;
 
-    internal HomeAssistantGraphExtension(ICanvas canvas)
+    internal HomeAssistantGraphExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Entity ID", "Numeric Home Assistant entity to plot", DefaultValue = "", Order = 1)]
@@ -74,66 +67,25 @@ public class HomeAssistantGraphExtension : ICanvasExtension, IDisposable
         Order = 14)]
     public SKColor BackgroundColor { get; set; } = new(12, 20, 32);
 
-    public string Name => "HA Graph";
-    public bool IsRunning { get; private set; }
+    public override string Name => "HA Graph";
+    protected override double FrameIntervalMs => 1000;
 
-    public void Dispose()
+    protected override void OnStart()
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        _scale = DisplayScale.GetScale(Canvas.Width, Canvas.Height);
     }
 
-    public void Start()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(1000) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
+        Draw(canvas);
     }
 
-    public void Stop()
+    private void Draw(SKCanvas canvas)
     {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try { Render(); }
-            catch (Exception ex) { Console.WriteLine($"[HA Graph] render: {ex.Message}"); }
-        }
-    }
-
-    private void Render()
-    {
-        var bb = _backBuffer;
-        if (bb == null) return;
-
-        using var c = new SKCanvas(bb);
+        var c = canvas;
         c.Clear(BackgroundColor);
 
-        float w = _canvas.Width, h = _canvas.Height;
+        float w = Canvas.Width, h = Canvas.Height;
         var pad = Math.Max(2f, 3f * _scale);
 
         HomeAssistantBridge.RequestHistory(EntityId);
@@ -170,7 +122,6 @@ public class HomeAssistantGraphExtension : ICanvasExtension, IDisposable
             DrawText(c, msg, SKColors.Gray, pad, graphRect.Top, w - pad * 2, graphRect.Height,
                 Math.Max(8f, 12f * _scale), SKTextAlign.Center);
             c.Flush();
-            _canvas.SubmitCompletedFrame(bb);
             return;
         }
 
@@ -191,7 +142,6 @@ public class HomeAssistantGraphExtension : ICanvasExtension, IDisposable
         }
 
         c.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private void DrawText(SKCanvas c, string text, SKColor color, float rx, float ry, float rw, float rh,
@@ -201,8 +151,8 @@ public class HomeAssistantGraphExtension : ICanvasExtension, IDisposable
 
         if (UseBdfFont)
         {
-            var fontName = _canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
-            using var bmp = _canvas.RenderBdfTextToBitmap(text, color, fontName);
+            var fontName = Canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
+            using var bmp = Canvas.RenderBdfTextToBitmap(text, color, fontName);
             if (bmp is not { Width: > 0, Height: > 0 }) return;
             var (dw, dh) = CanvasText.DestSize(bmp, Math.Min(targetH, rh), rw);
             var left = align == SKTextAlign.Right ? rx + rw - dw : align == SKTextAlign.Center ? rx + (rw - dw) / 2f : rx;

@@ -1,8 +1,6 @@
 using System.Globalization;
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.HomeAssistant;
 
@@ -13,16 +11,10 @@ namespace CanvasManagement.Extension.HomeAssistant;
     "Thermostat arc from a Home Assistant climate entity",
     "Information",
     IconResourceName = "home-assistant.svg")]
-public class HomeAssistantClimateExtension : ICanvasExtension, IDisposable
+public class HomeAssistantClimateExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
-
-    internal HomeAssistantClimateExtension(ICanvas canvas)
+    internal HomeAssistantClimateExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Entity ID", "climate.* entity", DefaultValue = "climate.living_room", Order = 1)]
@@ -66,64 +58,20 @@ public class HomeAssistantClimateExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Background Color", "Background (alpha 0 for overlay)", DefaultValue = "#0C1014", Order = 12)]
     public SKColor BackgroundColor { get; set; } = new(12, 16, 20);
 
-    public string Name => "HA Climate";
-    public bool IsRunning { get; private set; }
+    public override string Name => "HA Climate";
+    protected override double FrameIntervalMs => 1000;
 
-    public void Dispose()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        Draw(canvas);
     }
 
-    public void Start()
+    private void Draw(SKCanvas canvas)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(1000) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try { Render(); }
-            catch (Exception ex) { Console.WriteLine($"[HA Climate] {ex.Message}"); }
-        }
-    }
-
-    private void Render()
-    {
-        var bb = _backBuffer;
-        if (bb == null) return;
-        using var c = new SKCanvas(bb);
+        var c = canvas;
         c.Clear(BackgroundColor);
 
-        float w = _canvas.Width, h = _canvas.Height;
+        float w = Canvas.Width, h = Canvas.Height;
         var found = HomeAssistantBridge.TryGet(EntityId, out var entity);
         var action = HomeAssistantBridge.Attr(EntityId, "hvac_action") ?? (found ? entity.State : "");
         double current = double.NaN, target = double.NaN;
@@ -189,16 +137,15 @@ public class HomeAssistantClimateExtension : ICanvasExtension, IDisposable
             ? Label
             : found && !string.IsNullOrWhiteSpace(entity.FriendlyName) ? entity.FriendlyName! : "";
         if (ShowLabel && !string.IsNullOrWhiteSpace(title))
-            HaText.Draw(c, _canvas, title, LabelColor, 0, h * 0.04f, w, h * 0.16f, h * 0.12f, align, UseBdfFont);
+            HaText.Draw(c, Canvas, title, LabelColor, 0, h * 0.04f, w, h * 0.16f, h * 0.12f, align, UseBdfFont);
 
         var tempH = ValueSize > 0 ? ValueSize : h * 0.22f;
-        HaText.Draw(c, _canvas, main, ValueColor, 0, h * 0.28f, w, h * 0.28f, tempH, align, UseBdfFont);
+        HaText.Draw(c, Canvas, main, ValueColor, 0, h * 0.28f, w, h * 0.28f, tempH, align, UseBdfFont);
         var sub = double.IsNaN(target)
             ? action
             : $"soll {target.ToString(fmt, CultureInfo.InvariantCulture)}° · {action}";
-        HaText.Draw(c, _canvas, sub, LabelColor, 0, h * 0.72f, w, h * 0.2f, h * 0.12f, align, UseBdfFont);
+        HaText.Draw(c, Canvas, sub, LabelColor, 0, h * 0.72f, w, h * 0.2f, h * 0.12f, align, UseBdfFont);
 
         c.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 }

@@ -7,8 +7,8 @@ namespace BenchmarkSuite1;
 [MemoryDiagnoser]
 public class CanvasShapesBenchmark
 {
-    private CanvasManager _canvasManager;
-    private Canvas _canvas;
+    private CanvasManager _canvasManager = null!;
+    private Canvas _canvas = null!;
 
     [GlobalSetup]
     public void Setup()

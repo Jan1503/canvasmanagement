@@ -7,10 +7,10 @@ namespace BenchmarkSuite1;
 [MemoryDiagnoser]
 public class CanvasBitmapBenchmark
 {
-    private CanvasManager _canvasManager;
-    private Canvas _canvas;
-    private SKBitmap _smallBitmap;
-    private SKBitmap _largeBitmap;
+    private CanvasManager _canvasManager = null!;
+    private Canvas _canvas = null!;
+    private SKBitmap _smallBitmap = null!;
+    private SKBitmap _largeBitmap = null!;
 
     [GlobalSetup]
     public void Setup()

@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.BomberMaze;
 
@@ -13,19 +11,15 @@ namespace CanvasManagement.Extension.BomberMaze;
     "Maze bomber — arrows / WASD to walk, Space to bomb, or autopilot",
     "Games",
     IconResourceName = "bomber-maze.svg")]
-public class BomberMazeExtension : ICanvasExtension, IDisposable
+public class BomberMazeExtension : GameExtension
 {
     private const int Empty = 0, Solid = 1, Soft = 2, Extra = 5, RangeUp = 6;
 
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _random = new();
     private readonly List<BombEnt> _bombs = new();
     private readonly List<Enemy> _enemies = new();
     private readonly List<(int x, int y, int life)> _blasts = new();
 
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private int _gw, _gh, _cell, _art;
     private int[,] _map = new int[1, 1];
     private float _px, _py;
@@ -37,7 +31,7 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
     private string _hint = "SPACE = bomb · blast pink foes";
     private string _death = "";
 
-    internal BomberMazeExtension(ICanvas canvas) => _canvas = canvas;
+    internal BomberMazeExtension(ICanvas canvas) : base(canvas, GameSong.Action) { }
 
     [ExtensionParameter("Game Speed", "Frame interval in milliseconds (lower = faster)", DefaultValue = 28,
         MinValue = 18, MaxValue = 80, Unit = "ms", Order = 1)]
@@ -60,82 +54,28 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Auto Pilot", "AI plays until you press a key in Studio", DefaultValue = true, Order = 6)]
     public bool AutoPilot { get; set; } = true;
 
-    private GameSound? _snd;
-    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Action);
+    public override string Name => "Bomber Maze";
+    protected override double FrameIntervalMs => GameSpeed;
 
-    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
-    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
-
-    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
-    public bool Music { get => _sound.Music; set => _sound.Music = value; }
-
-    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
-        MaxValue = 100, Order = 22)]
-    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
-
-    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
-        MaxValue = 100, Order = 23)]
-    public int MusicVolume
+    protected override void OnStart()
     {
-        get => (int)MathF.Round(_sound.MusicVolume * 100);
-        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
-    }
-
-    public string Name => "Bomber Maze";
-    public bool IsRunning { get; private set; }
-
-    public void Dispose()
-    {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _human = false;
-            _lives = 3;
-            _score = 0;
-            NewLevel();
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(GameSpeed) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _sound.Stop();
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); } catch { }
-        }
+        _human = false;
+        _lives = 3;
+        _score = 0;
+        NewLevel();
     }
 
     private void NewLevel()
     {
         // 8px art, integer scale so tiles are 1:1 on a 128-tall wall (cell = 8).
-        _art = Math.Max(1, Math.Min(_canvas.Width / (17 * 8), _canvas.Height / (13 * 8)));
+        _art = Math.Max(1, Math.Min(Canvas.Width / (17 * 8), Canvas.Height / (13 * 8)));
         _cell = 8 * _art;
-        _gw = Math.Max(9, _canvas.Width / _cell);
+        _gw = Math.Max(9, Canvas.Width / _cell);
         if (_gw % 2 == 0) _gw--;
-        _gh = Math.Max(9, _canvas.Height / _cell);
+        _gh = Math.Max(9, Canvas.Height / _cell);
         if (_gh % 2 == 0) _gh--;
-        _ox = (_canvas.Width - _gw * _cell) / 2;
-        _oy = (_canvas.Height - _gh * _cell) / 2;
+        _ox = (Canvas.Width - _gw * _cell) / 2;
+        _oy = (Canvas.Height - _gh * _cell) / 2;
         _map = new int[_gw, _gh];
         _bombs.Clear();
         _blasts.Clear();
@@ -178,36 +118,24 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
         }
     }
 
-    private void OnTick(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
+        if (_crashTimer > 0)
         {
-            if (!IsRunning || _backBuffer == null) return;
-            try
+            _crashTimer--;
+            if (_crashTimer == 0)
             {
-                if (_timer != null && Math.Abs(_timer.Interval - GameSpeed) > 0.5) _timer.Interval = GameSpeed;
-                if (_crashTimer > 0)
-                {
-                    _crashTimer--;
-                    if (_crashTimer == 0)
-                    {
-                        if (_lives <= 0) { _lives = 3; _score = 0; }
-                        NewLevel();
-                    }
-                }
-                else
-                    Update();
-
-                Render();
-                _sound.Duck(_crashTimer > 0 ? 0.35f : 1f);
-                _sound.Update();
-                _frame++;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[BomberMaze] {ex.Message}");
+                if (_lives <= 0) { _lives = 3; _score = 0; }
+                NewLevel();
             }
         }
+        else
+            Update();
+
+        Draw(canvas);
+        Audio.Duck(_crashTimer > 0 ? 0.35f : 1f);
+        Audio.Update();
+        _frame++;
     }
 
     private void Update()
@@ -260,7 +188,7 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
                 _score += 50;
                 _fx.Burst(_ox + e.X * _cell + _cell / 2f, _oy + e.Y * _cell + _cell / 2f, new SKColor(255, 70, 160), 18, 2.4f, 0.7f, 0.04f);
                 _fx.Pop("+50", _ox + e.X * _cell + _cell / 2f, _oy + e.Y * _cell, new SKColor(255, 160, 220));
-                _sound.Play(GameSfx.Pop);
+                Audio.Play(GameSfx.Pop);
                 continue;
             }
 
@@ -281,14 +209,14 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
         }
 
         var t = Tile(tx, ty);
-        if (t is Extra or RangeUp) _sound.Play(GameSfx.PowerUp, 0.6f);
+        if (t is Extra or RangeUp) Audio.Play(GameSfx.PowerUp, 0.6f);
         if (t == Extra) { _maxBombs = Math.Min(6, _maxBombs + 1); _map[tx, ty] = Empty; _hint = "+BOMB"; }
         if (t == RangeUp) { _range = Math.Min(8, _range + 1); _map[tx, ty] = Empty; _hint = "+RANGE"; }
 
         if (_enemies.Count == 0)
         {
             _score += 200;
-            _sound.Play(GameSfx.LevelUp, 0.7f);
+            Audio.Play(GameSfx.LevelUp, 0.7f);
             _hint = "STAGE CLEAR";
             NewLevel();
         }
@@ -654,7 +582,7 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
         foreach (var b in _bombs)
             if (b.X == x && b.Y == y) return;
         _bombs.Add(new BombEnt { X = x, Y = y, T = 42, Range = _range });
-        _sound.Play(GameSfx.Bomb, 0.6f);
+        Audio.Play(GameSfx.Bomb, 0.6f);
     }
 
     private void Boom(int x, int y, int range)
@@ -672,7 +600,7 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
             }
         }
 
-        _sound.Play(GameSfx.Explode, 0.7f, (x / (float)Math.Max(1, _gw)) * 2 - 1);
+        Audio.Play(GameSfx.Explode, 0.7f, (x / (float)Math.Max(1, _gw)) * 2 - 1);
         _fx.Shake(3 + range * 0.4f);
         _fx.Burst(_ox + x * _cell + _cell / 2f, _oy + y * _cell + _cell / 2f, new SKColor(255, 200, 80), 20, 3f, 0.6f, 0.02f);
         Arm(x, y);
@@ -692,7 +620,7 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
     {
         if (_crashTimer > 0) return;
         _lives--;
-        _sound.Play(_lives <= 0 ? GameSfx.GameOver : GameSfx.Die, 0.8f);
+        Audio.Play(_lives <= 0 ? GameSfx.GameOver : GameSfx.Die, 0.8f);
         _fx.Flash(new SKColor(255, 60, 40), 0.6f);
         _fx.Shake(5);
         _crashTimer = 40;
@@ -704,49 +632,49 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Left|A", Order = 1)]
     public void GoLeft()
     {
-        lock (_lock) { _human = true; _holdX = -1; _holdY = 0; }
+        lock (Sync) { _human = true; _holdX = -1; _holdY = 0; }
     }
 
     [ExtensionMethod("Go Right", "Walk right",
         Category = "Controls", KeyboardShortcut = "Right|D", Order = 2)]
     public void GoRight()
     {
-        lock (_lock) { _human = true; _holdX = 1; _holdY = 0; }
+        lock (Sync) { _human = true; _holdX = 1; _holdY = 0; }
     }
 
     [ExtensionMethod("Go Up", "Walk up",
         Category = "Controls", KeyboardShortcut = "Up|W", Order = 3)]
     public void GoUp()
     {
-        lock (_lock) { _human = true; _holdY = -1; _holdX = 0; }
+        lock (Sync) { _human = true; _holdY = -1; _holdX = 0; }
     }
 
     [ExtensionMethod("Go Down", "Walk down",
         Category = "Controls", KeyboardShortcut = "Down|S", Order = 4)]
     public void GoDown()
     {
-        lock (_lock) { _human = true; _holdY = 1; _holdX = 0; }
+        lock (Sync) { _human = true; _holdY = 1; _holdX = 0; }
     }
 
     [ExtensionMethod("Stop H", "Release left/right",
         Category = "Controls", KeyboardShortcut = "Left:up|Right:up|A:up|D:up", Order = 5)]
     public void StopH()
     {
-        lock (_lock) _holdX = 0;
+        lock (Sync) _holdX = 0;
     }
 
     [ExtensionMethod("Stop V", "Release up/down",
         Category = "Controls", KeyboardShortcut = "Up:up|Down:up|W:up|S:up", Order = 6)]
     public void StopV()
     {
-        lock (_lock) _holdY = 0;
+        lock (Sync) _holdY = 0;
     }
 
     [ExtensionMethod("Bomb", "Place a bomb",
         Category = "Controls", KeyboardShortcut = "Space", Order = 7)]
     public void DropBomb()
     {
-        lock (_lock)
+        lock (Sync)
         {
             _human = true;
             PlaceBomb();
@@ -845,15 +773,12 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
     ///     Explosions are glowing flame crosses that flicker and fade, crates splinter into debris, bombs swell
     ///     and spit sparks from the fuse, power-ups glow and bob, foes burst, and every blast shakes the maze.
     /// </summary>
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
         var now = _clock.Elapsed.TotalSeconds;
         var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
         _lastRender = now;
         _fx.Update(dt);
-        using var canvas = new SKCanvas(bb);
         canvas.Clear(new SKColor(12, 10, 22));
         _fx.BeginShake(canvas);
         using var paint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
@@ -978,19 +903,17 @@ public class BomberMazeExtension : ICanvasExtension, IDisposable
 
         if (ShowScore)
         {
-            var size = CanvasText.ResolveSize(FontSize, Math.Max(7f, _canvas.Height * 0.07f));
-            CanvasText.Draw(canvas, _canvas, $"{_score}  x{_lives}  B{_maxBombs} R{_range}", SKColors.White,
+            var size = CanvasText.ResolveSize(FontSize, Math.Max(7f, Canvas.Height * 0.07f));
+            CanvasText.Draw(canvas, Canvas, $"{_score}  x{_lives}  B{_maxBombs} R{_range}", SKColors.White,
                 3, size + 1, size, SKTextAlign.Left, UseBdfFont);
             var msg = _crashTimer > 0 && _death.Length > 0 ? _death.ToUpperInvariant() : _hint;
             paint.Color = new SKColor(0, 0, 0, 150);
-            canvas.DrawRect(0, _canvas.Height - size - 2, _canvas.Width, size + 2, paint);
-            CanvasText.Draw(canvas, _canvas, msg, new SKColor(255, 230, 120),
-                _canvas.Width / 2f, _canvas.Height - 2, Math.Max(6f, size * 0.85f), SKTextAlign.Center, UseBdfFont);
+            canvas.DrawRect(0, Canvas.Height - size - 2, Canvas.Width, size + 2, paint);
+            CanvasText.Draw(canvas, Canvas, msg, new SKColor(255, 230, 120),
+                Canvas.Width / 2f, Canvas.Height - 2, Math.Max(6f, size * 0.85f), SKTextAlign.Center, UseBdfFont);
         }
 
-        _fx.DrawOverlay(canvas, _canvas, _canvas.Width, _canvas.Height, Math.Max(7f, _canvas.Height * 0.07f));
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
+        _fx.DrawOverlay(canvas, Canvas, Canvas.Width, Canvas.Height, Math.Max(7f, Canvas.Height * 0.07f));
     }
 
     private struct BombEnt

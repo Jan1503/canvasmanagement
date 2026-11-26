@@ -773,9 +773,7 @@ public class CanvasManager : IDisposable
         {
             _cancellationTokenSource?.Dispose();
         }
-        catch
-        {
-        }
+        catch { /* best effort, nothing to recover */ }
 
         _cancellationTokenSource = null;
 
@@ -818,9 +816,7 @@ public class CanvasManager : IDisposable
                 {
                     canvasTuple.Value?.Dispose();
                 }
-                catch
-                {
-                }
+                catch { /* best effort, nothing to recover */ }
 
             GetCanvases.Clear();
         }
@@ -832,25 +828,19 @@ public class CanvasManager : IDisposable
             _opaqueCompositePaint?.Dispose();
             _alphaCompositePaint?.Dispose();
         }
-        catch
-        {
-        }
+        catch { /* best effort, nothing to recover */ }
 
         try
         {
             _mainCanvas?.Dispose();
         }
-        catch
-        {
-        }
+        catch { /* best effort, nothing to recover */ }
 
         try
         {
             _mainCanvasBitmap?.Dispose();
         }
-        catch
-        {
-        }
+        catch { /* best effort, nothing to recover */ }
     }
 
     #endregion

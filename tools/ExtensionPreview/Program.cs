@@ -95,30 +95,58 @@ foreach (var f in Directory.GetFiles(outDir, "*.png")) File.Delete(f);
 
 BdfFontRegistry.LoadFontsFromDirectory(Path.Combine(root, "Fonts"), true);
 
-var dll = Directory.GetFiles(Path.Combine(root, "Extensions"), $"CanvasManagement.Extension.{name}.dll",
-        SearchOption.AllDirectories)
+var builds = Directory.GetFiles(Path.Combine(root, "Extensions"), "CanvasManagement*.Extension*.dll", SearchOption.AllDirectories)
     .Where(f => f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar))
     .OrderByDescending(File.GetLastWriteTimeUtc)
-    .FirstOrDefault();
+    .ToList();
+// By project name (TurboKart), else by extension class name (Matrix, MatrixExtension, GameOfLife).
+var dll = builds.FirstOrDefault(f => Path.GetFileNameWithoutExtension(f) == $"CanvasManagement.Extension.{name}");
+string? typeName = null;
 if (dll == null)
 {
-    Console.WriteLine($"no build of CanvasManagement.Extension.{name}.dll under Extensions/*/bin");
+    foreach (var f in builds.Where(f => Path.GetFileName(Path.GetDirectoryName(f)!) is var d && d.StartsWith("net")))
+    {
+        var stem = Path.GetFileNameWithoutExtension(f);
+        var projDir = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(f)!)!)!)!;
+        var src = Directory.GetFiles(projDir, "*.cs", SearchOption.TopDirectoryOnly)
+            .FirstOrDefault(c => Path.GetFileNameWithoutExtension(c) is var cn &&
+                                 (cn.Equals(name, StringComparison.OrdinalIgnoreCase) ||
+                                  cn.Equals(name + "Extension", StringComparison.OrdinalIgnoreCase)));
+        if (src == null) continue;
+        dll = f;
+        typeName = Path.GetFileNameWithoutExtension(src);
+        break;
+    }
+}
+if (dll == null)
+{
+    Console.WriteLine($"no extension '{name}' under Extensions/*/bin (project or class name)");
     return 1;
 }
 Console.WriteLine("loading " + dll);
 var dir = Path.GetDirectoryName(dll)!;
+// Class-library builds do not copy NuGet dependencies (Svg.Skia, ...) next to the plugin; the smoke-test
+// project references every extension, so its output has them all.
+var depDirs = new[]
+{
+    dir,
+    Path.Combine(root, "CanvasManagement.Extensions.Tests", "bin", "Release", "net10.0"),
+    Path.Combine(root, "CanvasManagement.Extensions.Tests", "bin", "Debug", "net10.0")
+};
 AppDomain.CurrentDomain.AssemblyResolve += (_, e) =>
 {
-    var file = Path.Combine(dir, new AssemblyName(e.Name).Name + ".dll");
-    return File.Exists(file) ? Assembly.LoadFrom(file) : null;
+    var name = new AssemblyName(e.Name).Name + ".dll";
+    var file = depDirs.Select(d => Path.Combine(d, name)).FirstOrDefault(File.Exists);
+    return file != null ? Assembly.LoadFrom(file) : null;
 };
 var asm = Assembly.LoadFrom(dll);
-var type = asm.GetTypes().First(t => t.IsClass && !t.IsAbstract && t.GetCustomAttribute<ExtensionInfoAttribute>() != null);
+var type = asm.GetTypes().First(t => t.IsClass && !t.IsAbstract && t.GetCustomAttribute<ExtensionInfoAttribute>() != null &&
+                                     (typeName == null || t.Name == typeName));
 
 using var mgr = new CanvasManager(w, h);
 var recorder = new SoundRecorder();
 mgr.UseExtensionAudio(recorder.Voices);
-ICanvas canvas = mgr.GetCanvas(0, "preview");
+var canvas = mgr.GetCanvas(0, "preview"); // concrete Canvas: the harness reads its pixels
 var ext = Activator.CreateInstance(type,
     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new object[] { canvas }, null)!;
 
@@ -141,6 +169,11 @@ MethodInfo? FindMethod(string key) => type.GetMethods().FirstOrDefault(m =>
 
 recorder.Source = ext as ICanvasAudioSource;
 if (wav) recorder.Start();
+var proc = Process.GetCurrentProcess();
+var cpu0 = proc.TotalProcessorTime;
+var alloc0 = GC.GetTotalAllocatedBytes();
+var gc0 = (GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2));
+var wall = Stopwatch.StartNew();
 type.GetMethod("Start", Type.EmptyTypes)!.Invoke(ext, null);
 var clock = Stopwatch.StartNew();
 var frames = new List<(double T, SKBitmap Bmp)>();
@@ -174,7 +207,17 @@ while (clock.Elapsed.TotalSeconds < seconds)
     Thread.Sleep(5);
 }
 
+// Performance of this run, measured before stopping (grabbing frames costs a little, included).
+proc.Refresh();
+var secs = wall.Elapsed.TotalSeconds;
+var cpu = (proc.TotalProcessorTime - cpu0).TotalSeconds / secs * 100;
+var allocMb = (GC.GetTotalAllocatedBytes() - alloc0) / 1024.0 / 1024.0 / secs;
+var stats = canvas.Stats?.Snapshot();
+var perf = $"perf {name}: fps {stats?.Fps:0.0}, render avg {(stats?.AvgRenderMs is { } av ? av.ToString("0.00") : "n/a")} ms max {(stats?.MaxRenderMs is { } mx ? mx.ToString("0.0") : "n/a")} ms, " +
+           $"cpu {cpu:0}% of one core, alloc {allocMb:0.0} MB/s, gc {GC.CollectionCount(0) - gc0.Item1}/{GC.CollectionCount(1) - gc0.Item2}/{GC.CollectionCount(2) - gc0.Item3}";
 type.GetMethod("Stop", Type.EmptyTypes)?.Invoke(ext, null);
+Console.WriteLine(perf);
+File.WriteAllText(Path.Combine(outDir, "perf.txt"), perf);
 (ext as IDisposable)?.Dispose();
 recorder.Stop();
 
@@ -210,7 +253,7 @@ if (wav)
 }
 return 0;
 
-static SKBitmap Grab(ICanvas canvas)
+static SKBitmap Grab(Canvas canvas)
 {
     var bmp = new SKBitmap(new SKImageInfo(canvas.Width, canvas.Height, SKColorType.Bgra8888, SKAlphaType.Premul));
     var bytes = canvas.Width * canvas.Height * 4;

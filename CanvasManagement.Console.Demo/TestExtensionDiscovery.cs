@@ -15,7 +15,6 @@ foreach (var ext in extensionList)
     Console.WriteLine($"  Type: {ext.Name}");
     Console.WriteLine($"  Category: {ext.Category}");
     Console.WriteLine($"  Description: {ext.Description}");
-    Console.WriteLine($"  Method: {ext.ExtensionMethodName}");
     Console.WriteLine($"  Assembly: {ext.AssemblyName}");
     Console.WriteLine($"  Parameters: {ext.Parameters.Count}");
     Console.WriteLine();

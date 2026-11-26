@@ -19,7 +19,6 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
 
     private readonly ICanvas _canvas;
     private readonly object _lock = new();
-    private HttpClient? _http;
     private SKBitmap? _backBuffer;
     private ExtensionLoop? _loop;
     private float _scale = 1f;
@@ -76,8 +75,6 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
     public void Dispose()
     {
         Stop();
-        _http?.Dispose();
-        _http = null;
         _backBuffer?.Dispose();
         GC.SuppressFinalize(this);
     }
@@ -88,8 +85,6 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
         {
             if (IsRunning) return;
             _scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
-            _http ??= new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-            _http.DefaultRequestHeaders.UserAgent.ParseAdd("verpixeld-newsticker/1.0");
             _backBuffer?.Dispose();
             _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
             _scrollX = _canvas.Width;
@@ -100,7 +95,7 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
             {
                 OnTick();
                 return Task.CompletedTask;
-            });
+            }, _canvas.Stats);
             _loop.Start();
             IsRunning = true;
         }
@@ -117,7 +112,7 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
             _backBuffer?.Dispose();
             _backBuffer = null;
             try { _canvas.Clear(SKColors.Black); }
-            catch { }
+            catch { /* best effort, nothing to recover */ }
         }
     }
 
@@ -149,7 +144,6 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
         _fetching = true;
         try
         {
-            _http ??= new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
             var sources = new List<(string label, string url)>();
             if (Tagesschau) sources.Add(("Tagesschau", "https://www.tagesschau.de/index~rss2.xml"));
             if (Heise) sources.Add(("heise", "https://www.heise.de/rss/heise-atom.xml"));
@@ -159,7 +153,7 @@ public class NewsTickerExtension : ICanvasExtension, IDisposable
             foreach (var (label, url) in sources)
                 try
                 {
-                    var xml = await _http.GetStringAsync(url);
+                    var xml = await ExtensionHttp.Client.GetStringAsync(url);
                     foreach (var title in ParseTitles(xml).Take(12))
                         headlines.Add(ShowSource ? $"[{label}] {title}" : title);
                 }

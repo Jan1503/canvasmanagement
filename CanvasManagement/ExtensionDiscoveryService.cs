@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Text;
 using CanvasManagement.Interfaces;
 
@@ -147,9 +146,8 @@ public class ExtensionDiscoveryService : IExtensionDiscovery
     {
         lock (_cacheLock)
         {
-            if (_cachedInfo != null) return _cachedInfo;
-            _cachedInfo = BuildAvailableInfo();
-            return _cachedInfo;
+            _cachedInfo ??= BuildAvailableInfo();
+            return includeFailedInstances ? _cachedInfo : _cachedInfo.Where(e => e.CanInstantiate).ToList();
         }
     }
 
@@ -166,7 +164,6 @@ public class ExtensionDiscoveryService : IExtensionDiscovery
             string? iconData = null;
             var canInstantiate = true;
             var parameters = new List<ExtensionParameterInfo>();
-            string? extensionMethod = null;
 
             // Get metadata from ExtensionInfo attribute
             var extensionInfoAttr = extensionType.GetCustomAttributes(typeof(ExtensionInfoAttribute), false)
@@ -217,7 +214,6 @@ public class ExtensionDiscoveryService : IExtensionDiscovery
             }
 
             // Try to find the extension method name
-            extensionMethod = FindExtensionMethodName(extensionType);
 
             // Extract parameters from public properties
             parameters = ExtractParameters(extensionType);
@@ -237,8 +233,7 @@ public class ExtensionDiscoveryService : IExtensionDiscovery
                 AssemblyName = extensionType.Assembly.GetName().Name ?? "Unknown",
                 CanInstantiate = canInstantiate,
                 Parameters = parameters,
-                Methods = methods,
-                ExtensionMethodName = extensionMethod
+                Methods = methods
             });
         }
 
@@ -515,37 +510,6 @@ public class ExtensionDiscoveryService : IExtensionDiscovery
         foreach (var i in t.GetInterfaces())
             if (i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>))
                 return i.GetGenericArguments()[0];
-
-        return null;
-    }
-
-    /// <summary>
-    ///     Finds the extension method name for a given extension type
-    /// </summary>
-    private static string? FindExtensionMethodName(Type extensionType)
-    {
-        foreach (var assembly in PluginAssemblyHub.AssembliesToScan())
-            try
-            {
-                var types = assembly.GetTypes();
-
-                foreach (var type in types)
-                {
-                    if (!type.IsSealed || !type.IsAbstract) continue; // Must be static class
-
-                    var methods = type.GetMethods(BindingFlags.Static | BindingFlags.Public);
-
-                    foreach (var method in methods)
-                        // Check if it's an extension method that returns our type
-                        if (method.IsDefined(typeof(ExtensionAttribute), false) &&
-                            method.ReturnType == extensionType)
-                            return method.Name;
-                }
-            }
-            catch
-            {
-                // Skip assemblies that can't be loaded
-            }
 
         return null;
     }

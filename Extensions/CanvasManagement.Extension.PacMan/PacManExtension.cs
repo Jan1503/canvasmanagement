@@ -103,7 +103,7 @@ public sealed class PacManExtension : ICanvasExtension, IDisposable
             _sound = new PacSound(_canvas);
             _watch.Restart();
             _last = 0;
-            _loop = new ExtensionLoop(60, Tick);
+            _loop = new ExtensionLoop(60, Tick, _canvas.Stats);
             _loop.Start();
         }
     }

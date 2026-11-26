@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.Tetris;
 
@@ -13,7 +11,7 @@ namespace CanvasManagement.Extension.Tetris;
     "Classic Tetris — arrows / WASD, Space hard-drop, C hold, or autopilot",
     "Games",
     IconResourceName = "tetris.svg")]
-public class TetrisExtension : ICanvasExtension, IDisposable
+public class TetrisExtension : GameExtension
 {
     private const int MaxCols = 24;
     private int _cols = 10;
@@ -92,15 +90,11 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         }
     };
 
-    private readonly ICanvas _canvas;
-    private readonly object _sync = new();
     private readonly Random _random = new();
     private readonly Queue<int> _bag = new();
     private readonly Queue<int> _next = new();
     private readonly int[,] _grid = new int[MaxCols, Rows + Hidden];
 
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private int _cell, _ox, _oy;
     private bool _wide;
     private int _kind, _rot, _x, _y;
@@ -120,7 +114,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
     private int[] _clearing = Array.Empty<int>();
     private int _aiRot = -1, _aiX;
 
-    internal TetrisExtension(ICanvas canvas) => _canvas = canvas;
+    internal TetrisExtension(ICanvas canvas) : base(canvas, GameSong.Puzzle) { }
 
     [ExtensionParameter("Game Speed", "Frame interval in milliseconds (lower = faster)", DefaultValue = 22,
         MinValue = 14, MaxValue = 50, Unit = "ms", Order = 1)]
@@ -147,67 +141,13 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         DefaultValue = 10, MinValue = 6, MaxValue = MaxCols, Order = 7)]
     public int BoardWidth { get; set; } = 10;
 
-    private GameSound? _snd;
-    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Puzzle);
+    public override string Name => "Tetris";
+    protected override double FrameIntervalMs => GameSpeed;
 
-    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
-    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
-
-    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
-    public bool Music { get => _sound.Music; set => _sound.Music = value; }
-
-    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
-        MaxValue = 100, Order = 22)]
-    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
-
-    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
-        MaxValue = 100, Order = 23)]
-    public int MusicVolume
+    protected override void OnStart()
     {
-        get => (int)MathF.Round(_sound.MusicVolume * 100);
-        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
-    }
-
-    public string Name => "Tetris";
-    public bool IsRunning { get; private set; }
-
-    public void Dispose()
-    {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        lock (_sync)
-        {
-            if (IsRunning) return;
-            _human = false;
-            NewGame();
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(GameSpeed) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_sync)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _sound.Stop();
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); } catch { }
-        }
+        _human = false;
+        NewGame();
     }
 
     private void NewGame()
@@ -237,19 +177,19 @@ public class TetrisExtension : ICanvasExtension, IDisposable
 
     private void Layout()
     {
-        var hud = Math.Max(2, _canvas.Height / 32);
-        _cell = Math.Max(4, (_canvas.Height - hud) / Rows);
+        var hud = Math.Max(2, Canvas.Height / 32);
+        _cell = Math.Max(4, (Canvas.Height - hud) / Rows);
         var boardW = _cols * _cell;
-        var side = Math.Max(18, _canvas.Width - boardW - 8);
+        var side = Math.Max(18, Canvas.Width - boardW - 8);
         // A wide wall puts the well in the middle: hold and score on the left, the next pieces on the right.
-        _wide = _canvas.Width - boardW >= 2 * Math.Max(46, _cell * 8);
+        _wide = Canvas.Width - boardW >= 2 * Math.Max(46, _cell * 8);
         if (_wide)
-            _ox = (_canvas.Width - boardW) / 2;
+            _ox = (Canvas.Width - boardW) / 2;
         else if (side > boardW * 0.9f)
             _ox = 6;
         else
-            _ox = Math.Max(2, (_canvas.Width - boardW - side) / 2);
-        _oy = Math.Max(1, (_canvas.Height - Rows * _cell) / 2);
+            _ox = Math.Max(2, (Canvas.Width - boardW - side) / 2);
+        _oy = Math.Max(1, (Canvas.Height - Rows * _cell) / 2);
     }
 
     private int DrawBag()
@@ -290,38 +230,26 @@ public class TetrisExtension : ICanvasExtension, IDisposable
             PlanAi();
     }
 
-    private void OnTick(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_sync)
+        if (Math.Clamp(BoardWidth, 6, MaxCols) != _cols) NewGame();
+        if (_crashTimer > 0)
         {
-            if (!IsRunning || _backBuffer == null) return;
-            try
-            {
-                if (_timer != null && Math.Abs(_timer.Interval - GameSpeed) > 0.5) _timer.Interval = GameSpeed;
-                if (Math.Clamp(BoardWidth, 6, MaxCols) != _cols) NewGame();
-                if (_crashTimer > 0)
-                {
-                    _crashTimer--;
-                    if (_crashTimer == 0) NewGame();
-                }
-                else if (_clearFlash > 0)
-                {
-                    _clearFlash--;
-                    if (_clearFlash == 0) FinishClear();
-                }
-                else
-                    Update();
-
-                Render();
-                _sound.Duck(_crashTimer > 0 ? 0.3f : 1f);
-                _sound.Update();
-                _frame++;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Tetris] {ex.Message}");
-            }
+            _crashTimer--;
+            if (_crashTimer == 0) NewGame();
         }
+        else if (_clearFlash > 0)
+        {
+            _clearFlash--;
+            if (_clearFlash == 0) FinishClear();
+        }
+        else
+            Update();
+
+        Draw(canvas);
+        Audio.Duck(_crashTimer > 0 ? 0.3f : 1f);
+        Audio.Update();
+        _frame++;
     }
 
     private void Update()
@@ -400,7 +328,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
             _rot = nr;
             _x += kx;
             _y += ky;
-            if (_human) _sound.Play(GameSfx.Rotate, 0.5f);
+            if (_human) Audio.Play(GameSfx.Rotate, 0.5f);
             if (Resting() && _lockMoves < 12)
             {
                 _lockTicks = 0;
@@ -433,7 +361,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         }
 
         _score += n * 2;
-        _sound.Play(GameSfx.Drop, 0.7f);
+        Audio.Play(GameSfx.Drop, 0.7f);
         // Streaks from where it started to where it lands.
         if (n > 1)
             foreach (var (px, py) in Cells(_kind, _rot, _x, _y))
@@ -447,7 +375,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
     {
         if (_heldThisPiece || _crashTimer > 0) return;
         _heldThisPiece = true;
-        _sound.Play(GameSfx.Select, 0.5f);
+        Audio.Play(GameSfx.Select, 0.5f);
         if (_hold == null)
         {
             _hold = _kind;
@@ -473,12 +401,12 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         _crashTimer = 80;
         _fx.Flash(new SKColor(255, 50, 50), 0.5f);
         _fx.Shake(4);
-        _sound.Play(GameSfx.GameOver, 0.7f);
+        Audio.Play(GameSfx.GameOver, 0.7f);
     }
 
     private void LockPiece()
     {
-        _sound.Play(GameSfx.Thud, 0.35f);
+        Audio.Play(GameSfx.Thud, 0.35f);
         foreach (var (px, py) in Cells(_kind, _rot, _x, _y))
         {
             if (py < 0) continue;
@@ -510,7 +438,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
             _lines += n;
             var before = _level;
             _level = Math.Max(_level, 1 + _lines / 10);
-            _sound.Play(n >= 4 ? GameSfx.BigClear : GameSfx.Clear, 0.8f, 0, 1f + (n - 1) * 0.06f);
+            Audio.Play(n >= 4 ? GameSfx.BigClear : GameSfx.Clear, 0.8f, 0, 1f + (n - 1) * 0.06f);
             foreach (var row in full)
                 for (var c = 0; c < _cols; c++)
                 {
@@ -527,7 +455,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
             }
             else
                 _fx.Pop($"+{pts * _level}", _ox + _cols * _cell / 2f, _oy + (full[0] - Hidden) * _cell, SKColors.White);
-            if (_level > before) _sound.Play(GameSfx.LevelUp, 0.6f);
+            if (_level > before) Audio.Play(GameSfx.LevelUp, 0.6f);
             _best = Math.Max(_best, _score);
             return;
         }
@@ -670,7 +598,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Left|A", Order = 1)]
     public void MoveLeft()
     {
-        lock (_sync)
+        lock (Sync)
         {
             _human = true;
             if (_holdX == -1) return;
@@ -684,7 +612,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Right|D", Order = 2)]
     public void MoveRight()
     {
-        lock (_sync)
+        lock (Sync)
         {
             _human = true;
             if (_holdX == 1) return;
@@ -698,21 +626,21 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Left:up|A:up", Order = 3)]
     public void ReleaseLeft()
     {
-        lock (_sync) { if (_holdX < 0) { _holdX = 0; _das = 0; } }
+        lock (Sync) { if (_holdX < 0) { _holdX = 0; _das = 0; } }
     }
 
     [ExtensionMethod("Release Right", "Release right",
         Category = "Controls", KeyboardShortcut = "Right:up|D:up", Order = 4)]
     public void ReleaseRight()
     {
-        lock (_sync) { if (_holdX > 0) { _holdX = 0; _das = 0; } }
+        lock (Sync) { if (_holdX > 0) { _holdX = 0; _das = 0; } }
     }
 
     [ExtensionMethod("Soft Drop", "Hold to drop faster",
         Category = "Controls", KeyboardShortcut = "Down|S", Order = 5)]
     public void SoftDrop()
     {
-        lock (_sync)
+        lock (Sync)
         {
             _human = true;
             if (_soft == 1) return;
@@ -726,14 +654,14 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Down:up|S:up", Order = 6)]
     public void ReleaseSoft()
     {
-        lock (_sync) { _soft = 0; _softDas = 0; }
+        lock (Sync) { _soft = 0; _softDas = 0; }
     }
 
     [ExtensionMethod("Rotate", "Rotate clockwise",
         Category = "Controls", KeyboardShortcut = "Up|W|X", Order = 7)]
     public void Rotate()
     {
-        lock (_sync)
+        lock (Sync)
         {
             _human = true;
             if (_rotCool > 0) return;
@@ -746,7 +674,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Z", Order = 8)]
     public void RotateCcw()
     {
-        lock (_sync)
+        lock (Sync)
         {
             _human = true;
             if (_rotCool > 0) return;
@@ -759,7 +687,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Space", Order = 9)]
     public void Drop()
     {
-        lock (_sync)
+        lock (Sync)
         {
             _human = true;
             if (_crashTimer > 0)
@@ -779,14 +707,11 @@ public class TetrisExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "C", Order = 10)]
     public void DoHold()
     {
-        lock (_sync) { _human = true; Hold(); }
+        lock (Sync) { _human = true; Hold(); }
     }
 
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
-        using var canvas = new SKCanvas(bb);
         canvas.Clear(new SKColor(10, 8, 22));
         using var paint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
         var now = _clock.Elapsed.TotalSeconds;
@@ -847,33 +772,31 @@ public class TetrisExtension : ICanvasExtension, IDisposable
 
         if (ShowScore)
         {
-            var size = CanvasText.ResolveSize(FontSize, Math.Max(7f, _canvas.Height * 0.07f));
+            var size = CanvasText.ResolveSize(FontSize, Math.Max(7f, Canvas.Height * 0.07f));
             var tx = _wide ? leftX : sideX;
             var ty = _wide ? _oy + box * 8 : _oy + box * 14;
-            if (ty > _canvas.Height - size * 4)
+            if (ty > Canvas.Height - size * 4)
             {
                 tx = 4;
                 ty = 4;
             }
 
-            CanvasText.Draw(canvas, _canvas, $"{_score}", SKColors.White, tx, ty + size, size, SKTextAlign.Left, UseBdfFont);
-            CanvasText.Draw(canvas, _canvas, $"LV {_level}  {_lines}", new SKColor(180, 200, 255),
+            CanvasText.Draw(canvas, Canvas, $"{_score}", SKColors.White, tx, ty + size, size, SKTextAlign.Left, UseBdfFont);
+            CanvasText.Draw(canvas, Canvas, $"LV {_level}  {_lines}", new SKColor(180, 200, 255),
                 tx, ty + size * 2.1f, Math.Max(6f, size * 0.8f), SKTextAlign.Left, UseBdfFont);
             if (_best > 0)
-                CanvasText.Draw(canvas, _canvas, $"HI {_best}", new SKColor(255, 210, 80),
+                CanvasText.Draw(canvas, Canvas, $"HI {_best}", new SKColor(255, 210, 80),
                     tx, ty + size * 3.1f, Math.Max(6f, size * 0.75f), SKTextAlign.Left, UseBdfFont);
         }
 
         if (_crashTimer > 0)
         {
-            var size = CanvasText.ResolveSize(FontSize, Math.Max(12f, _canvas.Height * 0.14f));
-            CanvasText.Draw(canvas, _canvas, "GAME OVER", SKColors.White,
+            var size = CanvasText.ResolveSize(FontSize, Math.Max(12f, Canvas.Height * 0.14f));
+            CanvasText.Draw(canvas, Canvas, "GAME OVER", SKColors.White,
                 _ox + wellW / 2f, _oy + wellH * 0.45f, size, SKTextAlign.Center, UseBdfFont);
         }
 
-        _fx.DrawOverlay(canvas, _canvas, _canvas.Width, _canvas.Height, Math.Max(7f, _canvas.Height * 0.07f));
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
+        _fx.DrawOverlay(canvas, Canvas, Canvas.Width, Canvas.Height, Math.Max(7f, Canvas.Height * 0.07f));
     }
 
     private readonly GameFx _fx = new();
@@ -885,10 +808,10 @@ public class TetrisExtension : ICanvasExtension, IDisposable
     {
         var t = Environment.TickCount64 / 1000.0;
         var rnd = new Random(17);
-        for (var i = 0; i < _canvas.Width * _canvas.Height / 400; i++)
+        for (var i = 0; i < Canvas.Width * Canvas.Height / 400; i++)
         {
-            var x = rnd.Next(_canvas.Width);
-            var y = rnd.Next(_canvas.Height);
+            var x = rnd.Next(Canvas.Width);
+            var y = rnd.Next(Canvas.Height);
             var tw = 0.5 + 0.5 * Math.Sin(t * (0.6 + rnd.NextDouble()) + i);
             var v = (byte)(40 + 90 * tw);
             paint.Color = new SKColor((byte)(v * 0.8), (byte)(v * 0.85), v);
@@ -899,7 +822,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
     private void DrawPreview(SKCanvas canvas, SKPaint paint, float x, float y, string label, int[] kinds, int box)
     {
         var size = CanvasText.ResolveSize(FontSize, Math.Max(6f, box * 1.1f));
-        CanvasText.Draw(canvas, _canvas, label, new SKColor(200, 210, 255),
+        CanvasText.Draw(canvas, Canvas, label, new SKColor(200, 210, 255),
             x, y + size, size, SKTextAlign.Left, UseBdfFont);
         var py = y + size + 4;
         var mini = Math.Max(3, box - 1);
@@ -913,7 +836,7 @@ public class TetrisExtension : ICanvasExtension, IDisposable
     private void DrawHoldBox(SKCanvas canvas, SKPaint paint, float x, float y, int box)
     {
         var size = CanvasText.ResolveSize(FontSize, Math.Max(6f, box * 1.1f));
-        CanvasText.Draw(canvas, _canvas, "HOLD", new SKColor(200, 210, 255),
+        CanvasText.Draw(canvas, Canvas, "HOLD", new SKColor(200, 210, 255),
             x, y + size, size, SKTextAlign.Left, UseBdfFont);
         if (_hold != null)
             DrawMini(canvas, paint, x, y + size + 4, _hold.Value, Math.Max(3, box - 1));

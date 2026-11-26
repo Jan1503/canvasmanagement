@@ -1,9 +1,7 @@
 using System.Globalization;
-using System.Timers;
 using CanvasManagement.BdfFontManager;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.HomeAssistant;
 
@@ -15,17 +13,12 @@ namespace CanvasManagement.Extension.HomeAssistant;
     "Home Assistant dashboard: several entities on one canvas",
     "Information",
     IconResourceName = "home-assistant.svg")]
-public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
+public class HomeAssistantGridExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private float _scale = 1f;
 
-    internal HomeAssistantGridExtension(ICanvas canvas)
+    internal HomeAssistantGridExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Entities", "The entities to display, in order", Order = 1)]
@@ -68,75 +61,32 @@ public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
         Order = 12)]
     public SKColor BackgroundColor { get; set; } = new(0, 0, 0);
 
-    public string Name => "HA Grid";
-    public bool IsRunning { get; private set; }
+    public override string Name => "HA Grid";
+    protected override double FrameIntervalMs => 1000;
 
-    public void Dispose()
+    protected override void OnStart()
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        _scale = DisplayScale.GetScale(Canvas.Width, Canvas.Height);
     }
 
-    public void Start()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-
-            _timer = new Timer(1000) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
+        Draw(canvas);
     }
 
-    public void Stop()
+    private void Draw(SKCanvas canvas)
     {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try { Render(); }
-            catch (Exception ex) { Console.WriteLine($"[HA Grid] render: {ex.Message}"); }
-        }
-    }
-
-    private void Render()
-    {
-        var bb = _backBuffer;
-        if (bb == null) return;
-
-        using var c = new SKCanvas(bb);
+        var c = canvas;
         c.Clear(BackgroundColor);
 
         var items = Entities;
-        float w = _canvas.Width, h = _canvas.Height;
+        float w = Canvas.Width, h = Canvas.Height;
 
         if (items == null || items.Count == 0)
         {
             DrawText(c, HomeAssistantBridge.Connected ? "No entities configured" : "HA offline",
                 SKColors.Gray, 0, 0, w, h, Math.Max(8f, 12f * _scale), true, SKTextAlign.Center, false);
             c.Flush();
-            _canvas.SubmitCompletedFrame(bb);
             return;
         }
 
@@ -200,7 +150,6 @@ public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
         }
 
         c.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private string FormatValue(string raw, string? unit, string? unitOverride)
@@ -231,8 +180,8 @@ public class HomeAssistantGridExtension : ICanvasExtension, IDisposable
 
         if (useBdf)
         {
-            var fontName = _canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
-            using var bmp = _canvas.RenderBdfTextToBitmap(text, color, fontName);
+            var fontName = Canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
+            using var bmp = Canvas.RenderBdfTextToBitmap(text, color, fontName);
             if (bmp is not { Width: > 0, Height: > 0 }) return;
             var (dw, dh) = CanvasText.DestSize(bmp, fit ? Math.Min(targetH, rh) : targetH, rw);
             var left = align == SKTextAlign.Center ? rx + (rw - dw) / 2f

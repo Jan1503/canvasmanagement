@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.RainbowBreakout;
 
@@ -12,7 +10,7 @@ namespace CanvasManagement.Extension.RainbowBreakout;
     "Neon brick-breaker — Left/Right + Space, or autopilot",
     "Games",
     IconResourceName = "rainbow-breakout.svg")]
-public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
+public class RainbowBreakoutExtension : GameExtension
 {
     private static readonly SKColor[] Rainbow =
     {
@@ -25,16 +23,12 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
         new(255, 80, 200)
     };
 
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _random = new();
     private readonly List<Brick> _bricks = new();
     private readonly List<Ball> _balls = new();
     private readonly List<Drop> _drops = new();
     private readonly List<Spark> _sparks = new();
 
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private int _px = 2;
     private int _frame;
     private float _padX, _padW, _padH, _padY, _padSpd;
@@ -46,7 +40,7 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
     private int _crashTimer;
     private bool _served;
 
-    internal RainbowBreakoutExtension(ICanvas canvas) => _canvas = canvas;
+    internal RainbowBreakoutExtension(ICanvas canvas) : base(canvas, GameSong.Arcade) { }
 
     [ExtensionParameter("Game Speed", "Frame interval in milliseconds (lower = faster)", DefaultValue = 16,
         MinValue = 12, MaxValue = 40, Unit = "ms", Order = 1)]
@@ -69,80 +63,26 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Auto Pilot", "AI plays until you press a key in Studio", DefaultValue = true, Order = 6)]
     public bool AutoPilot { get; set; } = true;
 
-    private GameSound? _snd;
-    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Arcade);
+    public override string Name => "Rainbow Breakout";
+    protected override double FrameIntervalMs => GameSpeed;
 
-    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
-    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
-
-    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
-    public bool Music { get => _sound.Music; set => _sound.Music = value; }
-
-    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
-        MaxValue = 100, Order = 22)]
-    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
-
-    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
-        MaxValue = 100, Order = 23)]
-    public int MusicVolume
+    protected override void OnStart()
     {
-        get => (int)MathF.Round(_sound.MusicVolume * 100);
-        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
-    }
-
-    public string Name => "Rainbow Breakout";
-    public bool IsRunning { get; private set; }
-
-    public void Dispose()
-    {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _px = PixelArt.Scale(_canvas.Height);
-            _human = false;
-            _hold = 0;
-            _level = 1;
-            _lives = 3;
-            _score = 0;
-            NewBoard();
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(GameSpeed) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _sound.Stop();
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); } catch { }
-        }
+        _px = PixelArt.Scale(Canvas.Height);
+        _human = false;
+        _hold = 0;
+        _level = 1;
+        _lives = 3;
+        _score = 0;
+        NewBoard();
     }
 
     private void NewBoard()
     {
         _padH = 5;
-        _padW = Math.Max(28, _canvas.Width * 0.18f);
-        _padY = _canvas.Height - Math.Max(8, 5 * _px);
-        _padX = (_canvas.Width - _padW) / 2f;
+        _padW = Math.Max(28, Canvas.Width * 0.18f);
+        _padY = Canvas.Height - Math.Max(8, 5 * _px);
+        _padX = (Canvas.Width - _padW) / 2f;
         _padSpd = Math.Max(2.5f, (3f + Difficulty * 0.25f) * _px);
         _wide = _laser = false;
         _wideTimer = _laserTimer = 0;
@@ -153,10 +93,10 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
         _sparks.Clear();
         _crashTimer = 0;
 
-        var cols = Math.Clamp(_canvas.Width / 18, 10, 14);
+        var cols = Math.Clamp(Canvas.Width / 18, 10, 14);
         var rows = Math.Clamp(5 + _level / 2, 5, 7);
         var gap = 2;
-        var bw = (_canvas.Width - gap * (cols + 1)) / (float)cols;
+        var bw = (Canvas.Width - gap * (cols + 1)) / (float)cols;
         var bh = 8f;
         var top = 14;
         for (var r = 0; r < rows; r++)
@@ -193,36 +133,24 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
 
     private float PadW() => _wide ? _padW * 1.45f : _padW;
 
-    private void OnTick(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
+        if (_crashTimer > 0)
         {
-            if (!IsRunning || _backBuffer == null) return;
-            try
+            _crashTimer--;
+            if (_crashTimer == 0)
             {
-                if (_timer != null && Math.Abs(_timer.Interval - GameSpeed) > 0.5) _timer.Interval = GameSpeed;
-                if (_crashTimer > 0)
-                {
-                    _crashTimer--;
-                    if (_crashTimer == 0)
-                    {
-                        if (_lives <= 0) { _lives = 3; _level = 1; _score = 0; }
-                        NewBoard();
-                    }
-                }
-                else
-                    Update();
-
-                Render();
-                _sound.Duck(_crashTimer > 0 ? 0.35f : 1f);
-                _sound.Update();
-                _frame++;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[RainbowBreakout] {ex.Message}");
+                if (_lives <= 0) { _lives = 3; _level = 1; _score = 0; }
+                NewBoard();
             }
         }
+        else
+            Update();
+
+        Draw(canvas);
+        Audio.Duck(_crashTimer > 0 ? 0.35f : 1f);
+        Audio.Update();
+        _frame++;
     }
 
     private void Update()
@@ -233,7 +161,7 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
         var want = 0;
         if (AutoPilot && !_human) RunAi(out want);
         else want = _hold;
-        _padX = Math.Clamp(_padX + want * _padSpd, 0, _canvas.Width - PadW());
+        _padX = Math.Clamp(_padX + want * _padSpd, 0, Canvas.Width - PadW());
 
         if (!_served)
         {
@@ -260,7 +188,7 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
             b.X += b.Vx;
             b.Y += b.Vy;
             if (b.X - b.R < 0) { b.X = b.R; b.Vx = Math.Abs(b.Vx); }
-            if (b.X + b.R > _canvas.Width) { b.X = _canvas.Width - b.R; b.Vx = -Math.Abs(b.Vx); }
+            if (b.X + b.R > Canvas.Width) { b.X = Canvas.Width - b.R; b.Vx = -Math.Abs(b.Vx); }
             if (b.Y - b.R < 0) { b.Y = b.R; b.Vy = Math.Abs(b.Vy); }
 
             if (b.Y + b.R >= _padY && b.Y - b.R <= _padY + _padH &&
@@ -268,14 +196,14 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
             {
                 var hit = (b.X - (_padX + PadW() / 2f)) / (PadW() / 2f);
                 b.Vy = -Math.Abs(b.Vy);
-                _sound.Play(GameSfx.Bounce, 0.5f, (b.X / _canvas.Width) * 2 - 1);
+                Audio.Play(GameSfx.Bounce, 0.5f, (b.X / Canvas.Width) * 2 - 1);
                 b.Vx += hit * speed * 0.55f;
                 b.Y = _padY - b.R - 1;
             }
 
             HitBricks(ref b);
 
-            if (b.Y - b.R > _canvas.Height + 4)
+            if (b.Y - b.R > Canvas.Height + 4)
                 _balls.RemoveAt(i);
             else
                 _balls[i] = b;
@@ -287,7 +215,7 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
             _crashTimer = 28;
             _fx.Flash(new SKColor(255, 40, 60), 0.6f);
             _fx.Shake(5);
-            _sound.Play(_lives <= 0 ? GameSfx.GameOver : GameSfx.Die, 0.7f);
+            Audio.Play(_lives <= 0 ? GameSfx.GameOver : GameSfx.Die, 0.7f);
             return;
         }
 
@@ -297,10 +225,10 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
         {
             _level++;
             _score += 100;
-            _fx.Confetti(_canvas.Width / 2f, _canvas.Height * 0.5f, 60, 3.5f);
+            _fx.Confetti(Canvas.Width / 2f, Canvas.Height * 0.5f, 60, 3.5f);
             _fx.Flash(new SKColor(255, 220, 120), 0.4f);
-            _fx.Pop($"LEVEL {_level}", _canvas.Width / 2f, _canvas.Height * 0.5f, new SKColor(255, 230, 120));
-            _sound.Play(GameSfx.LevelUp, 0.7f);
+            _fx.Pop($"LEVEL {_level}", Canvas.Width / 2f, Canvas.Height * 0.5f, new SKColor(255, 230, 120));
+            Audio.Play(GameSfx.LevelUp, 0.7f);
             NewBoard();
         }
     }
@@ -321,7 +249,7 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
             br.Hits--;
             Burst(b.X, b.Y, br.Color);
             // Higher rows ring higher.
-            _sound.Play(GameSfx.Blip, 0.5f, (b.X / _canvas.Width) * 2 - 1, 1.5f - Math.Clamp(br.Y / _canvas.Height, 0f, 0.6f), 20);
+            Audio.Play(GameSfx.Blip, 0.5f, (b.X / Canvas.Width) * 2 - 1, 1.5f - Math.Clamp(br.Y / Canvas.Height, 0f, 0.6f), 20);
             if (br.Hits <= 0)
             {
                 _score += 10;
@@ -343,7 +271,7 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
             d.Y += d.Vy;
             if (d.Y > _padY && d.Y < _padY + _padH + 4 && d.X > _padX && d.X < _padX + PadW())
             {
-                _sound.Play(GameSfx.PowerUp, 0.6f);
+                Audio.Play(GameSfx.PowerUp, 0.6f);
                 if (d.Kind == 0) { _wide = true; _wideTimer = 400; }
                 else if (d.Kind == 1) Multi();
                 else { _laser = true; _laserTimer = 280; }
@@ -351,7 +279,7 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
                 continue;
             }
 
-            if (d.Y > _canvas.Height) _drops.RemoveAt(i);
+            if (d.Y > Canvas.Height) _drops.RemoveAt(i);
             else _drops[i] = d;
         }
 
@@ -396,7 +324,7 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
         b.Vy = -Math.Abs(MathF.Sin(a) * sp);
         _balls[0] = b;
         _served = true;
-        _sound.Play(GameSfx.Start, 0.5f);
+        Audio.Play(GameSfx.Start, 0.5f);
     }
 
     private void FireLaser()
@@ -416,7 +344,7 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
             if (x < br.X || x > br.X + br.W) continue;
             Burst(x, br.Y + br.H / 2f, br.Color);
             _score += 5;
-            _sound.Play(GameSfx.Shoot, 0.4f);
+            Audio.Play(GameSfx.Shoot, 0.4f);
             _bricks.RemoveAt(i);
             break;
         }
@@ -440,35 +368,35 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Left|A", Order = 1)]
     public void MoveLeft()
     {
-        lock (_lock) { _human = true; _hold = -1; }
+        lock (Sync) { _human = true; _hold = -1; }
     }
 
     [ExtensionMethod("Move Right", "Hold right — takes over from autopilot",
         Category = "Controls", KeyboardShortcut = "Right|D", Order = 2)]
     public void MoveRight()
     {
-        lock (_lock) { _human = true; _hold = 1; }
+        lock (Sync) { _human = true; _hold = 1; }
     }
 
     [ExtensionMethod("Release Left", "Release left",
         Category = "Controls", KeyboardShortcut = "Left:up|A:up", Order = 3)]
     public void ReleaseLeft()
     {
-        lock (_lock) { if (_hold < 0) _hold = 0; }
+        lock (Sync) { if (_hold < 0) _hold = 0; }
     }
 
     [ExtensionMethod("Release Right", "Release right",
         Category = "Controls", KeyboardShortcut = "Right:up|D:up", Order = 4)]
     public void ReleaseRight()
     {
-        lock (_lock) { if (_hold > 0) _hold = 0; }
+        lock (Sync) { if (_hold > 0) _hold = 0; }
     }
 
     [ExtensionMethod("Serve", "Launch ball or fire laser",
         Category = "Controls", KeyboardShortcut = "Space|Up", Order = 5)]
     public void ServeOrFire()
     {
-        lock (_lock)
+        lock (Sync)
         {
             _human = true;
             if (!_served) Serve();
@@ -508,18 +436,15 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
     ///     Synthwave: a purple sky with stars, a glowing perspective grid at the bottom, bricks with a sheen that
     ///     sweeps across them, glowing balls with tails, sparks and shake when bricks break, confetti on a clear.
     /// </summary>
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
         var now = _clock.Elapsed.TotalSeconds;
         var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
         _lastRender = now;
         _fx.Update(dt);
 
-        var w = _canvas.Width;
-        var h = _canvas.Height;
-        using var canvas = new SKCanvas(bb);
+        var w = Canvas.Width;
+        var h = Canvas.Height;
         using var paint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
 
         GameFx.VerticalGradient(canvas, w, h, new SKColor(8, 4, 24), new SKColor(40, 8, 56));
@@ -612,14 +537,12 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
 
         if (ShowScore)
         {
-            var size = CanvasText.ResolveSize(FontSize, Math.Max(8f, _canvas.Height * 0.08f));
-            CanvasText.Draw(canvas, _canvas, $"{_score}  L{_level}  x{_lives}", SKColors.White,
+            var size = CanvasText.ResolveSize(FontSize, Math.Max(8f, Canvas.Height * 0.08f));
+            CanvasText.Draw(canvas, Canvas, $"{_score}  L{_level}  x{_lives}", SKColors.White,
                 4, size + 1, size, SKTextAlign.Left, UseBdfFont);
         }
 
-        _fx.DrawOverlay(canvas, _canvas, w, h, Math.Max(7f, h * 0.07f));
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
+        _fx.DrawOverlay(canvas, Canvas, w, h, Math.Max(7f, h * 0.07f));
     }
 
     private void DrawBrick(SKCanvas canvas, SKPaint paint, Brick br)
@@ -638,7 +561,7 @@ public class RainbowBreakoutExtension : ICanvasExtension, IDisposable
         paint.Color = br.Color.WithAlpha(90);
         canvas.DrawRect(x + 2, y + h - 2, w - 3, 1, paint);
         // A sheen sweeps across the wall every few seconds.
-        var sweep = (_fx.Time * 120f) % (_canvas.Width * 3f) - _canvas.Width;
+        var sweep = (_fx.Time * 120f) % (Canvas.Width * 3f) - Canvas.Width;
         var d = x + y * 0.6f - sweep;
         if (d > 0 && d < 6)
         {

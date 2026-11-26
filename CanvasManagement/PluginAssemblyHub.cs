@@ -120,25 +120,49 @@ public static class PluginAssemblyHub
 
         foreach (var alc in toUnload)
         {
-            try { alc.Unload(); }
+            try
+            {
+                alc.Unload();
+                lock (Gate) Unloading.Add((new WeakReference(alc), alc.Name ?? "?"));
+            }
             catch (Exception ex) { Console.WriteLine($"  ALC unload: {ex.Message}"); }
         }
 
         return toUnload.Count;
     }
 
-    /// <summary>GC after unload. Returns how many ALCs still look pinned.</summary>
+    /// <summary>
+    ///     Collects until every context from <see cref="UnloadUnder"/> is gone (at most 10 rounds). Returns how many
+    ///     are still alive and names them in the log: something (a running extension, a static event, a thread)
+    ///     still references that plugin, so its assembly stays in memory.
+    /// </summary>
     public static int CollectUnloaded()
     {
-        for (var i = 0; i < 3; i++)
+        List<(WeakReference Ref, string Name)> pending;
+        lock (Gate) pending = [.. Unloading];
+        if (pending.Count == 0) return 0;
+
+        for (var i = 0; i < 10 && pending.Any(p => p.Ref.IsAlive); i++)
         {
             GC.Collect();
             GC.WaitForPendingFinalizers();
-            GC.Collect();
         }
 
-        return 0;
+        var alive = pending.Where(p => p.Ref.IsAlive).ToList();
+        lock (Gate)
+        {
+            Unloading.Clear();
+            Unloading.AddRange(alive); // checked again after the next unload
+        }
+
+        if (alive.Count > 0)
+            Console.WriteLine($"  [PLUGINS] {alive.Count} unloaded plugin(s) still referenced: " +
+                              string.Join(", ", alive.Select(a => a.Name)));
+        return alive.Count;
     }
+
+    /// <summary>Contexts asked to unload; weak, so this list does not keep them alive.</summary>
+    private static readonly List<(WeakReference Ref, string Name)> Unloading = [];
 
     private readonly record struct Entry(PluginLoadContext Context, Assembly Assembly, string Path);
 }

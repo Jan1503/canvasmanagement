@@ -196,12 +196,9 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable, ICa
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[VLC] CRITICAL: Failed to initialize LibVLC core: {ex.Message}");
-                    Console.WriteLine($"[VLC] Stack trace: {ex.StackTrace}");
-                    throw new InvalidOperationException(
-                        "Failed to initialize LibVLC. Ensure VLC is installed: " +
-                        "Linux: sudo apt-get install vlc libvlc-dev | " +
-                        "Windows: Install VLC from videolan.org", ex);
+                    // No throw: the extension still loads and shows what is missing on the wall.
+                    Console.WriteLine($"[VLC] LibVLC is not available: {ex.Message}. " +
+                                      "Install it (Linux: sudo apt-get install vlc libvlc-dev, Windows: videolan.org).");
                 }
         }
     }
@@ -801,7 +798,11 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable, ICa
 
                 // Verify LibVLC core is initialized
                 if (!_coreInitialized)
-                    throw new InvalidOperationException("LibVLC core not initialized. This should not happen.");
+                {
+                    ShowMissingVlc();
+                    IsRunning = true;
+                    return;
+                }
 
                 // Try hardware decoder configurations for Raspberry Pi 4
                 // Priority order: Let VLC auto-detect first, then specific codecs
@@ -993,6 +994,20 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable, ICa
         }
     }
 
+    /// <summary>A plain notice instead of a crash when LibVLC is not installed on this host.</summary>
+    private void ShowMissingVlc()
+    {
+        using var bmp = new SKBitmap(new SKImageInfo(_canvas.Width, _canvas.Height, SKColorType.Bgra8888, SKAlphaType.Premul));
+        using (var c = new SKCanvas(bmp))
+        {
+            c.Clear(SKColors.Black);
+            var size = Math.Max(7f, _canvas.Height * 0.09f);
+            CanvasText.Draw(c, _canvas, "VLC NOT INSTALLED", new SKColor(255, 120, 90), _canvas.Width / 2f,
+                _canvas.Height / 2f, size, SKTextAlign.Center, true);
+        }
+        _canvas.SubmitCompletedFrame(bmp);
+    }
+
     public void Stop()
     {
         lock (_lock)
@@ -1072,7 +1087,12 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable, ICa
             });
     }
 
-    private async void LoadAndPlayMedia(string url)
+    /// <summary>Fire-and-forget entry for setters: failures are logged, never thrown into the thread pool.</summary>
+    private void LoadAndPlayMedia(string url) => _ = LoadAndPlayMediaAsync(url).ContinueWith(
+        t => Console.WriteLine($"[VLC] load failed: {t.Exception?.GetBaseException().Message}"),
+        TaskContinuationOptions.OnlyOnFaulted);
+
+    private async Task LoadAndPlayMediaAsync(string url)
     {
         if (string.IsNullOrWhiteSpace(url))
             return;

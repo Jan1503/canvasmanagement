@@ -123,7 +123,7 @@ public sealed class AnalogClockExtension(ICanvas canvas) : ICanvasExtension, IDi
             {
                 RenderClock();
                 return Task.CompletedTask;
-            });
+            }, _canvas.Stats);
             _loop.Start();
         }
         catch (Exception ex)

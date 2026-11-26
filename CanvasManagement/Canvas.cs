@@ -207,6 +207,10 @@ public class Canvas : ICanvas, IDisposable
 
     public IExtensionAudio? Audio { get; internal set; }
 
+    public FrameStats Stats { get; } = new();
+
+    FrameStats? ICanvas.Stats => Stats;
+
     /// <summary>
     ///     When true, the compositor blends this canvas over the layers beneath it honouring per-pixel alpha
     ///     (so a transparent background reveals what's underneath) instead of forcing it opaque. Opt-in per
@@ -258,18 +262,6 @@ public class Canvas : ICanvas, IDisposable
         }
     }
 
-    /// <summary>Erases a rectangular region to fully transparent (alpha 0) so the layer beneath shows through.</summary>
-    public void ClearRect(int x, int y, int width, int height)
-    {
-        lock (_drawLock)
-        {
-            if (_disposed) return;
-            var canvas = GetCachedCanvas();
-            using var paint = new SKPaint { BlendMode = SKBlendMode.Clear };
-            canvas.DrawRect(x, y, width, height, paint);
-        }
-    }
-
     public SKColor GetPixel(int x, int y)
     {
         return GetCanvasBitmap().GetPixel(x, y);
@@ -279,7 +271,6 @@ public class Canvas : ICanvas, IDisposable
     {
         return GetCanvasBitmap().GetPixels();
     }
-
 
     public void DrawCircle(float xPos, float yPos, float radius, SKColor color)
     {
@@ -291,7 +282,6 @@ public class Canvas : ICanvas, IDisposable
             canvas.DrawCircle(xPos, yPos, radius, _cachedStrokePaint);
         }
     }
-
 
     public void DrawRect(int xPos, int yPos, int width, int height, SKColor color, SKPaintStyle style)
     {
@@ -335,7 +325,6 @@ public class Canvas : ICanvas, IDisposable
         var canvas = GetCachedCanvas();
         canvas.DrawPicture(picture, xPos, yPos);
     }
-
 
     public void DrawBitmap(SKBitmap bitmap, int xPos, int yPos, int width, int height, float rotateDegrees = 0,
         float scale = 0)
@@ -432,17 +421,13 @@ public class Canvas : ICanvas, IDisposable
         {
             initialSize = paintStyle.TextSize > 0 ? paintStyle.TextSize : 12f;
         }
-        catch
-        {
-        }
+        catch { /* best effort, nothing to recover */ }
 
         try
         {
             typeface = paintStyle.Typeface;
         }
-        catch
-        {
-        }
+        catch { /* best effort, nothing to recover */ }
 #pragma warning restore CS0618 // Type or member is obsolete
 
         GetTextSizeAndBoundaries(text, initialSize, typeface, new SKSize(Width, Height),
@@ -471,117 +456,6 @@ public class Canvas : ICanvas, IDisposable
         }
 
         canvas.DrawText(text, xPos, yPos, SKTextAlign.Left, font, paintStyle);
-    }
-
-    public Task DrawAnalogClock(int xPos, int yPos, int radius, SKColor circleColor, SKColor quarterMarkColor,
-        SKColor hourHandColor, SKColor minuteHandColor, SKColor secondHandColor, CancellationToken ct = default)
-    {
-        return Task.Run(async () =>
-        {
-            int handLength, divisor;
-            double clockHelper, angleRadiants, angleSinus, angleCosinus;
-            double xSingle, ySingle;
-            int xInt, yInt;
-            double hourHelper;
-
-            int hourXOld = xPos, hourYOld = yPos, minxold = xPos, minyold = yPos;
-            int secxold = xPos, secyold = yPos;
-
-            DrawCircleLegacy(xPos, yPos, radius, circleColor);
-
-            DrawLine(xPos, yPos - radius - 1, xPos, yPos - radius + 2, quarterMarkColor); //Draw zero-mark
-            DrawLine(xPos + radius - 1, yPos, xPos + radius + 2, yPos, quarterMarkColor); //Draw 15' - mark
-            DrawLine(xPos, yPos + radius - 1, xPos, yPos + radius + 2, quarterMarkColor); //Draw 30' - mark
-            DrawLine(xPos - radius - 1, yPos, xPos - radius + 2, yPos, quarterMarkColor); //Draw 45' - mark
-
-            while (!ct.IsCancellationRequested)
-            {
-                var currentTime = TimeZoneInfo.ConvertTime(DateTime.UtcNow, ClockTimeZone);
-
-                //Draw hours
-                handLength = radius / 2;
-                divisor = 30;
-                hourHelper = currentTime.Minute / 60.0; //Make the hourhand smooth
-                hourHelper += currentTime.Hour;
-                clockHelper = hourHelper * divisor;
-                angleRadiants = ConvertToRadians(clockHelper);
-                angleSinus = Math.Sin(angleRadiants);
-                angleCosinus = Math.Cos(angleRadiants);
-                clockHelper = handLength * angleSinus; // X of hand
-                xSingle = xPos + clockHelper;
-                clockHelper = handLength * angleCosinus; // Y of the hand
-                ySingle = yPos - clockHelper;
-                xSingle = Math.Round(xSingle);
-                ySingle = Math.Round(ySingle);
-                xInt = (int)xSingle;
-                yInt = (int)ySingle;
-
-                if ((xInt != hourXOld) | (yInt != hourYOld))
-                    DrawLine(xPos, yPos, hourXOld, hourYOld, SKColors.Black);
-
-                DrawLine(xPos, yPos, xInt, yInt, hourHandColor);
-
-                hourXOld = xInt;
-                hourYOld = yInt;
-
-                //Draw Minutes
-                handLength = radius - 4;
-                divisor = 6;
-                clockHelper = currentTime.Minute * divisor;
-                angleRadiants = ConvertToRadians(clockHelper);
-                angleSinus = Math.Sin(angleRadiants);
-                angleCosinus = Math.Cos(angleRadiants);
-                clockHelper = handLength * angleSinus; // X of hand
-                xSingle = xPos + clockHelper;
-                clockHelper = handLength * angleCosinus; // Y of the hand
-                ySingle = yPos - clockHelper;
-                xSingle = Math.Round(xSingle);
-                ySingle = Math.Round(ySingle);
-                xInt = (int)xSingle;
-                yInt = (int)ySingle;
-
-                if ((xInt != minxold) | (yInt != minyold))
-                    DrawLine(xPos, yPos, minxold, minyold, SKColors.Black);
-
-                DrawLine(xPos, yPos, xInt, yInt, minuteHandColor);
-
-                minxold = xInt;
-                minyold = yInt;
-
-                //Draw Seconds
-                handLength = radius - 2;
-                divisor = 6;
-                clockHelper = currentTime.Second * divisor;
-                angleRadiants = ConvertToRadians(clockHelper);
-                angleSinus = Math.Sin(angleRadiants);
-                angleCosinus = Math.Cos(angleRadiants);
-                clockHelper = handLength * angleSinus; // X of hand
-                xSingle = xPos + clockHelper;
-                clockHelper = handLength * angleCosinus; // Y of the hand
-                ySingle = yPos - clockHelper;
-                xSingle = Math.Round(xSingle);
-                ySingle = Math.Round(ySingle);
-                xInt = (int)xSingle;
-                yInt = (int)ySingle;
-
-                if ((xInt != secxold) | (yInt != secyold))
-                    DrawLine(xPos, yPos, secxold, secyold, SKColors.Black);
-
-                DrawLine(xPos, yPos, xInt, yInt, secondHandColor);
-
-                secxold = xInt;
-                secyold = yInt;
-
-                try
-                {
-                    await Task.Delay(50, ct);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-            }
-        }, ct);
     }
 
     /// <summary>
@@ -615,6 +489,7 @@ public class Canvas : ICanvas, IDisposable
                     totalBytes);
             }
         }
+        Stats.RecordSubmit();
     }
 
     public void Dispose()
@@ -809,7 +684,6 @@ public class Canvas : ICanvas, IDisposable
         return Math.PI / 180 * angle;
     }
 
-
     internal void CopyBackgroundToForeground()
     {
         // Lock to ensure no drawing happens during copy
@@ -915,63 +789,9 @@ public class Canvas : ICanvas, IDisposable
 
     #region Bitmap Operations
 
-    public void DrawBitmapWithAlpha(SKBitmap bitmap, int xPos, int yPos, byte alpha = 255)
-    {
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            using var paint = new SKPaint { Color = SKColors.White.WithAlpha(alpha) };
-            canvas.DrawBitmap(bitmap, new SKPoint(xPos, yPos), paint);
-        }
-    }
-
-    public void DrawBitmapRegion(SKBitmap bitmap, SKRectI sourceRect, SKRect destRect)
-    {
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            canvas.DrawBitmap(bitmap, sourceRect, destRect);
-        }
-    }
-
-    public void DrawBitmapTinted(SKBitmap bitmap, int xPos, int yPos, SKColor tintColor)
-    {
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            using var paint = new SKPaint
-            {
-                ColorFilter = SKColorFilter.CreateBlendMode(tintColor, SKBlendMode.Modulate)
-            };
-            canvas.DrawBitmap(bitmap, new SKPoint(xPos, yPos), paint);
-        }
-    }
-
     #endregion
 
     #region Shape Drawing
-
-    public void DrawFilledCircle(float xPos, float yPos, float radius, SKColor color)
-    {
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            _cachedFillPaint.Color = color;
-            canvas.DrawCircle(xPos, yPos, radius, _cachedFillPaint);
-        }
-    }
-
-    public void DrawEllipse(float xPos, float yPos, float radiusX, float radiusY, SKColor color,
-        SKPaintStyle style = SKPaintStyle.Stroke)
-    {
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            var paint = style == SKPaintStyle.Stroke ? _cachedStrokePaint : _cachedFillPaint;
-            paint.Color = color;
-            canvas.DrawOval(new SKRect(xPos - radiusX, yPos - radiusY, xPos + radiusX, yPos + radiusY), paint);
-        }
-    }
 
     public void DrawRoundRect(int xPos, int yPos, int width, int height, float cornerRadius, SKColor color,
         SKPaintStyle style = SKPaintStyle.Stroke)
@@ -987,30 +807,6 @@ public class Canvas : ICanvas, IDisposable
         }
     }
 
-    public void DrawPolygon(SKPoint[] points, SKColor color, SKPaintStyle style = SKPaintStyle.Stroke)
-    {
-        if (points == null || points.Length < 3) return;
-
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            var paint = style == SKPaintStyle.Stroke ? _cachedStrokePaint : _cachedFillPaint;
-            paint.Color = color;
-
-            using var path = new SKPath();
-            path.MoveTo(points[0]);
-            for (var i = 1; i < points.Length; i++) path.LineTo(points[i]);
-            path.Close();
-            canvas.DrawPath(path, paint);
-        }
-    }
-
-    public void DrawTriangle(SKPoint p1, SKPoint p2, SKPoint p3, SKColor color,
-        SKPaintStyle style = SKPaintStyle.Stroke)
-    {
-        DrawPolygon(new[] { p1, p2, p3 }, color, style);
-    }
-
     public void DrawLine(int x1Pos, int y1Pos, int x2Pos, int y2Pos, SKColor color, float strokeWidth)
     {
         lock (_drawLock)
@@ -1019,23 +815,6 @@ public class Canvas : ICanvas, IDisposable
             _cachedAaStrokePaint.Color = color;
             _cachedAaStrokePaint.StrokeWidth = strokeWidth;
             canvas.DrawLine(x1Pos, y1Pos, x2Pos, y2Pos, _cachedAaStrokePaint);
-        }
-    }
-
-    public void DrawPolyline(SKPoint[] points, SKColor color, float strokeWidth = 1)
-    {
-        if (points == null || points.Length < 2) return;
-
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            _cachedAaStrokePaint.Color = color;
-            _cachedAaStrokePaint.StrokeWidth = strokeWidth;
-
-            _cachedReusablePath.Reset();
-            _cachedReusablePath.MoveTo(points[0]);
-            for (var i = 1; i < points.Length; i++) _cachedReusablePath.LineTo(points[i]);
-            canvas.DrawPath(_cachedReusablePath, _cachedAaStrokePaint);
         }
     }
 
@@ -1153,77 +932,9 @@ public class Canvas : ICanvas, IDisposable
         }
     }
 
-    public void FillRadialGradient(float centerX, float centerY, float radius, SKColor centerColor, SKColor edgeColor)
-    {
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            using var shader = SKShader.CreateRadialGradient(
-                new SKPoint(centerX, centerY),
-                radius,
-                new[] { centerColor, edgeColor },
-                null,
-                SKShaderTileMode.Clamp);
-
-            using var paint = new SKPaint
-            {
-                Shader = shader,
-                Style = SKPaintStyle.Fill
-            };
-
-            canvas.DrawCircle(centerX, centerY, radius, paint);
-        }
-    }
-
-    public void DrawWithShadow(Action drawAction, float offsetX, float offsetY, float blurRadius, SKColor shadowColor)
-    {
-        if (drawAction == null) return;
-
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-
-            // Save state
-            var saveCount = canvas.Save();
-
-            try
-            {
-                // Apply shadow filter
-                using var shadowPaint = new SKPaint
-                {
-                    ImageFilter = SKImageFilter.CreateDropShadow(offsetX, offsetY, blurRadius, blurRadius, shadowColor)
-                };
-
-                canvas.SaveLayer(shadowPaint);
-                drawAction();
-                canvas.Restore();
-            }
-            finally
-            {
-                canvas.RestoreToCount(saveCount);
-            }
-        }
-    }
-
     #endregion
 
     #region Path Operations
-
-    public void DrawBezier(SKPoint start, SKPoint control1, SKPoint control2, SKPoint end, SKColor color,
-        float strokeWidth = 1)
-    {
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            _cachedAaStrokePaint.Color = color;
-            _cachedAaStrokePaint.StrokeWidth = strokeWidth;
-
-            _cachedReusablePath.Reset();
-            _cachedReusablePath.MoveTo(start);
-            _cachedReusablePath.CubicTo(control1, control2, end);
-            canvas.DrawPath(_cachedReusablePath, _cachedAaStrokePaint);
-        }
-    }
 
     public void DrawPath(SKPath path, SKColor color, SKPaintStyle style = SKPaintStyle.Stroke, float strokeWidth = 1)
     {
@@ -1254,77 +965,9 @@ public class Canvas : ICanvas, IDisposable
         }
     }
 
-    public int SaveTransform()
-    {
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            return canvas.Save();
-        }
-    }
-
-    public void RestoreTransform(int saveCount)
-    {
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            canvas.RestoreToCount(saveCount);
-        }
-    }
-
-    public void ResetTransform()
-    {
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            canvas.ResetMatrix();
-        }
-    }
-
     #endregion
 
     #region Image Manipulation
-
-    public void ApplyColorFilter(SKColorFilter filter)
-    {
-        if (filter == null) return;
-
-        lock (_drawLock)
-        {
-            var bitmap = GetCanvasBitmap();
-            using var canvas = new SKCanvas(bitmap);
-            using var paint = new SKPaint { ColorFilter = filter };
-            canvas.DrawBitmap(bitmap, 0, 0, paint);
-        }
-    }
-
-    public void InvertColors()
-    {
-        var colorMatrix = new float[]
-        {
-            -1, 0, 0, 0, 255,
-            0, -1, 0, 0, 255,
-            0, 0, -1, 0, 255,
-            0, 0, 0, 1, 0
-        };
-
-        using var filter = SKColorFilter.CreateColorMatrix(colorMatrix);
-        ApplyColorFilter(filter);
-    }
-
-    public void Grayscale()
-    {
-        var colorMatrix = new[]
-        {
-            0.21f, 0.72f, 0.07f, 0, 0,
-            0.21f, 0.72f, 0.07f, 0, 0,
-            0.21f, 0.72f, 0.07f, 0, 0,
-            0, 0, 0, 1, 0
-        };
-
-        using var filter = SKColorFilter.CreateColorMatrix(colorMatrix);
-        ApplyColorFilter(filter);
-    }
 
     /// <summary>
     ///     Adjusts brightness using color matrix (DEPRECATED - use Brightness property instead)
@@ -1333,94 +976,10 @@ public class Canvas : ICanvas, IDisposable
     [Obsolete(
         "Use the Brightness property instead for proper brightness control. This method uses color matrix addition which can cause clipping. " +
         "Example: canvas.Brightness = 0.5f for 50% brightness.")]
-    public void AdjustBrightness(float amount)
-    {
-        // Clamp amount to -1.0 to 1.0
-        amount = Math.Max(-1.0f, Math.Min(1.0f, amount));
-        var brightness = amount * 255;
-
-        var colorMatrix = new[]
-        {
-            1, 0, 0, 0, brightness,
-            0, 1, 0, 0, brightness,
-            0, 0, 1, 0, brightness,
-            0, 0, 0, 1, 0
-        };
-
-        using var filter = SKColorFilter.CreateColorMatrix(colorMatrix);
-        ApplyColorFilter(filter);
-    }
-
-    public void AdjustContrast(float amount)
-    {
-        // Clamp amount to 0.0 to 2.0 (1.0 = normal)
-        amount = Math.Max(0.0f, Math.Min(2.0f, amount));
-        var translate = (1.0f - amount) / 2.0f * 255;
-
-        var colorMatrix = new[]
-        {
-            amount, 0, 0, 0, translate,
-            0, amount, 0, 0, translate,
-            0, 0, amount, 0, translate,
-            0, 0, 0, 1, 0
-        };
-
-        using var filter = SKColorFilter.CreateColorMatrix(colorMatrix);
-        ApplyColorFilter(filter);
-    }
-
-    public void ApplyBlur(float sigma)
-    {
-        lock (_drawLock)
-        {
-            var bitmap = GetCanvasBitmap();
-            using var canvas = new SKCanvas(bitmap);
-            using var filter = SKImageFilter.CreateBlur(sigma, sigma);
-            using var paint = new SKPaint { ImageFilter = filter };
-            canvas.DrawBitmap(bitmap, 0, 0, paint);
-        }
-    }
 
     #endregion
 
     #region Special Drawing
-
-    public void DrawGrid(int cellWidth, int cellHeight, SKColor color, float strokeWidth = 1)
-    {
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            using var paint = new SKPaint
-            {
-                Color = color,
-                Style = SKPaintStyle.Stroke,
-                StrokeWidth = strokeWidth
-            };
-
-            // Draw vertical lines
-            for (var x = 0; x <= Width; x += cellWidth) canvas.DrawLine(x, 0, x, Height, paint);
-
-            // Draw horizontal lines
-            for (var y = 0; y <= Height; y += cellHeight) canvas.DrawLine(0, y, Width, y, paint);
-        }
-    }
-
-    public void FillPattern(SKBitmap patternBitmap, SKShaderTileMode tileMode = SKShaderTileMode.Repeat)
-    {
-        if (patternBitmap == null) return;
-
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            using var shader = SKShader.CreateBitmap(patternBitmap, tileMode, tileMode);
-            using var paint = new SKPaint
-            {
-                Shader = shader,
-                Style = SKPaintStyle.Fill
-            };
-            canvas.DrawRect(0, 0, Width, Height, paint);
-        }
-    }
 
     public void ClipRect(int xPos, int yPos, int width, int height)
     {
@@ -1430,32 +989,6 @@ public class Canvas : ICanvas, IDisposable
             // Save the pre-clip state once so ResetClip can restore it later.
             if (_clipSaveCount < 0) _clipSaveCount = canvas.Save();
             canvas.ClipRect(new SKRect(xPos, yPos, xPos + width, yPos + height));
-        }
-    }
-
-    public void ClipCircle(float xPos, float yPos, float radius)
-    {
-        lock (_drawLock)
-        {
-            var canvas = GetCachedCanvas();
-            if (_clipSaveCount < 0) _clipSaveCount = canvas.Save();
-            using var path = new SKPath();
-            path.AddCircle(xPos, yPos, radius);
-            canvas.ClipPath(path);
-        }
-    }
-
-    public void ResetClip()
-    {
-        lock (_drawLock)
-        {
-            // Restore the canvas to the state captured before the first clip was applied,
-            // which removes the active clipping region. (Previously this reset the matrix,
-            // which did not actually clear clips.)
-            if (_clipSaveCount < 0) return;
-            var canvas = GetCachedCanvas();
-            canvas.RestoreToCount(_clipSaveCount);
-            _clipSaveCount = -1;
         }
     }
 

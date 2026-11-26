@@ -7,7 +7,7 @@ namespace CanvasManagement.Extensions.Default;
     "Cascading digital rain effect inspired by The Matrix",
     "Visual Effects",
     IconResourceName = "matrix-rain.svg")]
-public class MatrixExtension : IDisposable
+public class MatrixExtension : FrameExtension
 {
     // Authentic Matrix characters including mirrored Latin, numbers, and katakana-style glyphs
     private static readonly char[] MatrixChars =
@@ -28,16 +28,11 @@ public class MatrixExtension : IDisposable
         '?', '?', '?', '?', ';', '.', ',', '?', '?'
     };
 
-    private readonly ICanvas _canvas;
     private readonly List<RainColumn> _columns = new();
     private readonly Random _random = new();
-    private Task? _animationTask;
-    private SKBitmap? _backBuffer;
-    private CancellationTokenSource? _cancellationTokenSource;
 
-    internal MatrixExtension(ICanvas canvas)
+    internal MatrixExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Animation Speed", "Speed in milliseconds (lower = faster)",
@@ -67,197 +62,166 @@ public class MatrixExtension : IDisposable
     [ExtensionParameter("Background Color", "Background color for matrix rain",
         DefaultValue = "#000000")]
     public SKColor BackgroundColor { get; set; } = SKColors.Black;
-    public string Name => "Matrix Rain";
+    public override string Name => "Matrix Rain";
 
-    public bool IsRunning { get; private set; }
+    protected override double FrameIntervalMs => AnimationSpeed;
 
-    public void Dispose()
+    protected override bool ClearOnStop => false;
+
+    private const int CharWidth = 8;
+    private const int CharHeight = 10;
+
+    protected override void OnStart() => _columns.Clear();
+
+    /// <summary>Rain columns are laid out for the canvas width; the buffer starts black (frames fade into it).</summary>
+    protected override void OnResize(int width, int height)
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        BackBuffer?.Erase(SKColors.Black);
+        var columnCount = width / CharWidth;
+
+        // Initialize rain columns with highly varied properties
+        var initialColumns = (int)(columnCount * RainDensity);
+        _columns.Clear();
+
+        for (var i = 0; i < initialColumns; i++)
+        {
+            var initialY = _random.Next(-height * 4, -CharHeight);
+
+            _columns.Add(new RainColumn
+            {
+                X = i % columnCount * CharWidth,
+                Y = initialY,
+                Speed = _random.Next(MinSpeed, MaxSpeed),
+                Length = _random.Next(MinLength, MaxLength),
+                CharWidth = CharWidth,
+                CharHeight = CharHeight,
+                Brightness = (byte)_random.Next(150, 255),
+                GlowEffect = _random.Next(100) < 35,
+                Density = 0.5f + (float)_random.NextDouble() * 0.5f
+            });
+        }
     }
 
-    public void Start()
+    protected override void OnStop()
     {
-        if (IsRunning) return;
+        _columns.Clear();
+        try { Canvas.Clear(); } catch { /* canvas already gone */ }
+    }
 
-        IsRunning = true;
+    /// <summary>Draws on top of the previous frame (the fade needs it); the back buffer keeps its pixels.</summary>
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
+    {
+        var columnCount = Math.Max(1, width / CharWidth);
 
-        // Create back buffer
-        _backBuffer?.Dispose();
-        _backBuffer = new SKBitmap(new SKImageInfo(_canvas.Width, _canvas.Height,
-            SKColorType.Bgra8888, SKAlphaType.Premul));
+        // Apply sophisticated fade effect
+        ApplyAdvancedFade();
 
-        _cancellationTokenSource = new CancellationTokenSource();
-        var ct = _cancellationTokenSource.Token;
-
-        _animationTask = Task.Run(async () =>
+        // Draw and update columns
+        foreach (var column in _columns)
         {
-            const int charWidth = 8;
-            const int charHeight = 10;
-            var columnCount = _canvas.Width / charWidth;
+            DrawEnhancedColumn(column);
+            column.Update();
 
-            // Initialize rain columns with highly varied properties
-            var initialColumns = (int)(columnCount * RainDensity);
-            _columns.Clear();
-
-            for (var i = 0; i < initialColumns; i++)
+            // Reset if off-screen
+            if (column.Y > Canvas.Height + column.Length * CharHeight)
             {
-                var initialY = _random.Next(-_canvas.Height * 4, -charHeight);
+                column.Y = -_random.Next(50, 800);
+                column.Speed = _random.Next(MinSpeed, MaxSpeed);
+                column.Length = _random.Next(MinLength, MaxLength);
+                column.Brightness = (byte)_random.Next(150, 255);
+                column.GlowEffect = _random.Next(100) < 35;
+                column.Density = 0.5f + (float)_random.NextDouble() * 0.5f;
+                column.RegenerateChars();
+            }
+        }
+
+        // Dynamic column management based on density
+        var targetColumns = Math.Max(1, (int)(columnCount * RainDensity));
+
+        if (_columns.Count > targetColumns)
+        {
+            var toRemove = _columns.Count - targetColumns;
+            for (var r = 0; r < toRemove && _columns.Count > targetColumns; r++)
+            {
+                var idx = _random.Next(_columns.Count);
+                _columns.RemoveAt(idx);
+            }
+        }
+        else if (_columns.Count < targetColumns)
+        {
+            var toAdd = Math.Min(5, targetColumns - _columns.Count);
+            for (var a = 0; a < toAdd; a++)
+            {
+                var x = _random.Next(columnCount) * CharWidth;
 
                 _columns.Add(new RainColumn
                 {
-                    X = i % columnCount * charWidth,
-                    Y = initialY,
+                    X = x,
+                    Y = -_random.Next(50, 800),
                     Speed = _random.Next(MinSpeed, MaxSpeed),
                     Length = _random.Next(MinLength, MaxLength),
-                    CharWidth = charWidth,
-                    CharHeight = charHeight,
+                    CharWidth = CharWidth,
+                    CharHeight = CharHeight,
                     Brightness = (byte)_random.Next(150, 255),
                     GlowEffect = _random.Next(100) < 35,
                     Density = 0.5f + (float)_random.NextDouble() * 0.5f
                 });
             }
-
-            try
-            {
-                while (!ct.IsCancellationRequested)
-                {
-                    // Apply sophisticated fade effect
-                    ApplyAdvancedFade();
-
-                    // Draw and update columns
-                    foreach (var column in _columns)
-                    {
-                        DrawEnhancedColumn(column);
-                        column.Update();
-
-                        // Reset if off-screen
-                        if (column.Y > _canvas.Height + column.Length * charHeight)
-                        {
-                            column.Y = -_random.Next(50, 800);
-                            column.Speed = _random.Next(MinSpeed, MaxSpeed);
-                            column.Length = _random.Next(MinLength, MaxLength);
-                            column.Brightness = (byte)_random.Next(150, 255);
-                            column.GlowEffect = _random.Next(100) < 35;
-                            column.Density = 0.5f + (float)_random.NextDouble() * 0.5f;
-                            column.RegenerateChars();
-                        }
-                    }
-
-                    // Dynamic column management based on density
-                    var targetColumns = Math.Max(1, (int)(columnCount * RainDensity));
-
-                    if (_columns.Count > targetColumns)
-                    {
-                        var toRemove = _columns.Count - targetColumns;
-                        for (var r = 0; r < toRemove && _columns.Count > targetColumns; r++)
-                        {
-                            var idx = _random.Next(_columns.Count);
-                            _columns.RemoveAt(idx);
-                        }
-                    }
-                    else if (_columns.Count < targetColumns)
-                    {
-                        var toAdd = Math.Min(5, targetColumns - _columns.Count);
-                        for (var a = 0; a < toAdd; a++)
-                        {
-                            var x = _random.Next(columnCount) * charWidth;
-
-                            _columns.Add(new RainColumn
-                            {
-                                X = x,
-                                Y = -_random.Next(50, 800),
-                                Speed = _random.Next(MinSpeed, MaxSpeed),
-                                Length = _random.Next(MinLength, MaxLength),
-                                CharWidth = charWidth,
-                                CharHeight = charHeight,
-                                Brightness = (byte)_random.Next(150, 255),
-                                GlowEffect = _random.Next(100) < 35,
-                                Density = 0.5f + (float)_random.NextDouble() * 0.5f
-                            });
-                        }
-                    }
-
-                    await Task.Delay(AnimationSpeed, ct);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected when cancellation is requested
-            }
-            finally
-            {
-                _canvas.Clear();
-                _columns.Clear();
-                IsRunning = false;
-            }
-        }, ct);
+        }
     }
 
-    public void Stop()
+    private void Put(int x, int y, SKColor c)
     {
-        if (!IsRunning) return;
+        var bb = BackBuffer;
+        if (bb != null && (uint)x < bb.Width && (uint)y < bb.Height) bb.SetPixel(x, y, c);
+    }
 
-        try
-        {
-            _cancellationTokenSource?.Cancel();
-            _animationTask?.Wait(TimeSpan.FromSeconds(2));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Console.WriteLine($"Error stopping Matrix rain: {ex.Message}");
-        }
-        finally
-        {
-            _cancellationTokenSource?.Dispose();
-            _cancellationTokenSource = null;
-            _animationTask = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            _canvas.Clear();
-            IsRunning = false;
-        }
+    private SKColor Get(int x, int y)
+    {
+        var bb = BackBuffer;
+        return bb != null && (uint)x < bb.Width && (uint)y < bb.Height ? bb.GetPixel(x, y) : SKColors.Black;
     }
 
     private void ApplyAdvancedFade()
     {
-        var maxY = _canvas.Height;
-        var maxX = _canvas.Width;
+        var maxY = Canvas.Height;
+        var maxX = Canvas.Width;
 
-        // Process every pixel, not every 2nd pixel, to avoid artifacts
-        for (var y = 0; y < maxY; y++)
-        for (var x = 0; x < maxX; x++)
-            try
+        // Every pixel fades a little per frame, bright trails slower than dim ones. Works on the pixel memory
+        // directly: GetPixel/SetPixel per pixel was the bulk of the frame time.
+        var bb = BackBuffer;
+        if (bb == null) return;
+        var pixels = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(bb.GetPixelSpan());
+        var stride = bb.RowBytes / 4;
+        var black = (uint)SKColors.Black;
+        for (var y = 0; y < maxY && y < bb.Height; y++)
+        {
+            var line = pixels.Slice(y * stride, Math.Min(maxX, bb.Width));
+            for (var x = 0; x < line.Length; x++)
             {
-                var pixel = _canvas.GetPixel(x, y);
-                if (pixel.Green > 0)
-                {
-                    // Consistent fade based on brightness level
-                    byte fadeAmount;
-                    if (pixel.Green > 180)
-                        fadeAmount = (byte)_random.Next(6, 10); // Very bright: slow fade
-                    else if (pixel.Green > 100)
-                        fadeAmount = (byte)_random.Next(10, 16); // Medium: moderate fade
-                    else
-                        fadeAmount = (byte)_random.Next(16, 24); // Dim: fast fade
+                var green = (byte)(line[x] >> 8); // BGRA in memory = ARGB as uint on little-endian
+                if (green == 0) continue;
+                byte fadeAmount;
+                if (green > 180)
+                    fadeAmount = (byte)_random.Next(6, 10); // Very bright: slow fade
+                else if (green > 100)
+                    fadeAmount = (byte)_random.Next(10, 16); // Medium: moderate fade
+                else
+                    fadeAmount = (byte)_random.Next(16, 24); // Dim: fast fade
 
-                    if (pixel.Green > fadeAmount)
-                    {
-                        var newGreen = (byte)(pixel.Green - fadeAmount);
-                        var newColor = new SKColor(0, newGreen, (byte)(newGreen * 0.12f));
-                        _canvas.SetPixel(x, y, newColor);
-                    }
-                    else
-                    {
-                        _canvas.SetPixel(x, y, SKColors.Black);
-                    }
+                if (green > fadeAmount)
+                {
+                    var g = (byte)(green - fadeAmount);
+                    line[x] = (uint)new SKColor(0, g, (byte)(g * 0.12f));
+                }
+                else
+                {
+                    line[x] = black;
                 }
             }
-            catch
-            {
-            }
+        }
+
+        bb.NotifyPixelsChanged();
     }
 
     private void DrawEnhancedColumn(RainColumn column)
@@ -266,8 +230,8 @@ public class MatrixExtension : IDisposable
         {
             var y = column.Y - i * column.CharHeight;
 
-            if (y + 7 < 0 || y >= _canvas.Height) continue;
-            if (column.X < 0 || column.X + 5 >= _canvas.Width) continue;
+            if (y + 7 < 0 || y >= Canvas.Height) continue;
+            if (column.X < 0 || column.X + 5 >= Canvas.Width) continue;
 
             // Movie-authentic gap pattern: occasional missing characters in trail
             var allowGap = RainDensity < 0.8f && i > 2;
@@ -367,9 +331,9 @@ public class MatrixExtension : IDisposable
                     var pixelX = x + gx + 2;
                     var pixelY = y + gy + 3;
 
-                    if (pixelX >= 0 && pixelX < _canvas.Width &&
-                        pixelY >= 0 && pixelY < _canvas.Height)
-                        _canvas.SetPixel(pixelX, pixelY, outerGlowColor);
+                    if (pixelX >= 0 && pixelX < Canvas.Width &&
+                        pixelY >= 0 && pixelY < Canvas.Height)
+                        Put(pixelX, pixelY, outerGlowColor);
                 }
 
             // Inner glow (brighter)
@@ -382,9 +346,9 @@ public class MatrixExtension : IDisposable
                 var pixelX = x + gx + 2;
                 var pixelY = y + gy + 3;
 
-                if (pixelX >= 0 && pixelX < _canvas.Width &&
-                    pixelY >= 0 && pixelY < _canvas.Height)
-                    _canvas.SetPixel(pixelX, pixelY, innerGlowColor);
+                if (pixelX >= 0 && pixelX < Canvas.Width &&
+                    pixelY >= 0 && pixelY < Canvas.Height)
+                    Put(pixelX, pixelY, innerGlowColor);
             }
         }
 
@@ -396,11 +360,11 @@ public class MatrixExtension : IDisposable
                 var pixelX = x + px;
                 var pixelY = y + py;
 
-                if (pixelX >= 0 && pixelX < _canvas.Width &&
-                    pixelY >= 0 && pixelY < _canvas.Height)
+                if (pixelX >= 0 && pixelX < Canvas.Width &&
+                    pixelY >= 0 && pixelY < Canvas.Height)
                 {
                     // Core pixel
-                    _canvas.SetPixel(pixelX, pixelY, color);
+                    Put(pixelX, pixelY, color);
 
                     // Increased bright spot chance for more shimmer
                     var brightChance = isHead ? 35 : 18;
@@ -411,7 +375,7 @@ public class MatrixExtension : IDisposable
                             (byte)Math.Min(255, color.Green * 1.2f),
                             (byte)Math.Min(255, color.Blue * 1.2f)
                         );
-                        _canvas.SetPixel(pixelX, pixelY, sparkleColor);
+                        Put(pixelX, pixelY, sparkleColor);
                     }
                 }
             }

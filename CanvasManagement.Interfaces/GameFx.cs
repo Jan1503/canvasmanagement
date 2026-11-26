@@ -234,17 +234,16 @@ public sealed class GameFx
     /// <summary>Soft additive round glow (pixel discs).</summary>
     public static void GlowDisc(SKCanvas c, float cx, float cy, float radius, SKColor color, float strength = 0.5f)
     {
-        using var p = new SKPaint { IsAntialias = false, BlendMode = SKBlendMode.Plus };
-        var r = (int)MathF.Ceiling(radius);
-        for (var y = -r; y <= r; y++)
-        for (var x = -r; x <= r; x++)
+        if (radius <= 0 || strength <= 0) return;
+        var mask = PixelSprites.Glow(Math.Max(1, (int)MathF.Round(radius * 4)));
+        var r = (mask.Width - 1) / 2;
+        // The mask holds (1-d)²; the paint's alpha supplies the strength.
+        using var p = new SKPaint
         {
-            var d = MathF.Sqrt(x * x + y * y) / radius;
-            if (d > 1) continue;
-            var a = strength * (1 - d) * (1 - d);
-            p.Color = color.WithAlpha((byte)Math.Clamp(a * 255, 0, 255));
-            c.DrawRect(MathF.Round(cx) + x, MathF.Round(cy) + y, 1, 1, p);
-        }
+            IsAntialias = false, BlendMode = SKBlendMode.Plus,
+            Color = color.WithAlpha((byte)Math.Clamp(strength * 255, 0, 255))
+        };
+        c.DrawImage(mask, MathF.Round(cx) - r, MathF.Round(cy) - r, PixelArt.Nearest, p);
     }
 
     public static void VerticalGradient(SKCanvas c, int w, int h, SKColor top, SKColor bottom, int y0 = 0, int y1 = -1)

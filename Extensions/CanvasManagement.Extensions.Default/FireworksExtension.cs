@@ -7,21 +7,17 @@ namespace CanvasManagement.Extensions.Default;
     "Colorful fireworks explosions with particles and gravity physics",
     "Visual Effects",
     IconResourceName = "fireworks.svg")]
-public class FireworksExtension : IDisposable
+public class FireworksExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
     private readonly List<Firework> _fireworks = new();
     private readonly Random _random = new();
-    private Task? _animationTask;
-    private SKBitmap? _backBuffer;
+    private readonly SKPaint _bgPaint = new() { Style = SKPaintStyle.Fill };
     private SKColor _backgroundColor = SKColors.Black;
-    private CancellationTokenSource? _cancellationTokenSource;
     private float _scale = 1f;
+    private int _frameCount;
 
-    internal FireworksExtension(ICanvas canvas)
+    internal FireworksExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
-        _scale = DisplayScale.GetScale(canvas.Width, canvas.Height);
     }
 
     [ExtensionParameter("Launch Interval", "Frames between firework launches (lower = more frequent)",
@@ -51,123 +47,70 @@ public class FireworksExtension : IDisposable
         get => _backgroundColor;
         set => _backgroundColor = value;
     }
-    public string Name => "Fireworks";
 
-    public bool IsRunning { get; private set; }
+    public override string Name => "Fireworks";
 
-    public void Dispose()
+    protected override double FrameIntervalMs => 33;
+
+    protected override bool ClearOnStop => false;
+
+    protected override void OnStart()
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        _frameCount = 0;
+        _fireworks.Clear();
     }
 
-    public void Start()
+    protected override void OnResize(int width, int height) => _scale = DisplayScale.GetScale(width, height);
+
+    protected override void OnStop()
     {
-        if (IsRunning) return;
+        _fireworks.Clear();
+        try { Canvas.Clear(); } catch { /* canvas already gone */ }
+    }
 
-        IsRunning = true;
-
-        // Create back buffer
-        _backBuffer?.Dispose();
-        _backBuffer = new SKBitmap(new SKImageInfo(_canvas.Width, _canvas.Height,
-            SKColorType.Bgra8888, SKAlphaType.Premul));
-
-        _cancellationTokenSource = new CancellationTokenSource();
-        var ct = _cancellationTokenSource.Token;
-
-        _animationTask = Task.Run(async () =>
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
+    {
+        // Background (supports transparency).
+        if (_backgroundColor.Alpha == 255)
         {
-            var frameCount = 0;
-
-            try
+            canvas.Clear(_backgroundColor);
+        }
+        else
+        {
+            canvas.Clear(SKColors.Transparent);
+            if (_backgroundColor.Alpha > 0)
             {
-                while (!ct.IsCancellationRequested)
-                {
-                    if (_backBuffer == null) break;
-
-                    // Render to back buffer
-                    using var canvas = new SKCanvas(_backBuffer);
-
-                    // Clear with background color (supports transparency)
-                    if (_backgroundColor.Alpha == 0)
-                    {
-                        canvas.Clear(SKColors.Transparent);
-                    }
-                    else if (_backgroundColor.Alpha == 255)
-                    {
-                        canvas.Clear(_backgroundColor);
-                    }
-                    else
-                    {
-                        canvas.Clear(SKColors.Transparent);
-                        using var bgPaint = new SKPaint { Color = _backgroundColor, Style = SKPaintStyle.Fill };
-                        canvas.DrawRect(0, 0, _canvas.Width, _canvas.Height, bgPaint);
-                    }
-
-                    if (frameCount++ % LaunchInterval == 0) LaunchFirework();
-
-                    for (var i = _fireworks.Count - 1; i >= 0; i--)
-                    {
-                        var firework = _fireworks[i];
-                        firework.Update();
-
-                        if (firework.IsDead())
-                            _fireworks.RemoveAt(i);
-                        else
-                            firework.Draw(canvas, _canvas.Width, _canvas.Height);
-                    }
-
-                    canvas.Flush();// Atomic submission
-                    _canvas.SubmitCompletedFrame(_backBuffer);
-
-                    await Task.Delay(33, ct); // ~30 FPS
-                }
+                _bgPaint.Color = _backgroundColor;
+                canvas.DrawRect(0, 0, width, height, _bgPaint);
             }
-            catch (OperationCanceledException)
-            {
-                // Expected when cancellation is requested
-            }
-            finally
-            {
-                _canvas.Clear();
-                _fireworks.Clear();
-                IsRunning = false;
-            }
-        }, ct);
+        }
+
+        if (_frameCount++ % Math.Max(1, LaunchInterval) == 0) LaunchFirework();
+
+        for (var i = _fireworks.Count - 1; i >= 0; i--)
+        {
+            var firework = _fireworks[i];
+            firework.Update();
+
+            if (firework.IsDead())
+                _fireworks.RemoveAt(i);
+            else
+                firework.Draw(canvas, width, height);
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing) _bgPaint.Dispose();
     }
 
     private void LaunchFirework()
     {
-        var x = _random.Next(_canvas.Width / 8, _canvas.Width * 7 / 8);
+        var x = _random.Next(Canvas.Width / 8, Canvas.Width * 7 / 8);
         var color = RandomColors ? SKColor.FromHsl(_random.Next(360), 100, 50) : SKColors.Red;
-        _fireworks.Add(new Firework(x, _canvas.Height, color, _random, ParticlesPerExplosion, MinSpeed, MaxSpeed,
+        _fireworks.Add(new Firework(x, Canvas.Height, color, _random, ParticlesPerExplosion, MinSpeed, MaxSpeed,
             _scale));
-    }
-
-    public void Stop()
-    {
-        if (!IsRunning) return;
-
-        try
-        {
-            _cancellationTokenSource?.Cancel();
-            _animationTask?.Wait(TimeSpan.FromSeconds(2));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Console.WriteLine($"Error stopping fireworks: {ex.Message}");
-        }
-        finally
-        {
-            _cancellationTokenSource?.Dispose();
-            _cancellationTokenSource = null;
-            _animationTask = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            _canvas.Clear();
-            IsRunning = false;
-        }
     }
 
     private class Firework

@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.Snake;
 
@@ -9,20 +7,12 @@ namespace CanvasManagement.Extension.Snake;
     "Classic snake — autopilot, or play with arrows / WASD in Studio",
     "Games",
     IconResourceName = "snake.svg")]
-public class SnakeExtension : IDisposable
+public class SnakeExtension : GameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _gameLock = new();
-
-    // Double buffering to prevent flicker
-    private SKBitmap? _backBuffer;
-
     private SKColor _backgroundColor = SKColors.Black;
     private Direction _direction = Direction.Right;
-    private bool _disposed;
     private Point _food;
     private bool _gameOver;
-    private Timer? _gameTimer;
     private int _gridSize = 20;
     private int _autoGridSize = 20;
     private int _appliedGridSize = -1;
@@ -32,10 +22,8 @@ public class SnakeExtension : IDisposable
 
     private readonly List<Point> _snake = new();
 
-    internal SnakeExtension(ICanvas canvas)
+    internal SnakeExtension(ICanvas canvas) : base(canvas, GameSong.Chill)
     {
-        _canvas = canvas;
-
         // Auto-fit the cell size so the play-field keeps a similar column count on any panel
         // (the 20px reference cell is sized for 384x192 and is too coarse on small displays).
         var s = DisplayScale.GetScale(canvas.Width, canvas.Height);
@@ -43,62 +31,30 @@ public class SnakeExtension : IDisposable
         _gridSize = _autoGridSize;
     }
 
-    public bool IsRunning { get; private set; }
+    public override string Name => "Snake Game";
+
+    /// <summary>Drawn at 30 fps; the snake moves Game Speed cells per second.</summary>
+    protected override double FrameIntervalMs => 1000.0 / 30;
+
+    protected override bool ClearOnStop => false;
+
+    private double _moves;
+    private double _restartAt = -1;
     public int Score { get; private set; }
 
-    public void Dispose()
+    protected override void OnStart()
     {
-        if (_disposed) return;
-        Stop();
-        _backBuffer?.Dispose();
-        _disposed = true;
-        GC.SuppressFinalize(this);
+        _human = false;
+        _moves = 0;
+        _restartAt = -1;
+        InitializeGame();
+        Console.WriteLine($"Snake started - Speed: {GameSpeed}, Grid: {GridSize}");
     }
 
-    public void Start()
+    protected override void OnStop()
     {
-        if (IsRunning) return;
-
-        lock (_gameLock)
-        {
-            _human = false;
-            InitializeGame();
-
-            // Create back buffer
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-
-            _gameTimer = new Timer(1000.0 / GameSpeed);
-            _gameTimer.Elapsed += OnGameTick;
-            _gameTimer.AutoReset = true;
-            _gameTimer.Start();
-
-            IsRunning = true;
-            Console.WriteLine($"Snake started - Speed: {GameSpeed}, Grid: {GridSize}");
-        }
-    }
-
-    public void Stop()
-    {
-        if (!IsRunning) return;
-
-        _gameTimer?.Stop();
-        _gameTimer?.Dispose();
-        _gameTimer = null;
-        _sound.Stop();
-
-        _backBuffer?.Dispose();
-        _backBuffer = null;
-
-        try
-        {
-            _canvas.Clear(BackgroundColor);
-        }
-        catch
-        {
-        }
-
-        IsRunning = false;
+        base.OnStop();
+        try { Canvas.Clear(BackgroundColor); } catch { /* canvas already gone */ }
         Console.WriteLine($"Snake stopped - Final Score: {Score}");
     }
 
@@ -107,8 +63,8 @@ public class SnakeExtension : IDisposable
         // GridSize 0 = auto-fit to the panel; otherwise honour the user's value.
         _gridSize = GridSize > 0 ? Math.Max(2, GridSize) : _autoGridSize;
         _appliedGridSize = GridSize;
-        var gridWidth = _canvas.Width / _gridSize;
-        var gridHeight = _canvas.Height / _gridSize;
+        var gridWidth = Canvas.Width / _gridSize;
+        var gridHeight = Canvas.Height / _gridSize;
 
         _snake.Clear();
         _snake.Add(new Point(gridWidth / 2, gridHeight / 2));
@@ -127,8 +83,8 @@ public class SnakeExtension : IDisposable
 
     private void PlaceFood()
     {
-        var gridWidth = _canvas.Width / _gridSize;
-        var gridHeight = _canvas.Height / _gridSize;
+        var gridWidth = Canvas.Width / _gridSize;
+        var gridHeight = Canvas.Height / _gridSize;
 
         do
         {
@@ -136,89 +92,74 @@ public class SnakeExtension : IDisposable
         } while (_snake.Contains(_food));
     }
 
-    private void OnGameTick(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        if (!IsRunning) return;
+        // The user changed the grid size, or the canvas size changed.
+        if (GridSize != _appliedGridSize) InitializeGame();
 
-        try
+        if (_restartAt >= 0 && Time >= _restartAt)
         {
-            _gameTimer?.Stop();
+            _restartAt = -1;
+            InitializeGame();
+        }
 
-            // Update grid size if the user changed the parameter.
-            if (GridSize != _appliedGridSize)
+        _moves = Math.Min(_moves + dt * Math.Max(1, GameSpeed), 3);
+        while (_moves >= 1)
+        {
+            _moves -= 1;
+            Move();
+        }
+
+        Draw(canvas);
+        Audio.Duck(_gameOver ? 0.35f : 1f);
+        Audio.Update();
+    }
+
+    protected override void OnResize(int width, int height)
+    {
+        var s = DisplayScale.GetScale(width, height);
+        _autoGridSize = Math.Max(2, (int)Math.Round(20 * s));
+        if (_snake.Count > 0) InitializeGame();
+    }
+
+    private void Move()
+    {
+        if (!_gameOver)
+        {
+            // AI decision
+            if (AutoPilot && !_human) _nextDirection = GetAIDirection();
+
+            // Apply direction change
+            if (!IsOppositeDirection(_nextDirection, _direction)) _direction = _nextDirection;
+
+            // Move snake
+            var newHead = GetNextPosition(_snake[0], _direction);
+
+            // Check collisions
+            if (CheckCollision(newHead))
             {
-                InitializeGame();
-                _backBuffer?.Dispose();
-                _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
+                _gameOver = true;
+                FxCrash();
+                Audio.Play(GameSfx.Hit, 0.7f);
+                Audio.Play(GameSfx.GameOver, 0.6f);
+                if (AutoRestart) _restartAt = Time + 2;
             }
-
-            // Update speed if changed
-            if (_gameTimer != null && Math.Abs(_gameTimer.Interval - 1000.0 / GameSpeed) > 0.1)
-                _gameTimer.Interval = 1000.0 / GameSpeed;
-
-            if (!_gameOver)
+            else
             {
-                // AI decision
-                if (AutoPilot && !_human) _nextDirection = GetAIDirection();
+                _snake.Insert(0, newHead);
 
-                // Apply direction change
-                if (!IsOppositeDirection(_nextDirection, _direction)) _direction = _nextDirection;
-
-                // Move snake
-                var newHead = GetNextPosition(_snake[0], _direction);
-
-                // Check collisions
-                if (CheckCollision(newHead))
+                // Check if food eaten
+                if (newHead == _food)
                 {
-                    _gameOver = true;
-                    FxCrash();
-                    _sound.Play(GameSfx.Hit, 0.7f);
-                    _sound.Play(GameSfx.GameOver, 0.6f);
-                    if (AutoRestart)
-                        Task.Delay(2000).ContinueWith(_ =>
-                        {
-                            if (IsRunning)
-                                lock (_gameLock)
-                                {
-                                    InitializeGame();
-                                }
-                        });
+                    Score += 10;
+                    FxEat(_food);
+                    Audio.Play(GameSfx.Eat, 0.6f, 0, 1f + Math.Min(_snake.Count, 40) * 0.01f);
+                    PlaceFood();
                 }
                 else
                 {
-                    _snake.Insert(0, newHead);
-
-                    // Check if food eaten
-                    if (newHead == _food)
-                    {
-                        Score += 10;
-                        FxEat(_food);
-                        _sound.Play(GameSfx.Eat, 0.6f, 0, 1f + Math.Min(_snake.Count, 40) * 0.01f);
-                        PlaceFood();
-                    }
-                    else
-                    {
-                        _snake.RemoveAt(_snake.Count - 1);
-                    }
+                    _snake.RemoveAt(_snake.Count - 1);
                 }
-            }
-
-            Render();
-            _sound.Duck(_gameOver ? 0.35f : 1f);
-            _sound.Update();
-
-            if (IsRunning && _gameTimer != null) _gameTimer.Start();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Snake tick error: {ex.Message}");
-            try
-            {
-                _gameTimer?.Start();
-            }
-            catch
-            {
-                Stop();
             }
         }
     }
@@ -262,8 +203,8 @@ public class SnakeExtension : IDisposable
 
     private Point GetNextPosition(Point current, Direction dir)
     {
-        var gridWidth = _canvas.Width / _gridSize;
-        var gridHeight = _canvas.Height / _gridSize;
+        var gridWidth = Canvas.Width / _gridSize;
+        var gridHeight = Canvas.Height / _gridSize;
 
         var next = dir switch
         {
@@ -298,8 +239,8 @@ public class SnakeExtension : IDisposable
 
     private bool CheckWallCollision(Point position)
     {
-        var gridWidth = _canvas.Width / _gridSize;
-        var gridHeight = _canvas.Height / _gridSize;
+        var gridWidth = Canvas.Width / _gridSize;
+        var gridHeight = Canvas.Height / _gridSize;
         return position.X < 0 || position.X >= gridWidth || position.Y < 0 || position.Y >= gridHeight;
     }
 
@@ -318,102 +259,83 @@ public class SnakeExtension : IDisposable
     private int _best;
     private int _shownScore;
 
-    /// <summary>
-    ///     Neon look: a dark glassy board with a faint dot grid, a continuous body whose colour runs from the
-    ///     head down the tail, a head with eyes that look where it goes, a glowing, pulsing fruit, sparks and
-    ///     a pop-up when it eats, and a shaking burst of the whole body when it crashes.
-    /// </summary>
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        if (_backBuffer == null) return;
+        var now = _clock.Elapsed.TotalSeconds;
+        var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
+        _lastRender = now;
+        _fx.Update(dt);
 
-        lock (_gameLock)
+        var w = Canvas.Width;
+        var h = Canvas.Height;
+        var g = _gridSize;
+        var cols = w / g;
+        var rows = h / g;
+        var ox = (w - cols * g) / 2;
+        var oy = (h - rows * g) / 2;
+        using var paint = new SKPaint { IsAntialias = false };
+
+        if (_backgroundColor.Alpha == 0) canvas.Clear(SKColors.Transparent);
+        else
         {
-            try
-            {
-                var now = _clock.Elapsed.TotalSeconds;
-                var dt = (float)Math.Clamp(now - _lastRender, 0.001, 0.1);
-                _lastRender = now;
-                _fx.Update(dt);
-
-                var w = _canvas.Width;
-                var h = _canvas.Height;
-                var g = _gridSize;
-                var cols = w / g;
-                var rows = h / g;
-                var ox = (w - cols * g) / 2;
-                var oy = (h - rows * g) / 2;
-                using var canvas = new SKCanvas(_backBuffer);
-                using var paint = new SKPaint { IsAntialias = false };
-
-                if (_backgroundColor.Alpha == 0) canvas.Clear(SKColors.Transparent);
-                else
-                {
-                    var bg = _backgroundColor == SKColors.Black ? new SKColor(8, 12, 22) : _backgroundColor;
-                    GameFx.VerticalGradient(canvas, w, h, GameFx.Shade(bg, 1.6f), GameFx.Shade(bg, 0.7f));
-                }
-
-                // Board: faint dots at cell corners and a soft frame.
-                if (ShowGrid)
-                {
-                    paint.Color = new SKColor(40, 60, 90);
-                    for (var x = 0; x <= cols; x++)
-                    for (var y = 0; y <= rows; y++)
-                        canvas.DrawRect(ox + x * g, oy + y * g, 1, 1, paint);
-                }
-
-                _fx.BeginShake(canvas);
-
-                // Fruit: pulsing glow, a round body with a shine and a leaf.
-                var fx = ox + _food.X * g + g / 2f;
-                var fy = oy + _food.Y * g + g / 2f;
-                var pulse = 0.5f + 0.5f * MathF.Sin(_fx.Time * 5);
-                GameFx.GlowDisc(canvas, fx, fy, g * (1.1f + 0.3f * pulse), FoodColor, 0.35f + 0.25f * pulse);
-                paint.Color = FoodColor;
-                PixelArt.Disc(canvas, paint, (int)fx, (int)fy, Math.Max(1, g / 2 - 2));
-                paint.Color = GameFx.Lerp(FoodColor, SKColors.White, 0.6f);
-                canvas.DrawRect((int)fx - g / 5, (int)fy - g / 5, Math.Max(1, g / 6), Math.Max(1, g / 6), paint);
-                paint.Color = new SKColor(80, 200, 70);
-                canvas.DrawRect((int)fx, (int)fy - g / 2 + 1, Math.Max(1, g / 5), Math.Max(1, g / 5), paint);
-
-                if (!(_gameOver && _wasOver && _fx.Time - _overAt > 0.15f))
-                    DrawSnake(canvas, paint, ox, oy, g);
-
-                _fx.DrawParticles(canvas);
-                _fx.EndShake(canvas);
-
-                // HUD
-                _best = Math.Max(_best, Score);
-                if (_shownScore < Score) _shownScore = Math.Min(Score, _shownScore + 2);
-                if (_shownScore > Score) _shownScore = Score;
-                var size = CanvasText.ResolveSize(FontSize, Math.Max(7f, h * 0.075f));
-                Text(canvas, $"{_shownScore}", 3, size + 1, size, SKColors.White, SKTextAlign.Left);
-                Text(canvas, $"HI {_best}", w - 3, size + 1, size, new SKColor(255, 200, 80), SKTextAlign.Right);
-
-                if (_gameOver)
-                {
-                    var overSize = CanvasText.ResolveSize(FontSize, Math.Max(10f, h * 0.12f));
-                    var blink = (int)(_fx.Time * 3) % 2 == 0;
-                    Text(canvas, "GAME OVER", w / 2f, h / 2f, overSize, blink ? new SKColor(255, 70, 70) : new SKColor(255, 160, 60),
-                        SKTextAlign.Center);
-                }
-
-                _fx.DrawOverlay(canvas, _canvas, w, h, Math.Max(7f, h * 0.07f));
-                _canvas.SubmitCompletedFrame(_backBuffer);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Render error: {ex.Message}");
-            }
+            var bg = _backgroundColor == SKColors.Black ? new SKColor(8, 12, 22) : _backgroundColor;
+            GameFx.VerticalGradient(canvas, w, h, GameFx.Shade(bg, 1.6f), GameFx.Shade(bg, 0.7f));
         }
+
+        // Board: faint dots at cell corners and a soft frame.
+        if (ShowGrid)
+        {
+            paint.Color = new SKColor(40, 60, 90);
+            for (var x = 0; x <= cols; x++)
+            for (var y = 0; y <= rows; y++)
+                canvas.DrawRect(ox + x * g, oy + y * g, 1, 1, paint);
+        }
+
+        _fx.BeginShake(canvas);
+
+        // Fruit: pulsing glow, a round body with a shine and a leaf.
+        var fx = ox + _food.X * g + g / 2f;
+        var fy = oy + _food.Y * g + g / 2f;
+        var pulse = 0.5f + 0.5f * MathF.Sin(_fx.Time * 5);
+        GameFx.GlowDisc(canvas, fx, fy, g * (1.1f + 0.3f * pulse), FoodColor, 0.35f + 0.25f * pulse);
+        paint.Color = FoodColor;
+        PixelArt.Disc(canvas, paint, (int)fx, (int)fy, Math.Max(1, g / 2 - 2));
+        paint.Color = GameFx.Lerp(FoodColor, SKColors.White, 0.6f);
+        canvas.DrawRect((int)fx - g / 5, (int)fy - g / 5, Math.Max(1, g / 6), Math.Max(1, g / 6), paint);
+        paint.Color = new SKColor(80, 200, 70);
+        canvas.DrawRect((int)fx, (int)fy - g / 2 + 1, Math.Max(1, g / 5), Math.Max(1, g / 5), paint);
+
+        if (!(_gameOver && _wasOver && _fx.Time - _overAt > 0.15f))
+            DrawSnake(canvas, paint, ox, oy, g);
+
+        _fx.DrawParticles(canvas);
+        _fx.EndShake(canvas);
+
+        // HUD
+        _best = Math.Max(_best, Score);
+        if (_shownScore < Score) _shownScore = Math.Min(Score, _shownScore + 2);
+        if (_shownScore > Score) _shownScore = Score;
+        var size = CanvasText.ResolveSize(FontSize, Math.Max(7f, h * 0.075f));
+        Text(canvas, $"{_shownScore}", 3, size + 1, size, SKColors.White, SKTextAlign.Left);
+        Text(canvas, $"HI {_best}", w - 3, size + 1, size, new SKColor(255, 200, 80), SKTextAlign.Right);
+
+        if (_gameOver)
+        {
+            var overSize = CanvasText.ResolveSize(FontSize, Math.Max(10f, h * 0.12f));
+            var blink = (int)(_fx.Time * 3) % 2 == 0;
+            Text(canvas, "GAME OVER", w / 2f, h / 2f, overSize, blink ? new SKColor(255, 70, 70) : new SKColor(255, 160, 60),
+                SKTextAlign.Center);
+        }
+
+        _fx.DrawOverlay(canvas, Canvas, w, h, Math.Max(7f, h * 0.07f));
     }
 
     private float _overAt;
 
     private void Text(SKCanvas c, string s, float x, float y, float size, SKColor color, SKTextAlign align)
     {
-        CanvasText.Draw(c, _canvas, s, new SKColor(0, 0, 0, 180), x + 1, y + 1, size, align, UseBdfFont);
-        CanvasText.Draw(c, _canvas, s, color, x, y, size, align, UseBdfFont);
+        CanvasText.Draw(c, Canvas, s, new SKColor(0, 0, 0, 180), x + 1, y + 1, size, align, UseBdfFont);
+        CanvasText.Draw(c, Canvas, s, color, x, y, size, align, UseBdfFont);
     }
 
     private void DrawSnake(SKCanvas canvas, SKPaint paint, int ox, int oy, int g)
@@ -509,8 +431,8 @@ public class SnakeExtension : IDisposable
     private void FxEat(Point food)
     {
         var g = _gridSize;
-        var ox = (_canvas.Width - _canvas.Width / g * g) / 2;
-        var oy = (_canvas.Height - _canvas.Height / g * g) / 2;
+        var ox = (Canvas.Width - Canvas.Width / g * g) / 2;
+        var oy = (Canvas.Height - Canvas.Height / g * g) / 2;
         var x = ox + food.X * g + g / 2f;
         var y = oy + food.Y * g + g / 2f;
         _fx.Burst(x, y, FoodColor, 16, 2f, 0.6f, 0.02f);
@@ -522,8 +444,8 @@ public class SnakeExtension : IDisposable
     private void FxCrash()
     {
         var g = _gridSize;
-        var ox = (_canvas.Width - _canvas.Width / g * g) / 2;
-        var oy = (_canvas.Height - _canvas.Height / g * g) / 2;
+        var ox = (Canvas.Width - Canvas.Width / g * g) / 2;
+        var oy = (Canvas.Height - Canvas.Height / g * g) / 2;
         for (var i = 0; i < _snake.Count; i++)
         {
             var s = _snake[i];
@@ -538,7 +460,7 @@ public class SnakeExtension : IDisposable
 
     private void Steer(Direction dir)
     {
-        lock (_gameLock)
+        lock (Sync)
         {
             _human = true;
             _nextDirection = dir;
@@ -562,27 +484,6 @@ public class SnakeExtension : IDisposable
     public void GoRight() => Steer(Direction.Right);
 
     #region Parameters
-
-    private GameSound? _snd;
-    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Chill);
-
-    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
-    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
-
-    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
-    public bool Music { get => _sound.Music; set => _sound.Music = value; }
-
-    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
-        MaxValue = 100, Order = 22)]
-    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
-
-    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
-        MaxValue = 100, Order = 23)]
-    public int MusicVolume
-    {
-        get => (int)MathF.Round(_sound.MusicVolume * 100);
-        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
-    }
 
     [ExtensionParameter("Game Speed", "Game speed (higher = faster)",
         DefaultValue = 7, MinValue = 1, MaxValue = 30)]

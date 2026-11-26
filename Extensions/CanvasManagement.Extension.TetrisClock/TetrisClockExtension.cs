@@ -11,7 +11,7 @@ namespace CanvasManagement.Extension.TetrisClock;
     "Animated falling Tetris blocks that form numbers - perfect for a retro-style clock",
     "Clocks",
     IconResourceName = "tetris.svg")]
-public class TetrisClockExtension : IDisposable
+public class TetrisClockExtension : FrameExtension
 {
     private const int TETRIS_Y_DROP_DEFAULT = 16;
 
@@ -31,22 +31,18 @@ public class TetrisClockExtension : IDisposable
         TetrisBlack
     };
 
-    private readonly ICanvas _canvas;
-
     private readonly DigitSlot[] _slots = [new(), new(), new(), new(), new(), new()];
     private readonly Random _random = new();
 
     // Pre-generated random color palette (eliminates SKColor allocations)
     private readonly SKColor[] _randomColorPalette = new SKColor[256];
     private int _animationDelay = 10;
-    private Task? _animationTask;
-    private SKBitmap? _backBuffer;
     private SKColor _backgroundColor = SKColors.Black;
 
     // Cached offset calculations
     private int _cachedOffset1, _cachedOffset2, _cachedOffset3;
 
-    private CancellationTokenSource? _cancellationTokenSource;
+    private string _lastTime = "";
     private int _clockX = 32;
     private int _clockY = 120;
     private SKColor _colonColor = TetrisCyan;
@@ -56,13 +52,11 @@ public class TetrisClockExtension : IDisposable
 
     private int _scale = 5;
     private bool _showColon = true;
-    private SKPaint? _fillPaint;
+    private readonly SKPaint _fillPaint = new() { Style = SKPaintStyle.Fill, IsAntialias = false };
     private SKCanvas? _draw;
 
-    internal TetrisClockExtension(ICanvas canvas)
+    internal TetrisClockExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
-
         // Pre-generate random color palette
         for (var i = 0; i < _randomColorPalette.Length; i++)
             _randomColorPalette[i] = new SKColor(
@@ -223,9 +217,12 @@ public class TetrisClockExtension : IDisposable
     /// <summary>
     ///     Gets whether the clock animation is currently running
     /// </summary>
-    public bool IsRunning { get; private set; }
 
-    public string Name => "Tetris Clock";
+    public override string Name => "Tetris Clock";
+
+    protected override double FrameIntervalMs => 16;
+
+    protected override bool ClearOnStop => false;
 
     [ExtensionParameter("Background Color", "Background color for the clock",
         DefaultValue = "#000000")]
@@ -234,95 +231,41 @@ public class TetrisClockExtension : IDisposable
         get => _backgroundColor;
         set => _backgroundColor = value;
     }
-    public void Dispose()
-    {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
-    }
 
-    public void Start()
+    protected override void OnStart()
     {
-        if (IsRunning) return;
-
-        IsRunning = true;
         foreach (var s in _slots) s.Reset();
-
-        _backBuffer?.Dispose();
-        _backBuffer = new SKBitmap(new SKImageInfo(_canvas.Width, _canvas.Height,
-            SKColorType.Bgra8888, SKAlphaType.Premul));
-        _fillPaint?.Dispose();
-        _fillPaint = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = false };
-
-        _cancellationTokenSource = new CancellationTokenSource();
-        var ct = _cancellationTokenSource.Token;
-
-        _animationTask = Task.Run(async () =>
-        {
-            try
-            {
-                var lastTime = "";
-                var lastTick = Environment.TickCount64;
-                while (!ct.IsCancellationRequested)
-                {
-                    var currentTime = DateTime.Now.ToString("HHmmss");
-                    if (currentTime != lastTime)
-                    {
-                        SyncDigits(currentTime);
-                        lastTime = currentTime;
-                    }
-
-                    var now = Environment.TickCount64;
-                    var dt = (int)Math.Clamp(now - lastTick, 1, 50);
-                    lastTick = now;
-                    StepDigits(dt);
-                    RenderFrame();
-                    await Task.Delay(16, ct);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            finally
-            {
-                _canvas.Clear();
-                IsRunning = false;
-            }
-        }, ct);
+        _lastTime = "";
     }
 
-    public void Stop()
+    protected override void OnStop()
     {
-        if (!IsRunning) return;
+        try { Canvas.Clear(); } catch { /* canvas already gone */ }
+    }
 
-        try
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
+    {
+        var currentTime = DateTime.Now.ToString("HHmmss");
+        if (currentTime != _lastTime)
         {
-            _cancellationTokenSource?.Cancel();
-            _animationTask?.Wait(TimeSpan.FromSeconds(2));
+            SyncDigits(currentTime);
+            _lastTime = currentTime;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Console.WriteLine($"Error stopping extension: {ex.Message}");
-        }
-        finally
-        {
-            _cancellationTokenSource?.Dispose();
-            _cancellationTokenSource = null;
-            _animationTask = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            _fillPaint?.Dispose();
-            _fillPaint = null;
-            _canvas.Clear();
-            IsRunning = false;
-        }
+
+        StepDigits((int)Math.Clamp(dt * 1000, 1, 50));
+        DrawFrame(canvas);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing) _fillPaint.Dispose();
     }
 
     public void Refresh()
     {
-        foreach (var s in _slots) s.Reset();
         Stop();
-        Start();
+        Start(); // OnStart resets the digits
     }
 
     private void SyncDigits(string hhmmss)
@@ -360,12 +303,8 @@ public class TetrisClockExtension : IDisposable
         }
     }
 
-    private void RenderFrame()
+    private void DrawFrame(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null || _fillPaint == null) return;
-
-        using var canvas = new SKCanvas(bb);
         if (_backgroundColor.Alpha > 0)
             canvas.Clear(_backgroundColor);
         else
@@ -385,9 +324,6 @@ public class TetrisClockExtension : IDisposable
             DrawDigit(canvas, _slots[i], x, y);
             x += spacing;
         }
-
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private void DrawDigit(SKCanvas canvas, DigitSlot slot, int x, int yFinish)
@@ -460,8 +396,7 @@ public class TetrisClockExtension : IDisposable
 
     private void DrawColon(SKCanvas canvas, int x, int y, SKColor colonColor)
     {
-        if (_fillPaint == null) return;
-        _fillPaint.Color = colonColor;
+                _fillPaint.Color = colonColor;
         var colonSize = 2 * _scale;
         canvas.DrawRect(x, y - 9 * _scale, colonSize, colonSize, _fillPaint);
         canvas.DrawRect(x, y - 6 * _scale, colonSize, colonSize, _fillPaint);
@@ -476,7 +411,7 @@ public class TetrisClockExtension : IDisposable
 
     private void DrawShape(int xPos, int yPos, int scale, SKColor color)
     {
-        if (_draw == null || _fillPaint == null || color.Alpha == 0) return;
+        if (_draw == null || color.Alpha == 0) return;
         _fillPaint.Color = color;
         _draw.DrawRect(xPos, yPos, scale, scale, _fillPaint);
     }

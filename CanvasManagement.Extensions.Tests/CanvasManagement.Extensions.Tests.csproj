@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Smoke tests: every extension starts, renders, and stops cleanly at the wall sizes we ship. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CanvasManagement\CanvasManagement.csproj" />
+    <ProjectReference Include="..\CanvasManagement.BdfFontManager\CanvasManagement.BdfFontManager.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.AdvertisingDisplay\CanvasManagement.Extension.AdvertisingDisplay.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.AnalogClock\CanvasManagement.Extension.AnalogClock.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.AnimatedGifPlayer\CanvasManagement.Extension.AnimatedGifPlayer.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.Aquarium\CanvasManagement.Extension.Aquarium.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.AudioPlayer\CanvasManagement.Extension.AudioPlayer.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.BinaryClock\CanvasManagement.Extension.BinaryClock.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.BomberMaze\CanvasManagement.Extension.BomberMaze.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.BubblePop\CanvasManagement.Extension.BubblePop.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.DigitalClock\CanvasManagement.Extension.DigitalClock.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.DinoRunner\CanvasManagement.Extension.DinoRunner.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.FallingSand\CanvasManagement.Extension.FallingSand.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.FlappyBird\CanvasManagement.Extension.FlappyBird.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.FlipClock\CanvasManagement.Extension.FlipClock.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.FruitFall\CanvasManagement.Extension.FruitFall.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.GameOfLife\CanvasManagement.Extension.GameOfLife.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.HomeAssistant\CanvasManagement.Extension.HomeAssistant.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.LAV1StreamPlayer\CanvasManagement.Extension.LAV1StreamPlayer.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.LavaLamp\CanvasManagement.Extension.LavaLamp.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.NetworkStreamPlayer\CanvasManagement.Extension.NetworkStreamPlayer.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.NewsTicker\CanvasManagement.Extension.NewsTicker.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.NowPlaying\CanvasManagement.Extension.NowPlaying.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.PacMan\CanvasManagement.Extension.PacMan.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.PixelPlumber\CanvasManagement.Extension.PixelPlumber.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.Pong\CanvasManagement.Extension.Pong.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.Quake3Screensaver\CanvasManagement.Extension.Quake3Screensaver.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.RainbowBreakout\CanvasManagement.Extension.RainbowBreakout.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.ScrollTextPlayer\CanvasManagement.Extension.ScrollTextPlayer.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.Sky\CanvasManagement.Extension.Sky.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.SlideShowPlayer\CanvasManagement.Extension.SlideShowPlayer.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.Snake\CanvasManagement.Extension.Snake.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.SpaceInvaders\CanvasManagement.Extension.SpaceInvaders.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.Starfield\CanvasManagement.Extension.Starfield.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.StreetCrosser\CanvasManagement.Extension.StreetCrosser.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.TetrisClock\CanvasManagement.Extension.TetrisClock.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.Tetris\CanvasManagement.Extension.Tetris.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.Trailer\CanvasManagement.Extension.Trailer.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.TurboKart\CanvasManagement.Extension.TurboKart.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.VLCPlayer\CanvasManagement.Extension.VLCPlayer.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.Weather\CanvasManagement.Extension.Weather.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.WordClock\CanvasManagement.Extension.WordClock.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extension.YouTubePlayer\CanvasManagement.Extension.YouTubePlayer.csproj" />
+    <ProjectReference Include="..\Extensions\CanvasManagement.Extensions.Default\CanvasManagement.Extensions.Default.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

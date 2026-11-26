@@ -1,9 +1,7 @@
 using System.Globalization;
-using System.Timers;
 using CanvasManagement.BdfFontManager;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.DigitalClock;
 
@@ -25,17 +23,12 @@ public enum ClockLocale { German, English }
     "Flexible digital clock (12/24h, date, seven-segment, glow, colour cycle)",
     "Clock",
     IconResourceName = "digital-clock.svg")]
-public class DigitalClockExtension : ICanvasExtension, IDisposable
+public class DigitalClockExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private float _scale = 1f;
 
-    internal DigitalClockExtension(ICanvas canvas)
+    internal DigitalClockExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     // ── Time ────────────────────────────────────────────────────────────────
@@ -129,56 +122,17 @@ public class DigitalClockExtension : ICanvasExtension, IDisposable
         Order = 44)]
     public bool PulseOnSecond { get; set; }
 
-    public string Name => "Digital Clock";
-    public bool IsRunning { get; private set; }
+    public override string Name => "Digital Clock";
+    protected override double FrameIntervalMs => 100;
 
-    public void Dispose()
+    protected override void OnStart()
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        _scale = DisplayScale.GetScale(Canvas.Width, Canvas.Height);
     }
 
-    public void Start()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _scale = DisplayScale.GetScale(_canvas.Width, _canvas.Height);
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-
-            _timer = new Timer(100) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try { Render(); }
-            catch (Exception ex) { Console.WriteLine($"[DigitalClock] render: {ex.Message}"); }
-        }
+        Draw(canvas);
     }
 
     // ── Presets ─────────────────────────────────────────────────────────────
@@ -238,12 +192,9 @@ public class DigitalClockExtension : ICanvasExtension, IDisposable
     }
 
     // ── Render ──────────────────────────────────────────────────────────────
-    private void Render()
+    private void Draw(SKCanvas canvas)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
-
-        using var c = new SKCanvas(bb);
+        var c = canvas;
         c.Clear(BackgroundColor);
 
         var now = DateTime.Now.AddMinutes(TimeZoneOffsetMinutes);
@@ -255,7 +206,7 @@ public class DigitalClockExtension : ICanvasExtension, IDisposable
         var time = showTime ? BuildTime(now) : null;
         var date = ShowDate ? BuildDate(now) : null;
 
-        float w = _canvas.Width, h = _canvas.Height;
+        float w = Canvas.Width, h = Canvas.Height;
         var innerX = (float)PaddingX;
         var innerY = (float)PaddingY;
         var innerW = Math.Max(4f, w - 2 * PaddingX);
@@ -305,7 +256,6 @@ public class DigitalClockExtension : ICanvasExtension, IDisposable
         }
 
         c.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private string BuildTime(DateTime now)
@@ -378,8 +328,8 @@ public class DigitalClockExtension : ICanvasExtension, IDisposable
 
         if (UseBdfFont)
         {
-            var fontName = _canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
-            using var bmp = _canvas.RenderBdfTextToBitmap(text, color, fontName);
+            var fontName = Canvas.GetBestBdfFontForHeight(Math.Max(5, (int)Math.Round(targetH)));
+            using var bmp = Canvas.RenderBdfTextToBitmap(text, color, fontName);
             if (bmp is not { Width: > 0, Height: > 0 }) return;
             var fitH = fit ? rh : targetH;
             var (dw, dh) = CanvasText.DestSize(bmp, fitH, rw);

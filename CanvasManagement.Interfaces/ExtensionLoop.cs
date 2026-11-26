@@ -7,14 +7,29 @@ namespace CanvasManagement.Interfaces;
 public sealed class ExtensionLoop : IDisposable
 {
     private readonly Func<CancellationToken, Task> _tick;
-    private readonly int _targetFps;
+    private readonly Func<double> _intervalMs;
+    private readonly FrameStats? _stats;
     private CancellationTokenSource? _cts;
     private Task? _task;
 
-    public ExtensionLoop(int targetFps, Func<CancellationToken, Task> tick)
+    /// <param name="stats">Optional: where to report how long each tick took (pass <c>canvas.Stats</c>).</param>
+    public ExtensionLoop(int targetFps, Func<CancellationToken, Task> tick, FrameStats? stats = null)
     {
-        _targetFps = Math.Clamp(targetFps, 1, 60);
+        var interval = 1000.0 / Math.Clamp(targetFps, 1, 60);
+        _intervalMs = () => interval;
         _tick = tick ?? throw new ArgumentNullException(nameof(tick));
+        _stats = stats;
+    }
+
+    /// <summary>
+    ///     A loop whose frame interval may change while it runs (a "Game Speed" parameter): read before every
+    ///     frame, clamped to 8 ms – 10 s.
+    /// </summary>
+    public ExtensionLoop(Func<double> intervalMs, Func<CancellationToken, Task> tick, FrameStats? stats = null)
+    {
+        _intervalMs = intervalMs ?? throw new ArgumentNullException(nameof(intervalMs));
+        _tick = tick ?? throw new ArgumentNullException(nameof(tick));
+        _stats = stats;
     }
 
     public bool IsRunning => _task is { IsCompleted: false };
@@ -40,10 +55,11 @@ public sealed class ExtensionLoop : IDisposable
 
     private async Task RunAsync(CancellationToken ct)
     {
-        var interval = TimeSpan.FromMilliseconds(1000.0 / _targetFps);
+        // Fixed schedule on the stopwatch: a slow tick does not push every later frame back.
+        var next = (double)System.Diagnostics.Stopwatch.GetTimestamp();
         while (!ct.IsCancellationRequested)
         {
-            var start = DateTime.UtcNow;
+            var start = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
                 await _tick(ct).ConfigureAwait(false);
@@ -56,11 +72,19 @@ public sealed class ExtensionLoop : IDisposable
             {
                 Console.WriteLine($"[LOOP] {ex.Message}");
             }
+            _stats?.RecordRender(System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds);
 
-            var delay = interval - (DateTime.UtcNow - start);
-            if (delay > TimeSpan.Zero)
+            double ms;
+            try { ms = Math.Clamp(_intervalMs(), 8, 10_000); }
+            catch { ms = 1000.0 / 30; }
+            var interval = System.Diagnostics.Stopwatch.Frequency * ms / 1000.0;
+            next += interval;
+            var now = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (now > next + interval) next = now; // fell behind: do not try to catch up with a burst
+            var wait = TimeSpan.FromSeconds((next - now) / System.Diagnostics.Stopwatch.Frequency);
+            if (wait > TimeSpan.Zero)
             {
-                try { await Task.Delay(delay, ct).ConfigureAwait(false); }
+                try { await Task.Delay(wait, ct).ConfigureAwait(false); }
                 catch (OperationCanceledException) { break; }
             }
         }

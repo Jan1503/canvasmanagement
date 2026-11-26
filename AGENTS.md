@@ -13,10 +13,11 @@ Filters/
 ## Contract
 
 - Discovery is `[ExtensionInfo]` on a non-abstract class. Constructor **must** be `(ICanvas canvas)`.
-- Implement `ICanvasExtension` (`Name`, `IsRunning`, `Start`, `Stop`) and `IDisposable`.
-- Draw with SkiaSharp. Pixel text is BDF (`DrawBdfText`). `IsAntialias = false` on a 1:1 LED grid.
-- Read `canvas.Width` / `Height` every frame. Do not cache 256×128.
-- Prefer `ExtensionLoop` for animation (token, target fps, Stop/Dispose). Do not spin a raw `Task.Run` without cancellation.
+- Derive from `FrameExtension` (implements `ICanvasExtension` and `IDisposable`): override `Name`, `Render(canvas, w, h, dt)` and as needed `FrameIntervalMs`, `OnStart`, `OnStop`, `OnResize`. It owns the loop, the back buffer (recreated on resize) and a clean Stop. Hooks run under `Sync`; take it in input methods. No `System.Timers.Timer` or raw `Task.Run` render loops.
+- Only an extension that cannot draw frames on a schedule (a video decoder, a stream) implements `ICanvasExtension` itself, with `ExtensionLoop` or its own pipeline.
+- Draw with SkiaSharp. Pixel text is BDF (`CanvasText`). `IsAntialias = false` on a 1:1 LED grid.
+- Read the size every frame (`Render` gets it). Do not cache 256×128.
+- Sprites, discs and glows: `PixelArt.Blit/Disc/Ring`, `GameFx.GlowDisc` (cached images). Never one `DrawRect` per pixel in a frame; no `new SKPaint` per frame in hot paths.
 - Filters run **inside** the compositor lock — a slow filter drops the whole wall.
 
 Full recipe: [docs/EXTENSIONS.md](docs/EXTENSIONS.md), [docs/FILTERS.md](docs/FILTERS.md).
@@ -39,7 +40,10 @@ Do not flash firmware. Do not commit the tar.
 
 ```powershell
 dotnet test D:\Development\RGB-Display\CanvasManagement\CanvasManagement.Tests\CanvasManagement.Tests.csproj
+dotnet test D:\Development\RGB-Display\CanvasManagement\CanvasManagement.Extensions.Tests -c Release
 ```
+
+The second is the smoke test of every extension (two sizes, ~6 min). `tools/ExtensionPreview` renders an extension to PNG sheets and prints fps, render time, CPU and allocations.
 
 ## Do not
 

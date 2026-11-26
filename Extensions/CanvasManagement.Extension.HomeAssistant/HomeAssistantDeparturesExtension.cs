@@ -1,8 +1,6 @@
 using System.Globalization;
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.HomeAssistant;
 
@@ -16,16 +14,10 @@ public enum HaDepartTimeStyle { Minutes, Clock }
     "HVV / HAFAS departure board: line badge, destination, countdown",
     "Information",
     IconResourceName = "home-assistant.svg")]
-public class HomeAssistantDeparturesExtension : ICanvasExtension, IDisposable
+public class HomeAssistantDeparturesExtension : FrameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
-
-    internal HomeAssistantDeparturesExtension(ICanvas canvas)
+    internal HomeAssistantDeparturesExtension(ICanvas canvas) : base(canvas)
     {
-        _canvas = canvas;
     }
 
     [ExtensionParameter("Entity ID",
@@ -72,66 +64,20 @@ public class HomeAssistantDeparturesExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Background Color", "Background (alpha 0 for overlay)", DefaultValue = "#101418", Order = 13)]
     public SKColor BackgroundColor { get; set; } = new(16, 20, 24);
 
-    public string Name => "HA Departures";
-    public bool IsRunning { get; private set; }
+    public override string Name => "HA Departures";
+    protected override double FrameIntervalMs => 1000;
 
-    public void Dispose()
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
+        Draw(canvas);
     }
 
-    public void Start()
+    private void Draw(SKCanvas canvas)
     {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(1000) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-            try { Render(); }
-            catch (Exception ex) { Console.WriteLine($"[HA Departures] render: {ex.Message}"); }
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); }
-            catch { }
-        }
-    }
-
-    private void OnTick(object? sender, ElapsedEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (!IsRunning || _backBuffer == null) return;
-            try { Render(); }
-            catch (Exception ex) { Console.WriteLine($"[HA Departures] {ex.Message}"); }
-        }
-    }
-
-    private void Render()
-    {
-        var bb = _backBuffer;
-        if (bb == null) return;
-        using var c = new SKCanvas(bb);
+        var c = canvas;
         c.Clear(BackgroundColor);
 
-        float w = _canvas.Width, h = _canvas.Height;
+        float w = Canvas.Width, h = Canvas.Height;
         var pad = Math.Max(2f, Math.Min(w, h) * 0.03f);
         var header = ShowStation ? (string.IsNullOrWhiteSpace(Station)
             ? (HomeAssistantBridge.TryGet(EntityId, out var st) ? st.FriendlyName ?? st.EntityId : "")
@@ -146,7 +92,7 @@ public class HomeAssistantDeparturesExtension : ICanvasExtension, IDisposable
 
         if (headerH > 0)
         {
-            HaText.Draw(c, _canvas, header!, LabelColor, pad, 0, w - pad * 2, headerH,
+            HaText.Draw(c, Canvas, header!, LabelColor, pad, 0, w - pad * 2, headerH,
                 ValueSize > 0 ? ValueSize * 0.85f : headerH * 0.7f, HaText.ToSk(Align), UseBdfFont,
                 shrinkToWidth: false);
         }
@@ -154,10 +100,9 @@ public class HomeAssistantDeparturesExtension : ICanvasExtension, IDisposable
         if (rows.Count == 0)
         {
             var msg = HomeAssistantBridge.Connected ? "No departures" : "HA offline";
-            HaText.Draw(c, _canvas, msg, LabelColor, pad, headerH, w - pad * 2, Math.Max(12f, h - headerH),
+            HaText.Draw(c, Canvas, msg, LabelColor, pad, headerH, w - pad * 2, Math.Max(12f, h - headerH),
                 Math.Max(10f, (h - headerH) * 0.28f), HaText.ToSk(Align), UseBdfFont, shrinkToWidth: false);
             c.Flush();
-            _canvas.SubmitCompletedFrame(bb);
             return;
         }
 
@@ -181,23 +126,22 @@ public class HomeAssistantDeparturesExtension : ICanvasExtension, IDisposable
             var timeW = Math.Max(28f, w * 0.22f);
             var destW = Math.Max(8f, w - x - timeW - pad);
             var destColor = d.Cancelled ? DelayColor : LabelColor;
-            HaText.Draw(c, _canvas, dest, destColor, x, y, destW, rowH, textH, align, UseBdfFont,
+            HaText.Draw(c, Canvas, dest, destColor, x, y, destW, rowH, textH, align, UseBdfFont,
                 shrinkToWidth: false);
 
             var timeColor = d.Cancelled ? DelayColor : ValueColor;
-            HaText.Draw(c, _canvas, timeText, timeColor, w - pad - timeW, y, timeW, rowH, textH,
+            HaText.Draw(c, Canvas, timeText, timeColor, w - pad - timeW, y, timeW, rowH, textH,
                 SKTextAlign.Right, UseBdfFont, shrinkToWidth: false);
 
             if (ShowDelay && !d.Cancelled && d.DelayMin >= 2)
             {
                 var delay = $"+{d.DelayMin}";
-                HaText.Draw(c, _canvas, delay, DelayColor, w - pad - timeW, y + rowH * 0.55f, timeW, rowH * 0.4f,
+                HaText.Draw(c, Canvas, delay, DelayColor, w - pad - timeW, y + rowH * 0.55f, timeW, rowH * 0.4f,
                     Math.Max(6f, textH * 0.7f), SKTextAlign.Right, UseBdfFont, shrinkToWidth: false);
             }
         }
 
         c.Flush();
-        _canvas.SubmitCompletedFrame(bb);
     }
 
     private string FormatTime(HaDeparture d)

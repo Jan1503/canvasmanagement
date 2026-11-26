@@ -1,7 +1,5 @@
-using System.Timers;
 using CanvasManagement.Interfaces;
 using SkiaSharp;
-using Timer = System.Timers.Timer;
 
 namespace CanvasManagement.Extension.FruitFall;
 
@@ -12,16 +10,12 @@ namespace CanvasManagement.Extension.FruitFall;
     "Catch the rainbow fruit — Left/Right, or autopilot",
     "Games",
     IconResourceName = "fruit-fall.svg")]
-public class FruitFallExtension : ICanvasExtension, IDisposable
+public class FruitFallExtension : GameExtension
 {
-    private readonly ICanvas _canvas;
-    private readonly object _lock = new();
     private readonly Random _random = new();
     private readonly List<Fall> _falls = new();
     private readonly List<Spark> _sparks = new();
 
-    private SKBitmap? _backBuffer;
-    private Timer? _timer;
     private int _px = 2;
     private int _frame;
     private float _bx, _bw, _by, _spd;
@@ -30,7 +24,7 @@ public class FruitFallExtension : ICanvasExtension, IDisposable
     private int _score, _best, _lives, _combo, _spawn;
     private int _crashTimer;
 
-    internal FruitFallExtension(ICanvas canvas) => _canvas = canvas;
+    internal FruitFallExtension(ICanvas canvas) : base(canvas, GameSong.Chill) { }
 
     [ExtensionParameter("Game Speed", "Frame interval in milliseconds (lower = faster)", DefaultValue = 22,
         MinValue = 14, MaxValue = 50, Unit = "ms", Order = 1)]
@@ -53,115 +47,46 @@ public class FruitFallExtension : ICanvasExtension, IDisposable
     [ExtensionParameter("Auto Pilot", "AI catches until you press a key in Studio", DefaultValue = true, Order = 6)]
     public bool AutoPilot { get; set; } = true;
 
-    private GameSound? _snd;
-    private GameSound _sound => _snd ??= new GameSound(_canvas, GameSong.Chill);
+    public override string Name => "Fruit Fall";
+    protected override double FrameIntervalMs => GameSpeed;
 
-    [ExtensionParameter("Sound", "Sound effects on the audio board", DefaultValue = true, Order = 20)]
-    public bool Sound { get => _sound.Effects; set => _sound.Effects = value; }
-
-    [ExtensionParameter("Music", "Background music", DefaultValue = true, Order = 21)]
-    public bool Music { get => _sound.Music; set => _sound.Music = value; }
-
-    [ExtensionParameter("Volume", "How loud this game is on the audio board", DefaultValue = 70, MinValue = 0,
-        MaxValue = 100, Order = 22)]
-    public int Volume { get => (int)MathF.Round(_sound.Volume * 100); set => _sound.Volume = Math.Clamp(value, 0, 100) / 100f; }
-
-    [ExtensionParameter("Music Volume", "Music level relative to the effects", DefaultValue = 50, MinValue = 0,
-        MaxValue = 100, Order = 23)]
-    public int MusicVolume
+    protected override void OnStart()
     {
-        get => (int)MathF.Round(_sound.MusicVolume * 100);
-        set => _sound.MusicVolume = Math.Clamp(value, 0, 100) / 100f;
-    }
-
-    public string Name => "Fruit Fall";
-    public bool IsRunning { get; private set; }
-
-    public void Dispose()
-    {
-        Stop();
-        _backBuffer?.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    public void Start()
-    {
-        lock (_lock)
-        {
-            if (IsRunning) return;
-            _px = PixelArt.Scale(_canvas.Height);
-            _human = false;
-            _hold = 0;
-            _lives = 3;
-            _score = 0;
-            _combo = 0;
-            ResetBasket();
-            _bx = (_canvas.Width - _bw) / 2f;
-            _falls.Clear();
-            _sparks.Clear();
-            _spawn = 0;
-            _crashTimer = 0;
-            _backBuffer?.Dispose();
-            _backBuffer = new SKBitmap(_canvas.Width, _canvas.Height);
-            _timer = new Timer(GameSpeed) { AutoReset = true };
-            _timer.Elapsed += OnTick;
-            _timer.Start();
-            IsRunning = true;
-        }
-    }
-
-    public void Stop()
-    {
-        lock (_lock)
-        {
-            if (!IsRunning) return;
-            IsRunning = false;
-            _timer?.Stop();
-            _timer?.Dispose();
-            _timer = null;
-            _sound.Stop();
-            _backBuffer?.Dispose();
-            _backBuffer = null;
-            try { _canvas.Clear(SKColors.Black); } catch { }
-        }
+        _px = PixelArt.Scale(Canvas.Height);
+        _human = false;
+        _hold = 0;
+        _lives = 3;
+        _score = 0;
+        _combo = 0;
+        ResetBasket();
+        _bx = (Canvas.Width - _bw) / 2f;
+        _falls.Clear();
+        _sparks.Clear();
+        _spawn = 0;
+        _crashTimer = 0;
     }
 
     private void ResetBasket()
     {
-        _bw = Math.Max(16, _canvas.Width * 0.16f);
-        _by = _canvas.Height - Math.Max(10, 7 * _px);
+        _bw = Math.Max(16, Canvas.Width * 0.16f);
+        _by = Canvas.Height - Math.Max(10, 7 * _px);
         _spd = Math.Max(2.4f, (2.6f + Difficulty * 0.2f) * _px);
     }
 
-    private void OnTick(object? sender, ElapsedEventArgs e)
+    protected override void Render(SKCanvas canvas, int width, int height, float dt)
     {
-        lock (_lock)
+        if (_crashTimer > 0)
         {
-            if (!IsRunning || _backBuffer == null) return;
-            try
-            {
-                if (_timer != null && Math.Abs(_timer.Interval - GameSpeed) > 0.5) _timer.Interval = GameSpeed;
-                if (_crashTimer > 0)
-                {
-                    _crashTimer--;
-                    if (_crashTimer == 0)
-                    {
-                        if (_lives <= 0) { _lives = 3; _score = 0; _combo = 0; }
-                    }
-                }
-                else
-                    Update();
-
-                Render();
-                _sound.Duck(_crashTimer > 0 ? 0.35f : 1f);
-                _sound.Update();
-                _frame++;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[FruitFall] {ex.Message}");
-            }
+            _crashTimer--;
+            if (_crashTimer == 0 && _lives <= 0) { _lives = 3; _score = 0; _combo = 0; }
         }
+        else
+            Update();
+
+        Draw(canvas, dt);
+        Audio.Duck(_crashTimer > 0 ? 0.35f : 1f);
+        Audio.Update();
+        _frame++;
     }
 
     private void Update()
@@ -170,7 +95,7 @@ public class FruitFallExtension : ICanvasExtension, IDisposable
         var want = 0;
         if (AutoPilot && !_human) RunAi(out want);
         else want = _hold;
-        _bx = Math.Clamp(_bx + want * _spd, 0, _canvas.Width - _bw);
+        _bx = Math.Clamp(_bx + want * _spd, 0, Canvas.Width - _bw);
 
         _spawn--;
         if (_spawn <= 0)
@@ -192,11 +117,11 @@ public class FruitFallExtension : ICanvasExtension, IDisposable
                     _lives--;
                     _combo = 0;
                     Burst(f.X, f.Y, new SKColor(255, 60, 40));
-                    _sound.Play(GameSfx.Explode, 0.7f);
+                    Audio.Play(GameSfx.Explode, 0.7f);
                     _gfx.Burst(f.X, f.Y, new SKColor(255, 150, 40), 24, 2.6f, 0.7f, 0.05f);
                     _gfx.Flash(new SKColor(255, 60, 30), 0.5f);
                     _gfx.Shake(4);
-                    if (_lives <= 0) _sound.Play(GameSfx.GameOver, 0.6f);
+                    if (_lives <= 0) Audio.Play(GameSfx.GameOver, 0.6f);
                     if (_lives <= 0) _crashTimer = 40;
                 }
                 else
@@ -204,7 +129,7 @@ public class FruitFallExtension : ICanvasExtension, IDisposable
                     _combo++;
                     _score += (f.Kind == 6 ? 50 : 10) * Math.Min(8, 1 + _combo / 4);
                     // The pitch climbs with the combo.
-                    _sound.Play(f.Kind == 6 ? GameSfx.PowerUp : GameSfx.Coin, 0.55f, (f.X / _canvas.Width) * 2 - 1,
+                    Audio.Play(f.Kind == 6 ? GameSfx.PowerUp : GameSfx.Coin, 0.55f, (f.X / Canvas.Width) * 2 - 1,
                         1f + Math.Min(_combo, 16) * 0.03f, 20);
                     _gfx.Burst(f.X + f.S / 2, f.Y, f.Kind == 6 ? new SKColor(255, 230, 70) : SKColors.White, 8, 1.6f, 0.4f, 0, true);
                     if (_combo > 1 && _combo % 5 == 0)
@@ -225,7 +150,7 @@ public class FruitFallExtension : ICanvasExtension, IDisposable
                 continue;
             }
 
-            if (f.Y > _canvas.Height)
+            if (f.Y > Canvas.Height)
             {
                 if (f.Kind != 0) { _combo = 0; _lives = Math.Max(0, _lives); }
                 _falls.RemoveAt(i);
@@ -251,7 +176,7 @@ public class FruitFallExtension : ICanvasExtension, IDisposable
         var s = 12;
         _falls.Add(new Fall
         {
-            X = 4 + _random.Next(Math.Max(4, _canvas.Width - 10)),
+            X = 4 + _random.Next(Math.Max(4, Canvas.Width - 10)),
             Y = -s,
             S = s,
             Kind = kind,
@@ -268,7 +193,7 @@ public class FruitFallExtension : ICanvasExtension, IDisposable
         {
             if (f.Kind == 0)
             {
-                if (f.X + f.S > _bx && f.X < _bx + _bw && f.Y > _canvas.Height * 0.45f)
+                if (f.X + f.S > _bx && f.X < _bx + _bw && f.Y > Canvas.Height * 0.45f)
                 {
                     want = f.X + f.S / 2f < _bx + _bw / 2f ? 1 : -1;
                     return;
@@ -304,50 +229,42 @@ public class FruitFallExtension : ICanvasExtension, IDisposable
         Category = "Controls", KeyboardShortcut = "Left|A", Order = 1)]
     public void MoveLeft()
     {
-        lock (_lock) { _human = true; _hold = -1; }
+        lock (Sync) { _human = true; _hold = -1; }
     }
 
     [ExtensionMethod("Move Right", "Hold right — takes over from autopilot",
         Category = "Controls", KeyboardShortcut = "Right|D", Order = 2)]
     public void MoveRight()
     {
-        lock (_lock) { _human = true; _hold = 1; }
+        lock (Sync) { _human = true; _hold = 1; }
     }
 
     [ExtensionMethod("Release Left", "Release left",
         Category = "Controls", KeyboardShortcut = "Left:up|A:up", Order = 3)]
     public void ReleaseLeft()
     {
-        lock (_lock) { if (_hold < 0) _hold = 0; }
+        lock (Sync) { if (_hold < 0) _hold = 0; }
     }
 
     [ExtensionMethod("Release Right", "Release right",
         Category = "Controls", KeyboardShortcut = "Right:up|D:up", Order = 4)]
     public void ReleaseRight()
     {
-        lock (_lock) { if (_hold > 0) _hold = 0; }
+        lock (Sync) { if (_hold > 0) _hold = 0; }
     }
 
     private readonly GameFx _gfx = new();
-    private readonly System.Diagnostics.Stopwatch _gclock = System.Diagnostics.Stopwatch.StartNew();
-    private double _glast;
 
-    private void Render()
+    private void Draw(SKCanvas canvas, float dt)
     {
-        var bb = _backBuffer;
-        if (bb == null) return;
-        var gnow = _gclock.Elapsed.TotalSeconds;
-        var gdt = (float)Math.Clamp(gnow - _glast, 0.001, 0.1);
-        _glast = gnow;
-        _gfx.Update(gdt);
-        using var canvas = new SKCanvas(bb);
+        _gfx.Update(dt);
         using (var sky = new SKPaint())
         {
             sky.Shader = SKShader.CreateLinearGradient(
-                new SKPoint(0, 0), new SKPoint(0, _canvas.Height),
+                new SKPoint(0, 0), new SKPoint(0, Canvas.Height),
                 new[] { new SKColor(80, 190, 255), new SKColor(40, 140, 70) },
                 SKShaderTileMode.Clamp);
-            canvas.DrawRect(0, 0, _canvas.Width, _canvas.Height, sky);
+            canvas.DrawRect(0, 0, Canvas.Width, Canvas.Height, sky);
         }
 
         using var paint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
@@ -366,27 +283,25 @@ public class FruitFallExtension : ICanvasExtension, IDisposable
         }
         // Leaves drifting down from the canopy.
         if (_frame % 12 == 0)
-            _gfx.Spark(_gfx.Rand(0, _canvas.Width), 0, _gfx.Rand(-0.3f, 0.3f), 0.4f, _gfx.Rand(0, 1) < 0.5f ? new SKColor(80, 170, 60) : new SKColor(200, 160, 50), 4f, 2, false, 0, null, 0);
+            _gfx.Spark(_gfx.Rand(0, Canvas.Width), 0, _gfx.Rand(-0.3f, 0.3f), 0.4f, _gfx.Rand(0, 1) < 0.5f ? new SKColor(80, 170, 60) : new SKColor(200, 160, 50), 4f, 2, false, 0, null, 0);
         _gfx.DrawParticles(canvas);
 
         if (ShowScore)
         {
-            var size = CanvasText.ResolveSize(FontSize, Math.Max(8f, _canvas.Height * 0.09f));
+            var size = CanvasText.ResolveSize(FontSize, Math.Max(8f, Canvas.Height * 0.09f));
             var combo = _combo >= 4 ? $"  x{_combo}" : "";
-            CanvasText.Draw(canvas, _canvas, $"{_score}{combo}  {_lives}", SKColors.White,
+            CanvasText.Draw(canvas, Canvas, $"{_score}{combo}  {_lives}", SKColors.White,
                 4, size + 1, size, SKTextAlign.Left, UseBdfFont);
         }
 
         if (_crashTimer > 0)
         {
-            var size = CanvasText.ResolveSize(FontSize, Math.Max(12f, _canvas.Height * 0.14f));
-            CanvasText.Draw(canvas, _canvas, "SPLAT", SKColors.White,
-                _canvas.Width / 2f, _canvas.Height * 0.45f, size, SKTextAlign.Center, UseBdfFont);
+            var size = CanvasText.ResolveSize(FontSize, Math.Max(12f, Canvas.Height * 0.14f));
+            CanvasText.Draw(canvas, Canvas, "SPLAT", SKColors.White,
+                Canvas.Width / 2f, Canvas.Height * 0.45f, size, SKTextAlign.Center, UseBdfFont);
         }
 
-        _gfx.DrawOverlay(canvas, _canvas, _canvas.Width, _canvas.Height, Math.Max(7f, _canvas.Height * 0.07f));
-        canvas.Flush();
-        _canvas.SubmitCompletedFrame(bb);
+        _gfx.DrawOverlay(canvas, Canvas, Canvas.Width, Canvas.Height, Math.Max(7f, Canvas.Height * 0.07f));
     }
 
     private static readonly string[] Apple =
@@ -473,7 +388,7 @@ public class FruitFallExtension : ICanvasExtension, IDisposable
     /// <summary>Sun, drifting clouds, a row of trees on a hill and grass under the basket.</summary>
     private void DrawScenery(SKCanvas c, SKPaint paint)
     {
-        int w = _canvas.Width, h = _canvas.Height;
+        int w = Canvas.Width, h = Canvas.Height;
         var px = Math.Max(1, (int)_px);
         var t = Environment.TickCount64 / 1000f;
 

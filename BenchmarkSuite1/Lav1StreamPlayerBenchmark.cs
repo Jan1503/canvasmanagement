@@ -6,9 +6,9 @@ namespace BenchmarkSuite1;
 [MemoryDiagnoser]
 public class Lav1StreamPlayerBenchmark
 {
-    private byte[] _rgbFrame;
-    private byte[] _bgraFrame;
-    private byte[] _destinationBuffer;
+    private byte[] _rgbFrame = null!;
+    private byte[] _bgraFrame = null!;
+    private byte[] _destinationBuffer = null!;
     private const int Width = 640;
     private const int Height = 480;
     private const int RgbSize = Width * Height * 3;
