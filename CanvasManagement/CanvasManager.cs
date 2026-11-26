@@ -557,107 +557,7 @@ public class CanvasManager : IDisposable
                     // Check cancellation again after acquiring lock
                     if (ct.IsCancellationRequested || _stopped) break;
 
-                    // PERFORMANCE: Rebuild the z-ordered snapshot only when the canvas set or
-                    // z-order changed, instead of allocating a sorted list every frame.
-                    if (_canvasesDirty)
-                    {
-                        _renderSnapshot.Clear();
-                        foreach (var canvas in GetCanvases.OrderBy(a => a.Key))
-                            _renderSnapshot.Add(canvas.Value);
-                        _canvasesDirty = false;
-                    }
-
-                    // PERFORMANCE: Copy all canvases (background -> foreground)
-                    for (var i = 0; i < _renderSnapshot.Count; i++)
-                        _renderSnapshot[i].CopyBackgroundToForeground();
-
-                    // Build the visible list into a reused buffer (no per-frame allocation)
-                    _visibleSnapshot.Clear();
-                    for (var i = 0; i < _renderSnapshot.Count; i++)
-                    {
-                        var canvas = _renderSnapshot[i];
-                        if (!canvas.IsHidden) _visibleSnapshot.Add(canvas);
-                    }
-
-                    if (_visibleSnapshot.Count != 0)
-                    {
-                        // PERFORMANCE OPTIMIZATION: Use unsafe direct pixel copy for single full-screen canvas
-                        if (_visibleSnapshot.Count == 1 &&
-                            _visibleSnapshot[0].XPos == 0 &&
-                            _visibleSnapshot[0].YPos == 0 &&
-                            _visibleSnapshot[0].Width == _mainCanvasBitmap.Width &&
-                            _visibleSnapshot[0].Height == _mainCanvasBitmap.Height)
-                        {
-                            // Fast path: Single full-screen canvas - direct memory copy
-                            var canvasBitmap = _visibleSnapshot[0].GetForegroundBitmap();
-                            unsafe
-                            {
-                                var src = (byte*)canvasBitmap.GetPixels();
-                                var dst = (byte*)_mainCanvasBitmap.GetPixels();
-                                var byteCount = _mainCanvasBitmap.Width * _mainCanvasBitmap.Height * 4;
-                                Buffer.MemoryCopy(src, dst, byteCount, byteCount);
-                            }
-                        }
-                        else
-                        {
-                            // Slow path: Multiple/positioned canvases. Layer them by each canvas's Opacity,
-                            // forcing the source opaque so content always shows (the LED display has no
-                            // real alpha and extension pixel-alpha is unreliable). A canvas with Opacity < 1
-                            // genuinely blends with what's beneath it.
-                            _mainCanvas.Clear(SKColors.Black);
-
-                            for (var i = 0; i < _visibleSnapshot.Count; i++)
-                            {
-                                var canvas = _visibleSnapshot[i];
-                                var canvasBitmap = canvas.GetForegroundBitmap();
-
-                                if (canvas.TransparentBackground)
-                                {
-                                    // Honour per-pixel alpha so transparent areas reveal the layer beneath.
-                                    if (canvas.Opacity >= 0.999f)
-                                    {
-                                        _mainCanvas.DrawBitmap(canvasBitmap, canvas.XPos, canvas.YPos,
-                                            _alphaCompositePaint);
-                                    }
-                                    else
-                                    {
-                                        using var p = MakeAlphaPaint(canvas.Opacity);
-                                        _mainCanvas.DrawBitmap(canvasBitmap, canvas.XPos, canvas.YPos, p);
-                                    }
-                                }
-                                else if (canvas.Opacity >= 0.999f)
-                                {
-                                    _mainCanvas.DrawBitmap(canvasBitmap, canvas.XPos, canvas.YPos,
-                                        _opaqueCompositePaint);
-                                }
-                                else
-                                {
-                                    using var p = MakeOpaquePaint(canvas.Opacity);
-                                    _mainCanvas.DrawBitmap(canvasBitmap, canvas.XPos, canvas.YPos, p);
-                                }
-                            }
-                        }
-                    }
-
-                    // Apply enabled filters (plain loop - no LINQ allocation per frame).
-                    // A filter must not be able to kill the render thread; disable it and keep drawing.
-                    for (var i = 0; i < _filters.Count; i++)
-                    {
-                        var filter = _filters[i];
-                        if (!filter.Enabled) continue;
-                        try
-                        {
-                            filter.Apply(_mainCanvasBitmap);
-                        }
-                        catch (Exception ex)
-                        {
-                            filter.Enabled = false;
-                            Console.WriteLine($"Filter '{filter.Name}' disabled after error: {ex.Message}");
-                        }
-                    }
-
-                    // Apply global brightness adjustment
-                    if (_brightness < 1.0f) ApplyBrightness(_mainCanvasBitmap, _brightness);
+                    ComposeFrame();
 
                     // Only fire event if not stopped.
                     // NOTE: kept inside the swap lock on purpose - the event hands the live
@@ -695,6 +595,122 @@ public class CanvasManager : IDisposable
             Console.WriteLine("Display refreshing stopped.");
         }, ct, TaskCreationOptions.LongRunning, TaskScheduler.Current);
     }
+
+    /// <summary>
+    ///     One frame of the compositor: snapshot the canvases, run each visible canvas's effects, layer them
+    ///     into the composite bitmap, run the wall-wide filters and the global brightness. Called by the render
+    ///     loop under the swap lock; tests call it directly.
+    /// </summary>
+    internal void ComposeFrame()
+    {
+        // PERFORMANCE: Rebuild the z-ordered snapshot only when the canvas set or
+        // z-order changed, instead of allocating a sorted list every frame.
+        if (_canvasesDirty)
+        {
+            _renderSnapshot.Clear();
+            foreach (var canvas in GetCanvases.OrderBy(a => a.Key))
+                _renderSnapshot.Add(canvas.Value);
+            _canvasesDirty = false;
+        }
+
+        // PERFORMANCE: Copy all canvases (background -> foreground)
+        for (var i = 0; i < _renderSnapshot.Count; i++)
+            _renderSnapshot[i].CopyBackgroundToForeground();
+
+        // Build the visible list into a reused buffer (no per-frame allocation); each visible canvas
+        // runs its own effect chain on its finished frame before it is layered.
+        _visibleSnapshot.Clear();
+        for (var i = 0; i < _renderSnapshot.Count; i++)
+        {
+            var canvas = _renderSnapshot[i];
+            if (canvas.IsHidden) continue;
+            canvas.ApplyFilters();
+            _visibleSnapshot.Add(canvas);
+        }
+
+        if (_visibleSnapshot.Count != 0)
+        {
+            // PERFORMANCE OPTIMIZATION: Use unsafe direct pixel copy for single full-screen canvas
+            if (_visibleSnapshot.Count == 1 &&
+                _visibleSnapshot[0].XPos == 0 &&
+                _visibleSnapshot[0].YPos == 0 &&
+                _visibleSnapshot[0].Width == _mainCanvasBitmap.Width &&
+                _visibleSnapshot[0].Height == _mainCanvasBitmap.Height)
+            {
+                // Fast path: Single full-screen canvas - direct memory copy
+                var canvasBitmap = _visibleSnapshot[0].GetForegroundBitmap();
+                unsafe
+                {
+                    var src = (byte*)canvasBitmap.GetPixels();
+                    var dst = (byte*)_mainCanvasBitmap.GetPixels();
+                    var byteCount = _mainCanvasBitmap.Width * _mainCanvasBitmap.Height * 4;
+                    Buffer.MemoryCopy(src, dst, byteCount, byteCount);
+                }
+            }
+            else
+            {
+                // Slow path: Multiple/positioned canvases. Layer them by each canvas's Opacity,
+                // forcing the source opaque so content always shows (the LED display has no
+                // real alpha and extension pixel-alpha is unreliable). A canvas with Opacity < 1
+                // genuinely blends with what's beneath it.
+                _mainCanvas.Clear(SKColors.Black);
+
+                for (var i = 0; i < _visibleSnapshot.Count; i++)
+                {
+                    var canvas = _visibleSnapshot[i];
+                    var canvasBitmap = canvas.GetForegroundBitmap();
+
+                    if (canvas.TransparentBackground)
+                    {
+                        // Honour per-pixel alpha so transparent areas reveal the layer beneath.
+                        if (canvas.Opacity >= 0.999f)
+                        {
+                            _mainCanvas.DrawBitmap(canvasBitmap, canvas.XPos, canvas.YPos,
+                                _alphaCompositePaint);
+                        }
+                        else
+                        {
+                            using var p = MakeAlphaPaint(canvas.Opacity);
+                            _mainCanvas.DrawBitmap(canvasBitmap, canvas.XPos, canvas.YPos, p);
+                        }
+                    }
+                    else if (canvas.Opacity >= 0.999f)
+                    {
+                        _mainCanvas.DrawBitmap(canvasBitmap, canvas.XPos, canvas.YPos,
+                            _opaqueCompositePaint);
+                    }
+                    else
+                    {
+                        using var p = MakeOpaquePaint(canvas.Opacity);
+                        _mainCanvas.DrawBitmap(canvasBitmap, canvas.XPos, canvas.YPos, p);
+                    }
+                }
+            }
+        }
+
+        // Apply enabled filters (plain loop - no LINQ allocation per frame).
+        // A filter must not be able to kill the render thread; disable it and keep drawing.
+        for (var i = 0; i < _filters.Count; i++)
+        {
+            var filter = _filters[i];
+            if (!filter.Enabled) continue;
+            try
+            {
+                filter.Apply(_mainCanvasBitmap);
+            }
+            catch (Exception ex)
+            {
+                filter.Enabled = false;
+                Console.WriteLine($"Filter '{filter.Name}' disabled after error: {ex.Message}");
+            }
+        }
+
+        // Apply global brightness adjustment
+        if (_brightness < 1.0f) ApplyBrightness(_mainCanvasBitmap, _brightness);
+    }
+
+    /// <summary>The composite bitmap (what the outputs get). For tests.</summary>
+    internal SKBitmap CompositeBitmap => _mainCanvasBitmap;
 
     /// <summary>
     ///     Applies brightness adjustment to a bitmap in-place

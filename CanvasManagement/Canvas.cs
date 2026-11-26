@@ -211,6 +211,43 @@ public class Canvas : ICanvas, IDisposable
 
     FrameStats? ICanvas.Stats => Stats;
 
+    // Effects of this canvas only. Replaced as a whole (copy-on-write), so the host can change the chain
+    // while the compositor reads it, without a lock.
+    private ICanvasFilter[] _filters = [];
+
+    /// <summary>
+    ///     Effects applied to this canvas only, in order, every frame before it is composited (so they never
+    ///     touch other layers). The wall-wide filters of <see cref="CanvasManager" /> still run on the result.
+    /// </summary>
+    public IReadOnlyList<ICanvasFilter> Filters => Volatile.Read(ref _filters);
+
+    /// <summary>Replaces this canvas's effect chain (order = apply order). An empty sequence removes all.</summary>
+    public void SetFilters(IEnumerable<ICanvasFilter> filters) => Volatile.Write(ref _filters, filters.ToArray());
+
+    /// <summary>
+    ///     Runs the effect chain on the finished frame (the foreground copy, never the buffer extensions draw
+    ///     into). A filter that throws is switched off, like a wall-wide one: it must not stop the render loop.
+    /// </summary>
+    internal void ApplyFilters()
+    {
+        var filters = Volatile.Read(ref _filters);
+        if (filters.Length == 0) return;
+        for (var i = 0; i < filters.Length; i++)
+        {
+            var filter = filters[i];
+            if (!filter.Enabled || filter.Intensity <= 0) continue;
+            try
+            {
+                filter.Apply(_canvasForegroundBitmap);
+            }
+            catch (Exception ex)
+            {
+                filter.Enabled = false;
+                Console.WriteLine($"Filter '{filter.Name}' on canvas '{Name}' disabled after error: {ex.Message}");
+            }
+        }
+    }
+
     /// <summary>
     ///     When true, the compositor blends this canvas over the layers beneath it honouring per-pixel alpha
     ///     (so a transparent background reveals what's underneath) instead of forcing it opaque. Opt-in per

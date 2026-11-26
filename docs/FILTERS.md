@@ -21,6 +21,14 @@ So:
 
 Image correction (gamma / white-balance) in verpixeld runs **after** this, in the host render loop — not inside CanvasManagement.
 
+### Per-canvas effects
+
+The same filter classes also run on **one canvas**: `Canvas.SetFilters(...)` gives a canvas its own chain, which the compositor applies to that canvas's finished frame (step 2, before it is layered), so it never touches other layers. The Studio inspector in verpixeld calls them “Effects” and stores them with the scene. Consequences for a filter:
+
+- `Apply` gets bitmaps of **different sizes** (a 64×32 overlay, then the full wall). Never cache by the first size; recreate buffers when `Width`/`Height` change.
+- One instance belongs to one chain. Copies (duplicating a canvas) are new instances, so keep animation state in fields, not statics.
+- The bitmap may have transparent pixels (a canvas with transparent background). Keep alpha as it is unless the effect is meant to change it.
+
 ## 2. Contract
 
 ```csharp
