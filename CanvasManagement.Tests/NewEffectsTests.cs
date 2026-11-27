@@ -173,11 +173,51 @@ public class NewEffectsTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void Digital_rain_finds_what_enters_the_picture_even_at_the_same_brightness()
+    {
+        // a plain grey room; then a block of the same brightness but another colour (a person in front of a
+        // camera): it must become an object, the rest of the room must not
+        var rain = new DigitalRainVisionFilter { Glow = 0 };
+        SKBitmap Frame(bool person)
+        {
+            var bmp = new SKBitmap(new SKImageInfo(96, 48, SKColorType.Bgra8888, SKAlphaType.Premul));
+            bmp.Erase(new SKColor(120, 120, 120));
+            if (person)
+            {
+                using var c = new SKCanvas(bmp);
+                using var paint = new SKPaint { Color = new SKColor(160, 110, 100) };
+                c.DrawRect(36, 8, 24, 40, paint);
+            }
+            return bmp;
+        }
+        for (var i = 0; i < 10; i++) { using var empty = Frame(false); rain.Apply(empty); Thread.Sleep(20); }
+        for (var i = 0; i < 10; i++) { using var present = Frame(true); rain.Apply(present); Thread.Sleep(20); }
+
+        Assert.True(rain.ObjectAt(48, 30) > 0.6f, $"the person should be an object, was {rain.ObjectAt(48, 30)}");
+        Assert.True(rain.ObjectAt(6, 30) < 0.2f, $"the empty room should not be, was {rain.ObjectAt(6, 30)}");
+    }
+
+    [Fact]
     public void Digital_rain_glyphs_are_neither_empty_nor_blocks()
     {
-        var glyphs = DigitalRainVisionFilter.MakeGlyphs(3, 5, new Random(1));
-        Assert.All(glyphs, g => Assert.InRange(System.Numerics.BitOperations.PopCount(g), 6, 10));
-        Assert.True(glyphs.Distinct().Count() > 20, "the set should be varied");
+        foreach (var small in new[] { false, true })
+        {
+            var glyphs = DigitalRainGlyphs.Build(small);
+            var (w, h) = small ? (3, 5) : (5, 7);
+            Assert.Equal(DigitalRainGlyphs.Count, glyphs.Length);
+            Assert.All(glyphs, g => Assert.InRange(System.Numerics.BitOperations.PopCount(g), 2, w * h - 1));
+            Assert.All(glyphs, g => Assert.Equal(0UL, g & ~MaskOf(w, h)));
+            Assert.True(glyphs.Distinct().Count() > (small ? 30 : 55), "the set should be varied");
+        }
+        Assert.InRange(DigitalRainGlyphs.PickTable().Count(i => i < DigitalRainGlyphs.KatakanaCount) * 1.0
+                       / DigitalRainGlyphs.PickTable().Length, 0.6, 0.85);
+
+        static ulong MaskOf(int w, int h)
+        {
+            ulong m = 0;
+            for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) m |= 1UL << (y * 8 + x);
+            return m;
+        }
     }
 
     [Fact]
