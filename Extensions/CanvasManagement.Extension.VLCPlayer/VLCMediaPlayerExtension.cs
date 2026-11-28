@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
 using CanvasManagement.Interfaces;
 using LibVLCSharp.Shared;
 using SkiaSharp;
@@ -159,6 +160,11 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable, ICa
     private volatile bool _isLoadingMedia = false; // Guard against concurrent LoadAndPlayMedia calls
 
     private LibVLC? _libVLC;
+
+    // RTSP without live555: FFmpeg pulls the stream and VLC reads it as MPEG-TS from a pipe.
+    private Process? _relay;
+    private StreamMediaInput? _relayInput;
+    private static bool? _hasLive555;
     private bool _loop;
     private MediaPlayer? _mediaPlayer;
 
@@ -565,6 +571,7 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable, ICa
         if (_mediaPlayer != null && IsRunning)
         {
             _mediaPlayer.Stop();
+            StopRelay();
             Console.WriteLine("[VLC] Playback stopped");
         }
     }
@@ -953,7 +960,11 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable, ICa
                 _mediaPlayer.Playing += (s, e) => Console.WriteLine("[VLC] Event: Playing");
                 _mediaPlayer.Paused += (s, e) => Console.WriteLine("[VLC] Event: Paused");
                 _mediaPlayer.Stopped += (s, e) => Console.WriteLine("[VLC] Event: Stopped");
-                _mediaPlayer.EncounteredError += (s, e) => Console.WriteLine("[VLC] Event: Error encountered!");
+                _mediaPlayer.EncounteredError += (s, e) =>
+                {
+                    Console.WriteLine("[VLC] Event: Error encountered!");
+                    ReconnectLive();
+                };
 
                 IsRunning = true;
                 Console.WriteLine("[VLC] Extension started successfully");
@@ -1056,6 +1067,8 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable, ICa
             _libVLC?.Dispose();
             _libVLC = null;
 
+            StopRelay();
+
             _currentBitmap?.Dispose();
             _currentBitmap = null;
 
@@ -1068,8 +1081,29 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable, ICa
         }
     }
 
+    /// <summary>A camera stream only ends when the camera or the network drops it: connect again.</summary>
+    private bool ReconnectLive()
+    {
+        if (_relay != null && IsRunning && !string.IsNullOrWhiteSpace(_mediaUrl))
+        {
+            var url = _mediaUrl;
+            Task.Run(async () =>
+            {
+                await Task.Delay(3000);
+                if (!IsRunning || url != _mediaUrl) return;
+                Console.WriteLine("[VLC] Stream ended, connecting again");
+                try { _mediaPlayer?.Stop(); } catch { /* already stopped */ }
+                LoadAndPlayMedia(url);
+            });
+            return true;
+        }
+        return false;
+    }
+
     private void OnEndReached(object? sender, EventArgs e)
     {
+        if (ReconnectLive())
+            return;
         if (_loop && IsRunning && !string.IsNullOrWhiteSpace(_mediaUrl))
             // Restart playback
             Task.Run(() =>
@@ -1166,7 +1200,28 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable, ICa
                 Console.WriteLine($"[VLC] Creating Media object (type: {fromType})...");
                 Console.WriteLine($"[VLC] Final URL: {HidePassword(mediaUrl)}");
 
-                var media = new Media(_libVLC, mediaUrl, fromType);
+                Media media;
+                if (IsRtsp(mediaUrl) && !HasLive555())
+                {
+                    // This LibVLC has no RTSP client (Debian and Ubuntu build VLC without live555;
+                    // the "satip" module then fails with "Failed to setup RTSP session").
+                    try { _mediaPlayer.Stop(); } catch { /* nothing playing */ }
+                    StopRelay();
+                    var relay = StartRelay(mediaUrl);
+                    if (relay == null)
+                        return;
+                    media = new Media(_libVLC, relay);
+                    media.AddOption(":demux=ts");
+                }
+                else
+                {
+                    if (_relay != null)
+                    {
+                        try { _mediaPlayer.Stop(); } catch { /* nothing playing */ }
+                        StopRelay();
+                    }
+                    media = new Media(_libVLC, mediaUrl, fromType);
+                }
                 if (!_playAudio && !_boardAudio)
                     media.AddOption(":no-audio");
 
@@ -1582,6 +1637,98 @@ public sealed class VLCMediaPlayerExtension : ICanvasExtension, IDisposable, ICa
         Console.WriteLine("[VLC] Not a UNC path - returning as-is");
         // Return as-is if not a UNC path
         return path;
+    }
+
+    private static bool IsRtsp(string url) =>
+        url.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase) ||
+        url.StartsWith("rtsps://", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether LibVLC on this host has its RTSP client (the live555 demux module).</summary>
+    private static bool HasLive555()
+    {
+        if (_hasLive555 is { } known)
+            return known;
+        var found = !OperatingSystem.IsLinux();
+        if (!found)
+        {
+            var dirs = new List<string>();
+            var env = Environment.GetEnvironmentVariable("VLC_PLUGIN_PATH");
+            if (!string.IsNullOrWhiteSpace(env))
+                dirs.Add(env);
+            dirs.AddRange(new[] { "/usr/lib/x86_64-linux-gnu/vlc/plugins", "/usr/lib/aarch64-linux-gnu/vlc/plugins",
+                "/usr/lib/arm-linux-gnueabihf/vlc/plugins", "/usr/lib/vlc/plugins", "/usr/local/lib/vlc/plugins" });
+            found = dirs.Any(d => File.Exists(Path.Combine(d, "demux", "liblive555_plugin.so")));
+        }
+        Console.WriteLine(found ? "[VLC] RTSP: LibVLC (live555)" : "[VLC] RTSP: LibVLC has no live555, FFmpeg pulls the stream");
+        _hasLive555 = found;
+        return found;
+    }
+
+    /// <summary>
+    ///     Starts FFmpeg pulling the RTSP stream over TCP and remuxing it to MPEG-TS on stdout, video
+    ///     untouched. Audio becomes AAC (cameras send G.711, which MPEG-TS cannot carry) or is left out.
+    /// </summary>
+    private StreamMediaInput? StartRelay(string url)
+    {
+        var withAudio = _playAudio || _boardAudio;
+        var psi = new ProcessStartInfo("ffmpeg")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        foreach (var a in new[] { "-hide_banner", "-loglevel", "error", "-nostdin", "-rtsp_transport", "tcp",
+                     "-timeout", "10000000", "-fflags", "nobuffer", "-flags", "low_delay", "-i", url,
+                     "-map", "0:v:0?", "-c:v", "copy" })
+            psi.ArgumentList.Add(a);
+        foreach (var a in withAudio ? new[] { "-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k" } : new[] { "-an" })
+            psi.ArgumentList.Add(a);
+        foreach (var a in new[] { "-f", "mpegts", "-muxdelay", "0", "pipe:1" })
+            psi.ArgumentList.Add(a);
+
+        try
+        {
+            var proc = Process.Start(psi);
+            if (proc == null)
+                return null;
+            var safe = HidePassword(url);
+            proc.ErrorDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                    Console.WriteLine($"[VLC] ffmpeg: {e.Data.Replace(url, safe)}");
+            };
+            proc.BeginErrorReadLine();
+            _relay = proc;
+            _relayInput = new StreamMediaInput(proc.StandardOutput.BaseStream);
+            Console.WriteLine($"[VLC] FFmpeg pulls {safe} (pid {proc.Id})");
+            return _relayInput;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[VLC] Could not start ffmpeg for RTSP: {ex.Message}");
+            return null;
+        }
+    }
+
+    private void StopRelay()
+    {
+        var proc = _relay;
+        var input = _relayInput;
+        _relay = null;
+        _relayInput = null;
+        if (proc != null)
+        {
+            try
+            {
+                if (!proc.HasExited)
+                    proc.Kill(true);
+            }
+            catch { /* gone already */ }
+            proc.Dispose();
+        }
+        input?.Dispose();
     }
 
     /// <summary>
